@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env*
+!.env.example
+*.sqlite*
+*.db*
+auth.json
+*.token
+*.pem
+state/
+runtime/
+config.local.json
+.coverage
+dist/
+build/
+*.egg-info/

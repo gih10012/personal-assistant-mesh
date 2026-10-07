@@ -1,0 +1,16 @@
+[Unit]
+Description=Personal assistant laptop Codex worker
+After=assistant-mesh-tunnel.service
+Wants=assistant-mesh-tunnel.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Github/personal-assistant-mesh
+ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-assistant-mesh/laptop-worker.json worker
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

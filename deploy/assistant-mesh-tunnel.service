@@ -1,0 +1,13 @@
+[Unit]
+Description=Private SSH transport to assistant control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -F %h/.ssh/config -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -L 127.0.0.1:17680:127.0.0.1:17680 ai-server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-assistant-mesh"
+version = "0.1.0"
+description = "Durable personal-agent control plane and independent WeChat iLink ingress"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+assistant-mesh = "assistant_mesh.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["assistant_mesh*"]

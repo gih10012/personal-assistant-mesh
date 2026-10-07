@@ -1,0 +1,18 @@
+[Unit]
+Description=Personal assistant cloud Codex worker
+After=assistant-mesh.service network-online.target
+Wants=assistant-mesh.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/personal-assistant-mesh
+ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-assistant-mesh/cloud-worker.json worker
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=350M
+
+[Install]
+WantedBy=default.target
