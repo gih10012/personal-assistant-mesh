@@ -377,7 +377,12 @@ class ArtifactFetchTests(unittest.TestCase):
             digest = original_read(snapshot, name, deadline, destination)
             if destination is not None and name == 'part-000':
                 changed = directory / 'part-003'
+                before = changed.stat()
                 changed.write_bytes(b'x' * 31)
+                # This specifically tests the metadata early-rejection path.
+                # Older hosts may coalesce rapid same-size writes into one
+                # timestamp tick; the separate whole-hash test rejects bytes.
+                os.utime(str(changed), ns=(before.st_atime_ns, before.st_mtime_ns + 1000000000))
             return digest
         with patch.object(_ResumeParts, '_read', changed_read):
             with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_checkpoint_changed'):
@@ -506,7 +511,11 @@ class ArtifactFetchTests(unittest.TestCase):
         self.assertEqual([], self.requests)
 
     def test_existing_output_changed_after_hash_is_not_trusted(self):
-        self.raced_existing_output(lambda: self.output.write_bytes(b'x' * len(self.body)))
+        def mutate():
+            before = self.output.stat()
+            self.output.write_bytes(b'x' * len(self.body))
+            os.utime(str(self.output), ns=(before.st_atime_ns, before.st_mtime_ns + 1000000000))
+        self.raced_existing_output(mutate)
         self.assertEqual(b'x' * len(self.body), self.output.read_bytes())
 
     def test_existing_output_replaced_after_hash_is_not_trusted(self):
