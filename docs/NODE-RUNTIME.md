@@ -146,6 +146,34 @@ python3 -m scripts.probe_native_shell --config /private/worker.json
 启动后的 quota/网络失败仍保留任务和原生会话，不假设没有外部效果、也不
 用新 ID 自动重做；有确定零效果证据才可单独核对后续接。
 
+明确 quota 失败的独立维护审计默认只读：
+
+```sh
+python3 -m scripts.reconcile_native_quota \
+  --worker-config /private/worker.json --server-config /private/server.json \
+  --task-id ORIGINAL_TASK_ID --rollout-path ORIGINAL_NATIVE_ROLLOUT
+```
+
+只有原任务 `needs_review`、授权 profile/节点/scope/thread/turn 一致、指定
+turn 终态明确 quota 失败且无执行记录才 eligible。审核通过后显式追加
+`--apply --expected-epoch AUDITED_EPOCH`；脚本再次核验完整前态/日志，保存
+审计备份与完整历史，以 CAS 释放**同一任务**。任何执行或未知记录都拒绝，
+不能用于网络超时、结果未知的工具或泛化业务重试；不会清空其它任务的
+side-effect marker，也不删失败轮或已有 session chunks。
+
+公共 artifact 的可选并行下载单独提供：
+
+```sh
+python3 -m scripts.fetch_artifact --url PUBLIC_HTTPS_RELEASE_URL \
+  --size VERIFIED_WHOLE_ARTIFACT_SIZE --sha256 VERIFIED_WHOLE_ARTIFACT_SHA256 \
+  --output /private/owned-directory/package.tar.gz --workers 4
+```
+
+要求调用者事先核对官方大小和完整 SHA256、各段返回准确的 206 Range，
+全部组装校验后才 0600 原子发布；既有错误内容不覆盖。它不接受账号凭据，
+不继承环境代理，也不修改原生网络/代理环境。原生 curl、fish、SSH 或其它
+下载方式仍可使用；此额外能力的失败不表示这些原生能力不可用。
+
 模型 runtime 的服务模板不额外设置 `NoNewPrivileges` 或 `PrivateTmp`，不会把 Mesh API 策略变成原生工具的进程权限/临时目录隔离。它仍以本人账户运行并受该账户既有 OS 权限约束，不新增 sudo 授权。只运行控制面或 SSH transport 的服务与模型 worker 分离。
 
 - 本地/A2A 任务的 native scope 由目的节点、认证主体、项目和 agent 身份组合哈希，支持同类项目连续 native thread，不与 `leader:owner` 或其他 peer 的记忆混用；Codex 原生 compaction 仍负责压缩。

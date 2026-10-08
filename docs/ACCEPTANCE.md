@@ -114,3 +114,31 @@ Mesh。SDK 注册使用 shim，原生路径为事件管道模拟；不冒称安�
 当前 task fence 失效仍结束该受管任务。推理账户池新增原生配额预检，只在
 尚未开始 turn 时选择下一授权 profile；已开始的 task 不盲目重放。Chat/Live
 通信主账号不因此切换，也不自动购买 credits 或消耗 quota reset。
+
+## 2026-10-08：原任务连续记忆恢复与维护能力
+
+- 上节两条 `recall` 随后均实际 completed，输出与之前记住的私有随机
+  nonce 完全一致。逐端核对本地权威账本：原任务 ID、原 native thread ID
+  保持不变；此前的节点/worker 重启不被替换成新会话。启动前跳过额度满
+  的 profile，在同一节点的第二授权推理 profile 续接完整原生历史后通过。
+  相同消息 ID/body 查询重放仍绑定同一接收任务。
+- 这两条额度失败没有直接清除 fence 或新建任务。维护脚本先只读核对
+  指定原生 turn 的明确 quota 终态、完整日志身份和零执行记录；显式 apply
+  再以 epoch/完整前态 CAS 保存原任务及会话的审计备份，传输完整原生
+  历史（保留失败轮及旧 chunks），释放同一任务。它只处理已证明没有
+  执行的 quota 失败；未知效果、工具执行、未知日志结构和变化中的任务
+  一律不适用，不代表通用外部效果 reconciliation 已完成。
+- 云端第二 profile 的既有 session 子目录含 group-write，导致 Mesh 的
+  可信恢复入口在模型启动前拒绝。仅收紧四个本人 Codex session 目录为
+  0700 后，原任务的既有 waiting_backend 重试完成；未更改文件内容、
+  未放宽恢复检查，也没有阻断 owner 的原生 Shell/联网能力。
+- 本节证明的是两个节点各自的连续线程在重启及推理 profile 迁移后续接，
+  **不是**一条 Global Leader thread 在不同机器间实际迁移接管，也不证明
+  native memories 后台提取、Pi/离线模型或完整 Native Live 已工作。
+- 可选并行 artifact transport 有 15 项实际 loopback 测试：严格 Range/
+  Content-Range、完整 SHA256、0600 原子发布、正确既有文件幂等及错误
+  内容不覆盖。它是额外下载能力，不是原生网络策略、安装器或凭据渠道；
+  官方完整包的实际下载/安装仍需单独核对。
+- 加入维护审计及 artifact transport 后，本机 Python 3.14 与云端
+  Python 3.6.8 均完整通过 420 项测试。云端默认 umask 下的维护测试通过，
+  夹具显式建立可信目录，生产权限规则未被削弱。
