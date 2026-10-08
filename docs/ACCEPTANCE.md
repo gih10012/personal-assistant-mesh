@@ -238,3 +238,17 @@ Worker 稳定存活与启动后新鲜认证心跳才能清其启动故障；失�
 后，同功能源码在本机 Python 3.14 和云端 Python 3.6.8 均全套通过
 516 项测试（Node 52 项）。这轮没有新提交模型任务、切换推理账户或
 更改原生工具权限；实际服务加载及 CI 另在核对后记录。
+
+上述功能提交 `b6edd8b` 已在两端实际加载：laptop owned Node 与 cloud
+companion active，持久快照新鲜，分别报告 A2A 可达、运行包/Worker
+incident 均 clear 且无 attention。cloud companion 的 worker_alive=false
+表示它没有管理外部 Worker，并非外部进程死亡；独立 Worker 和唯一
+iLink receiver 均 active，MainPID 与更新前相同。原生 reverse tunnel
+亦未重启。旧源码完整保留，私有工作区、配置、账号和任务历史未移动。
+原有 laptop/cloud 两份固定 state 的原生 Shell 挑战经默认只读复查仍
+completed/verified，没有重新提交或新建任务；这是历史执行证据复核，
+不是声称 laptop 新进程又运行了一次挑战。自动 process/systemd 认证
+字段仍为 false，边界不变。功能提交的
+[GitHub CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37804221106)
+已实际 success。此修复不代表自动 Shell 故障关闭、跨机 Global Leader
+连续接管、资源最佳调度或完整 Native Live 已完成。
