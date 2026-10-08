@@ -22,6 +22,8 @@
 
 身份来自当前认证 Client，父任务和 lease 来自当前运行环境，调用参数不能自行更换 actor/task/lease。资源 epoch 仍用于资源自身的版本核对。A2A 与 task lease 冲突继续终止该受管任务提交；这不是整台机器的原生权限门禁。
 
-新的 Codex thread 获得统一名称和全部旧 `mesh_*` 名称。既有连续 thread 保留原有 dynamicTools，不为了加名字而新建会话或替换历史；其旧工具和私有 CLI/reference 接线继续可用。Pi 的支持与实测以扩展及 [验收记录](ACCEPTANCE.md) 为准，不由 Codex 工具定义推断。
+新的 Codex thread 获得统一名称和全部旧 `mesh_*` 名称。既有连续 thread 保留原有 dynamicTools，不为了加名字而新建会话或替换历史；其旧工具和私有 CLI/reference 接线继续可用。
+
+Pi 扩展提供相同统一名称及旧工具，已删除全局 `tool_call` 钩子：只有额外 Mesh 工具执行才核对 task fence，原生工具不依赖 Mesh 可达性。14 项专属测试执行实际 TypeScript 源码及真实鉴权 HTTP，但使用注册层 SDK shim；不代表安装的 Pi SDK 或模型推理已验收。见 [验收记录](ACCEPTANCE.md)。
 
 私人认证、工具 payload、聊天和原生会话不进入公仓。入口参数不携带原始账号 token，模型生成的新工具无需白名单。
