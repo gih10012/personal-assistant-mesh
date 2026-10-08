@@ -29,8 +29,8 @@ class AccountPoolTests(unittest.TestCase):
         agent = worker.open_backend()
         self.assertIs(second, agent)
         first.close.assert_called_once()
-        self.assertEqual(['/private/main', '/private/other'], [call.args[0]['auth_home'] for call in backend.call_args_list])
-        self.assertTrue(all(call.args[0]['strict_auth_home'] for call in backend.call_args_list))
+        self.assertEqual(['/private/main', '/private/other'], [call[0][0]['auth_home'] for call in backend.call_args_list])
+        self.assertTrue(all(call[0][0]['strict_auth_home'] for call in backend.call_args_list))
 
     def test_auth_startup_unavailability_does_not_mutate_parent_environment(self):
         initial = dict(os.environ)

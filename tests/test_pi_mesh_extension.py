@@ -58,7 +58,7 @@ class PiMeshExtensionTests(unittest.TestCase):
                                                    'denied-peer': {'send_allowed': False}}}
         self.thread = threading.Thread(target=serve, args=(config, started), daemon=True)
         self.thread.start()
-        self.assertTrue(ready.wait(3))
+        self.assertTrue(ready.wait(10))
         self.url = 'http://127.0.0.1:' + str(self.server.server_address[1])
         self.operator = Client({'control_url': self.url, 'token_file': str(self.root / 'operator.token')})
         worker = Client({'control_url': self.url, 'token_file': str(self.root / 'worker.token')})

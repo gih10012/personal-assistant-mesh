@@ -9,6 +9,7 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+import assistant_mesh.worker as worker_module
 from assistant_mesh.cli import main, resource_payload
 from assistant_mesh.codex import Codex
 from assistant_mesh.model_tools import TOOLS
@@ -154,7 +155,8 @@ class ResourceCLITests(unittest.TestCase):
         reference = worker.resource_reference()
         self.assertEqual(str(self.configs['worker'][0]), reference['cli']['argv'][-2])
         self.assertNotIn('a' * 64, json.dumps(reference))
-        self.assertTrue(reference['cli']['cwd'].endswith('personal-assistant-mesh'))
+        self.assertEqual(Path(worker_module.__file__).resolve().parent.parent,
+                         Path(reference['cli']['cwd']).resolve())
         agent = Codex.__new__(Codex)
         agent.config = {'workspace': str(self.root)}
         agent.tools, agent.on_activity = TOOLS, None

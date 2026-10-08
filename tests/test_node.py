@@ -1,5 +1,6 @@
 """Real loopback RPC tests; no external hosts, credentials, models, or spend."""
 import hashlib
+import io
 import json
 import socket
 import stat
@@ -446,7 +447,7 @@ class NodeTests(unittest.TestCase):
         class LossThenRefusal(Client):
             def request(client, path, body=None):
                 if path == '/v1/mesh/send' and lost[0]:
-                    error = urllib.error.HTTPError('http://127.0.0.1', 403, 'test refusal', {}, None)
+                    error = urllib.error.HTTPError('http://127.0.0.1', 403, 'test refusal', {}, io.BytesIO())
                     error.close()
                     raise error
                 response = super(LossThenRefusal, client).request(path, body)

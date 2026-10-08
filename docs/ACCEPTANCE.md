@@ -73,3 +73,9 @@ Mesh。SDK 注册使用 shim，原生路径为事件管道模拟；不冒称安�
 包含以上修正的本机完整测试为 336 项通过（Python 3.14，Node TypeScript
 合同测试实际执行），不是仅跑定向测试。28 个 Python 源文件通过 3.6
 语法检查；云端实际运行及模型任务仍须部署后分别验证。
+
+随后在云端隔离 release 目录发现并修复旧 Python 的 bodyless HTTPError
+关闭兼容问题及 mock 参数读取兼容问题；CLI 路径测试不再依赖仓库目录名。
+修复后的完整 337 项测试在本机 Python 3.14 和云端 Python 3.6.8 均通过，
+含上述 14 项实际 TypeScript/HTTP 合同测试。CI 的慢启动 fixture 给予 10 秒
+启动时间，不改变认证、lease、执行或防重断言；新 CI 结果另行核对。

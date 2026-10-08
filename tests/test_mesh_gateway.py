@@ -1,4 +1,5 @@
 """Unified extra mesh tool; real local HTTP, no native execution or paid API."""
+import io
 import json
 import tempfile
 import threading
@@ -41,7 +42,7 @@ class MeshGatewayTests(unittest.TestCase):
                                                    'denied-peer': {'send_allowed': False}}}
         self.thread = threading.Thread(target=serve, args=(config, started), daemon=True)
         self.thread.start()
-        self.assertTrue(ready.wait(3))
+        self.assertTrue(ready.wait(10))
         url = 'http://127.0.0.1:' + str(self.server.server_address[1])
         self.operator = Client({'control_url': url, 'token_file': str(self.root / 'operator.token')})
         self.worker_config = {'control_url': url, 'token_file': str(self.root / 'worker.token'),
@@ -199,7 +200,7 @@ class MeshGatewayTests(unittest.TestCase):
             self.assertEqual(409, failure.exception.code)
 
     def test_local_coordination_permission_error_is_structured_and_wait_not_set(self):
-        error = urllib.error.HTTPError('http://127.0.0.1/fixture', 403, 'forbidden', {}, None)
+        error = urllib.error.HTTPError('http://127.0.0.1/fixture', 403, 'forbidden', {}, io.BytesIO())
         error.close()  # match actual Client's closed HTTP-error contract
         with patch.object(self.worker, 'tick'), patch.object(self.worker.client, 'request', side_effect=error):
             response = self.gateway('wait_children')
@@ -208,7 +209,7 @@ class MeshGatewayTests(unittest.TestCase):
         self.assertFalse(self.worker.wait_children)
 
     def test_local_coordination_409_is_not_converted_to_successful_result(self):
-        error = urllib.error.HTTPError('http://127.0.0.1/fixture', 409, 'stale', {}, None)
+        error = urllib.error.HTTPError('http://127.0.0.1/fixture', 409, 'stale', {}, io.BytesIO())
         error.close()
         with patch.object(self.worker, 'tick'), patch.object(self.worker.client, 'request', side_effect=error):
             with self.assertRaises(urllib.error.HTTPError):

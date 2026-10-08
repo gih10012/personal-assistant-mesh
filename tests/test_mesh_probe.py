@@ -41,7 +41,7 @@ class Endpoint:
         if path.startswith('/v1/mesh/task?id='):
             identity = path.partition('id=')[2]
             if identity not in self.tasks:
-                raise urllib.error.HTTPError('private URL', 403, 'private detail', {}, None)
+                raise urllib.error.HTTPError('private URL', 403, 'private detail', {}, io.BytesIO())
             return self.tasks[identity]
         if path == '/v1/mesh/send':
             message = body['message']
@@ -226,9 +226,15 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual('mesh_transport_unavailable_outcome_not_assumed',
                          error_code(urllib.error.URLError('DO_NOT_PRINT_PRIVATE_TOKEN')))
         self.assertEqual('authentication_rejected',
-                         error_code(urllib.error.HTTPError('private URL', 401, 'DO_NOT_PRINT_PRIVATE_TOKEN', {}, None)))
+                         error_code(urllib.error.HTTPError('private URL', 401, 'DO_NOT_PRINT_PRIVATE_TOKEN', {}, io.BytesIO())))
         self.assertEqual('private_configuration_or_probe_input_invalid',
                          error_code(ValueError('DO_NOT_PRINT_PRIVATE_TOKEN')))
+
+    def test_bodyless_http_error_is_safe_on_older_python(self):
+        # Python 3.6 keeps fp=None here and its close() raises KeyError. The
+        # probe must still sanitize and preserve the HTTP permission meaning.
+        error = urllib.error.HTTPError('private URL', 403, 'private detail', {}, None)
+        self.assertEqual('route_not_authorized', error_code(error))
 
 
 class ProbeCLITests(unittest.TestCase):

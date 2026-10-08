@@ -158,7 +158,8 @@ class Probe:
         try:
             answer = self.peer.request('/v1/mesh/task?' + urlencode({'id': message['id']}))
         except urllib.error.HTTPError as exc:
-            exc.close()
+            if exc.fp is not None:
+                exc.close()
             if exc.code == 403:
                 # This also means denied read permission; it is not proof that
                 # the remote task was never accepted or executed.
@@ -227,7 +228,8 @@ def error_code(exc):
     if isinstance(exc, ProbeError):
         return str(exc)  # fixed codes created only by this module
     if isinstance(exc, urllib.error.HTTPError):
-        exc.close()
+        if exc.fp is not None:
+            exc.close()
         return {401: 'authentication_rejected', 403: 'route_not_authorized',
                 404: 'mesh_route_missing', 409: 'mesh_content_or_lease_conflict'}.get(exc.code, 'mesh_http_error')
     if isinstance(exc, urllib.error.URLError):

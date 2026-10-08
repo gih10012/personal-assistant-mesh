@@ -1,6 +1,7 @@
 import json
 import hashlib
 import http.client
+import io
 import os
 import socket
 import stat
@@ -105,7 +106,9 @@ class Client:
             if 300 <= response.status < 400:
                 raise ValueError('control_redirect_blocked')
             if response.status >= 400:
-                error = urllib.error.HTTPError(self.url + path, response.status, response.reason, response.headers, None)
+                # Python 3.6's HTTPError.close cannot close a None fp. Keep an
+                # empty owned response body, never the private server response.
+                error = urllib.error.HTTPError(self.url + path, response.status, response.reason, response.headers, io.BytesIO())
                 error.close()  # match existing Client semantics, no leaked body
                 raise error
             return self._decode_response(response)
