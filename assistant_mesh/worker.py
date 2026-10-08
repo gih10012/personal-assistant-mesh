@@ -202,7 +202,25 @@ class Worker:
                     or not isinstance(arguments.get('arguments', {}), dict)):
                 return result({'error': 'invalid_mesh_gateway_arguments'}, False)
             action, nested = arguments['action'], arguments.get('arguments', {})
-            if action in ('remote_delegate', 'delegate', 'children', 'wait_children', 'remember', 'recall', 'notify'):
+            if action == 'allocation':
+                # Only the extra Mesh contract uses this admission journal;
+                # native tools never pass through it. Reserve is bound here to
+                # the actual running task, not model-supplied task identities.
+                if (set(nested) - {'action', 'arguments'}
+                        or not isinstance(nested.get('action'), str)
+                        or not isinstance(nested.get('arguments', {}), dict)):
+                    return result({'error': 'invalid_mesh_allocation_arguments'}, False)
+                payload = dict(nested, arguments=dict(nested.get('arguments', {})))
+                if payload['action'] == 'reserve':
+                    if {'task_id', 'task_epoch'} & set(payload['arguments']):
+                        return result({'error': 'mesh_allocation_task_identity_is_runtime_bound'}, False)
+                    payload['arguments'].update(task_id=self.current['id'], task_epoch=self.current['epoch'])
+                try:
+                    output = self.client.request('/v1/allocation/action', payload)
+                except (OSError, ValueError) as exc:
+                    return self._mesh_tool_failure(exc, 'allocation_authority', payload['action'] == 'reserve')
+                return result(output)
+            elif action in ('remote_delegate', 'delegate', 'children', 'wait_children', 'remember', 'recall', 'notify'):
                 name, arguments = 'mesh_' + action, nested
             else:
                 name = 'mesh_resource'
@@ -251,6 +269,8 @@ class Worker:
                      'legacy_tool': 'mesh_resource(action, arguments)',
                      'gateway': {'coordination_actions': ['remote_delegate', 'delegate', 'children', 'wait_children', 'remember', 'recall', 'notify'],
                          'resource_wrapper': {'action': 'resource', 'arguments': {'action': 'resource API action', 'arguments': {}}},
+                         'allocation_wrapper': {'action': 'allocation', 'arguments': {'action': 'reserve/inspect/pending/accept/start/unknown/settle/decline/cancel', 'arguments': {}}},
+                         'allocation_execution': '共享容量预留和provider回执是受管Mesh合同；start不是工具执行证明。没有实际provider适配器不得宣称完成；未知或running占用不会仅因TTL自动释放。',
                          'native_tools_intercepted': False,
                          'execution': '目录/graph/authorize 只表示声明、证据或权限检查，不自动执行能力；queued/allowed 不等于完成。',
                          'connectivity': 'mesh 内入口的授权不限制原生网络路线；失联可继续用其他本人授权的原生路线自主恢复连接。'},
@@ -290,7 +310,8 @@ class Worker:
                 'argv': [sys.executable, '-m', 'assistant_mesh.cli', '--config', self.config_path, 'resources'],
                 'resource_usage': '把 arguments JSON 写入 git 仓库之外本人所有的 0600 私有文件；'
                                   '把 resources 换成 resource --action NAME --payload-file /private/args.json。'
-                                  '配置/token 保持在受保护文件中，不要读取或输出 token 值。'}
+                                  '配置/token 保持在受保护文件中，不要读取或输出 token 值。',
+                'allocation_usage': 'allocation --action NAME --payload-file /private/args.json；reserve需当前task_id/task_epoch，优先mesh allocation入口自动绑定。'}
             reference['a2a'] = {'fresh_thread_tool': 'mesh(action="remote_delegate",arguments={peer,input,project_id,agent_id})',
                 'legacy_tool': 'mesh_remote_delegate(peer,input,project_id,agent_id)',
                 'payload_shape': {'peer': 'owner-enrolled-peer', 'arguments': {'input': 'model-selected task',
@@ -318,6 +339,25 @@ class Worker:
         return reference
 
     def open_backend(self):
+        # Diagnostic-only: replace a prior task/attempt's candidate chain. Do
+        # not retain configuration, account values, exception text or paths.
+        diagnostics = []
+        self.current.setdefault('checkpoint', {})['backend_candidates'] = diagnostics
+
+        def publish_diagnostics():
+            # Failed preflight never reaches the normal post-start tick. Its
+            # safe observations still need a fenced, private ledger checkpoint.
+            # This optional write must not replace the existing last_error or
+            # become another native runtime / tool precondition.
+            if 'id' not in self.current or 'epoch' not in self.current:
+                return
+            try:
+                self.client.request('/v1/task/update', {'id': self.current['id'],
+                    'epoch': self.current['epoch'],
+                    'checkpoint': {'backend_candidates': [dict(row) for row in diagnostics]}})
+            except (OSError, ValueError):
+                pass
+
         accounts = self.config.get('codex_accounts')
         if accounts is not None and (not isinstance(accounts, list) or not accounts or not all(isinstance(a, dict) for a in accounts)):
             raise ValueError('invalid_codex_account_pool')
@@ -330,8 +370,12 @@ class Worker:
             config['mesh_grant'].update(task_id=self.current['id'], epoch=self.current['epoch'])
             candidates.append((Pi, config, 'pi'))
         last_error = None
-        for implementation, config, name in candidates:
+        for index, (implementation, config, name) in enumerate(candidates):
             agent = None
+            diagnostic = {'index': index, 'harness': name, 'state': 'preflight',
+                          'cause': 'none', 'quota_status': 'not_checked'}
+            diagnostics.append(diagnostic)
+            stage = 'initialization'
             try:
                 config = dict(config)
                 if name == 'codex':
@@ -342,18 +386,37 @@ class Worker:
                         config['goal'] = dict(context['goal'])
                 agent = implementation(config, tools=TOOLS, on_tool=self.on_tool, on_activity=self.on_activity,
                                        on_interaction=self.on_interaction)
+                stage = 'account_rpc'
                 if not agent.account()['authenticated']:
+                    diagnostic.update(state='authentication_required', cause='authentication')
                     raise CodexError(name + '_auth_required')
                 if name == 'codex' and callable(getattr(agent, 'rate_limits', None)):
                     try:
                         quota = agent.rate_limits()
                     except (ValueError, OSError):
                         quota = {'status': 'unknown'}  # optional API, not a native-tool gate
+                    diagnostic['quota_status'] = (quota.get('status')
+                        if isinstance(quota, dict) and quota.get('status') in ('available', 'exhausted') else 'unknown')
                     if isinstance(quota, dict) and quota.get('status') == 'exhausted':
+                        diagnostic.update(state='quota_exhausted', cause='quota')
+                        retry = quota.get('retry_at')
+                        if (isinstance(retry, (int, float)) and not isinstance(retry, bool)
+                                and 0 < retry < float('inf')):
+                            diagnostic['retry_at'] = retry
                         raise CodexError('codex_usage_limit_exceeded')
+                elif name == 'codex':
+                    diagnostic['quota_status'] = 'unknown'
+                else:
+                    diagnostic['quota_status'] = 'not_applicable'
+                diagnostic.update(state='selected', cause='none')
+                publish_diagnostics()
                 self.harness = name
                 return agent
             except (ValueError, OSError) as exc:
+                if diagnostic['state'] == 'preflight':
+                    diagnostic.update(state='account_unavailable' if stage == 'account_rpc' else 'runtime_unavailable',
+                                      cause=stage)
+                publish_diagnostics()
                 if agent:
                     agent.close()
                 last_error = exc

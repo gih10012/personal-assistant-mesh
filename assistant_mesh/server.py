@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlsplit
 
+from .allocations import Allocations
 from .channel import Channel, ILink
 from .config import read_secret
 from .resources import Registry
@@ -24,6 +25,7 @@ class API:
         resource_config = config.get('resources', {})
         self.resources = Registry(self.store, owner_principal='operator',
                                   trusted_verifiers=resource_config.get('trusted_verifiers', ()))
+        self.allocations = Allocations(self.store, self.resources)
         self.network = Network(self.store, config['node_id']) if config.get('node_id') else None
         if self.network:
             from .remote import Remote
@@ -70,6 +72,8 @@ class API:
             return self.capability_events(query)
         if method == 'POST' and path == '/v1/resource/action':
             return self.resource_action(payload, peer)
+        if method == 'POST' and path == '/v1/allocation/action':
+            return self.allocation_action(payload, peer)
         if method == 'POST' and path == '/v1/heartbeat' and worker:
             configured = peer.get('capabilities', [])
             offered = payload.get('capabilities', configured)
@@ -220,6 +224,49 @@ class API:
         if action in reads:
             return method(**arguments)
         return method(actor, **arguments)
+
+    def allocation_action(self, payload, peer):
+        """Authenticated managed-capacity journal, not a native-tool gate.
+
+        Reserving or accepting a dispatch neither starts a provider process nor
+        proves execution. Providers must connect the journal to their own actual
+        effect ledger. Identity is fixed by the authenticated peer, including
+        when recording unknown outcomes or settlement after a task lease loss.
+        """
+        identity_fields = {'actor', 'principal', 'owner', 'node', 'role',
+                           'provider', 'trusted_verifiers'}
+        if not isinstance(payload, dict):
+            raise ValueError('invalid_allocation_request')
+        if identity_fields & set(payload):
+            raise PermissionError('allocation_identity_is_peer_bound')
+        if set(payload) - {'action', 'arguments'}:
+            raise ValueError('invalid_allocation_request')
+        role, node = peer.get('role'), peer.get('node')
+        if role == 'operator':
+            actor = 'operator'
+        elif role == 'worker' and node:
+            actor = 'node:' + node
+        else:
+            # As with resource/action, viewers use dedicated metadata routes;
+            # an optional node field does not turn a viewer into a provider.
+            raise PermissionError('route_not_authorized')
+        action, arguments = payload.get('action'), payload.get('arguments', {})
+        if not isinstance(action, str) or not isinstance(arguments, dict):
+            raise ValueError('invalid_allocation_request')
+        if identity_fields & set(arguments):
+            raise PermissionError('allocation_identity_is_peer_bound')
+        reads = {'pools', 'bindings', 'inspect', 'pending'}
+        approvals = {'define_pool', 'renew_pool', 'revoke_pool', 'bind_pool', 'expire'}
+        managed = {'reserve', 'accept', 'start', 'unknown', 'settle', 'decline', 'cancel'}
+        if action not in reads | approvals | managed:
+            raise ValueError('allocation_action_not_implemented')
+        if action in approvals and role != 'operator':
+            raise PermissionError('owner_approval_required')
+        if action == 'reserve' and role != 'worker':
+            # A task reservation must name the node holding its live task lease,
+            # never an operator-supplied node or an unbound caller assertion.
+            raise PermissionError('allocation_task_principal_mismatch')
+        return getattr(self.allocations, action)(actor, **dict(arguments))
 
 
 def serve(config, ready=None):

@@ -16,7 +16,7 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 
 - 标准库、SQLite WAL、单权威事务账本；无 Redis 或常开桌面依赖。
 - 独立云端微信 iLink 入口：整批消息、任务、上下文和游标原子落盘；稳定出站 ID，未知结果不重试。
-- 节点能力目录、Leader/任务租约和 epoch fencing；旧执行者不能继续提交。
+- 节点能力目录、Leader/任务租约和双代 epoch fencing；任务绑定实际 Leader 任期，同名节点重新当选也不能续写旧任期任务。
 - Leader 原生 thread 跨任务连续，子 agent 按项目/身份复用；上下文压缩由 Codex 自己维护。
 - 只传输选定的原生 rollout 用于跨机恢复，不复制整个认证目录或其他聊天。跨机实际验收见 [ACCEPTANCE](docs/ACCEPTANCE.md)。
 - Native memories 通过进程级配置开启；后台生成有 idle/quota 条件，不等于每轮即时写入，也不等于 mesh 手工事实记忆。
@@ -26,6 +26,7 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 - 复用已有 Codex 认证，从账户实时模型目录选择，不要求在面板粘贴 API Key。
 - 项目只读观察 API、viewer/operator 权限分离。浏览器鉴权由 Dots 产品层处理。
 - 资源/算力/性能/工具/连接的开放能力目录、租约、证据指标、资源图、exact scope/action 远端授权与审计；provider 声明不等于验证。
+- 模型选择能力/路径后的事务型共享容量预留、provider 接收/启动/未知/结算回执；只有受管 Mesh 合同受此管控，不接管原生工具。实际执行适配器仍待接通，见 [共享容量与回执合同](docs/MANAGED-ALLOCATIONS.md)。
 - 统一的 `mesh(action, arguments)` 额外工具入口；旧 `mesh_*` 保留，连续旧线程不重建。见 [模型入口合同](docs/MESH-GATEWAY.md)。
 - 独立节点 authority/worker、断网本地任务、持续 native 子 agent、持久重连退避与去重维护任务。
 - A2A 远端代理 child 回到原父账本并自动续接；SSH 另有执行 journal，未知结果不重放。当前自有 `mesh-a2a/1`，不冒称标准 A2A 兼容。
@@ -66,6 +67,7 @@ python3 -m assistant_mesh --config /absolute/private/node.json node
 | `POST /v1/budget/reserve` | 默认零支出预留，不实施采购 |
 | `GET /v1/resources`, `/v1/resource`, `/v1/resource/graph`, `/v1/capability-events` | 动态能力、实测指标、图与近期审计 |
 | `POST /v1/resource/action` | provider 注册/观测/请求授权，operator 才能审批 |
+| `POST /v1/allocation/action` | 认证绑定的共享容量池、预留和 provider 回执；回执不证明工具已执行 |
 | `GET /v1/mesh/hello`, `/v1/mesh/links`, `/v1/mesh/task` | 认证节点、链路与原 sender 的任务结果 |
 | `POST /v1/mesh/delegate`, `/v1/mesh/send`, `/v1/mesh/report` | 活任务租约下远端子任务、原子防重接收、仅证据报告 |
 
@@ -74,7 +76,7 @@ python3 -m assistant_mesh --config /absolute/private/node.json node
 - 已有动态资源图和质量/授权账本；自动最佳调度、逐跳工具调用与实际性能测量仍需证据，不把目录当调度器。
 - Native rollout 路径恢复是实验性接口。活跃外部效果中断先核对，不自动重放；reconciliation/release 工作流尚未完成。
 - 仍是单一控制账本，没有宣称完全去中心化或消除单点。
-- 可验证 Mesh 根身份/撤销同步、外围设备代理迁移与共享资源调度尚未实现；它们已列入核心合同和失败验收，不因能力目录存在而标完成。原生工具强隔离不属于此项目目标。
+- 可验证 Mesh 根身份/撤销同步、外围设备代理迁移与真实共享资源执行调度尚未完成；容量预留和回执不等于实际调度验收。它们已列入核心合同和失败验收，不因能力目录存在而标完成。原生工具强隔离不属于此项目目标。
 - Pi/离线模型、技能版本发布回滚、模型主导自维护的真实修复、云端持续调度、远端媒体及跨夜手机收件仍需各自证据。
 - Dots fork 上游 browser live view、vault、语音和部分插件 UI 尚未完整接入 native runtime。界面存在不代表能力已接通。
 

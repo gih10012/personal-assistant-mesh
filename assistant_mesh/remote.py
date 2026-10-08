@@ -67,12 +67,8 @@ class Remote:
         fingerprint = digest([task_id, 'remote_delegate', peer, arguments])
         with self.store.transaction() as db:
             row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            leader = db.execute('SELECT * FROM leader').fetchone()
             now = self.store.clock()
-            if (not row or row['status'] != 'running' or row['node'] != node or
-                    row['epoch'] != epoch or row['deadline'] <= now or
-                    ('leader' in json.loads(row['required']) and
-                     (leader['node'] != node or leader['deadline'] <= now))):
+            if not self.store._task_is_live(db, row, node, epoch):
                 raise Conflict('stale_task_lease')
             context = json.loads(row['context'])
             text, project, agent, role = self._arguments(arguments, context)

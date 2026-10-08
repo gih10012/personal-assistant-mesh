@@ -34,7 +34,7 @@ def main():
     parser = argparse.ArgumentParser(description='Durable personal-assistant mesh')
     parser.add_argument('--config', required=True)
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
-                                          'resources', 'resource', 'capability-events', 'resource-graph', 'node',
+                                          'resources', 'resource', 'allocation', 'capability-events', 'resource-graph', 'node',
                                           'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
@@ -63,7 +63,7 @@ def main():
     if args.command == 'recovery':
         from .recovery import run
         return run(config)
-    if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'capability-events', 'resource-graph',
+    if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'allocation', 'capability-events', 'resource-graph',
                         'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate'):
         from .worker import Client
         client = Client(config)
@@ -96,14 +96,14 @@ def main():
             if not args.request_id:
                 parser.error('notify requires --request-id')
             value = client.request('/v1/notify', {'text': args.text, 'request_id': args.request_id})
-        elif args.command == 'resource':
+        elif args.command in ('resource', 'allocation'):
             if args.principal is not None:
                 parser.error('--principal is a discovery filter, not a resource actor override')
             try:
                 payload = resource_payload(args.payload_file, args.action)
             except ValueError as exc:
                 parser.error(str(exc))
-            value = client.request('/v1/resource/action', payload)
+            value = client.request('/v1/' + args.command + '/action', payload)
         else:
             routes = {'resources': '/v1/resources', 'capability-events': '/v1/capability-events',
                       'resource-graph': '/v1/resource/graph'}

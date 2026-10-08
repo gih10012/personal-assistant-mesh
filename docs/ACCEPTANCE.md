@@ -252,3 +252,46 @@ completed/verified，没有重新提交或新建任务；这是历史执行证�
 [GitHub CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37804221106)
 已实际 success。此修复不代表自动 Shell 故障关闭、跨机 Global Leader
 连续接管、资源最佳调度或完整 Native Live 已完成。
+
+## 2026-10-09：隔离 Leader 跨机原生上下文接管
+
+在独立的 loopback authority、临时私有账本与两端临时 Worker 中完成了
+已结算任务边界的实际接管；没有切换正式业务 Leader、重启唯一 iLink
+接收器、清空历史或替换原生会话。helper 本身不启动模型或控制服务，
+owner 分别显式运行了两端 Worker，各自只执行一次 `run_once`。
+
+- 云端 remember 任务最终 completed，仅回复 ACK；笔记本 recall 任务
+  completed，并准确回复仅存在于前一轮原生上下文中的随机字串。
+  新 recall 输入和持久账本 reference 均不含字串，Mesh memories/children
+  为空。两个临时进程显式关闭 native memories，正式默认配置不变。
+- 同一 canonical Codex thread 跨机器延续，两个 turn ID 不同；真实租约
+  选举的 Leader 任期从 2 增到 3，没有人工更改期限或指定任期。
+  云端成功任务 epoch 为 2，笔记本为 1；这不是同一活跃任务的重放。
+- 两端选定 turn 的原生日志核对到实际输入、最终回复、成功结束和
+  零工具调用。源完整日志 57,869 bytes，目的完整日志 104,231 bytes；
+  private checkpoint、API 结果与 gzip 上传文件的原始内容哈希一致。
+  笔记本 checkpoint/完整文件核对使用云端 isolated ledger 的 SQLite
+  一致备份与仍运行的同一 authority API，未读取正式业务数据库内容。
+- 首次云端尝试停在 account preflight，没有 thread/turn/effect marker。
+  第一账户明确额度耗尽，第二账户快照失效。核对其与本机已授权备用
+  账户的相同身份后，私有备份旧快照并仅同步该账户认证文件；随后通过
+  同一不可变任务 ID 的正常 claim 续接，没有新 ID 绕过审查。
+  此同步是 owner 的一次维护，**不是**已完成分布式 token 刷新代理。
+- 验收器识别实际 Codex 自动环境 envelope，但只允许业务输入前的
+  单条已知 metadata XML，cwd 精确匹配，不含 nonce/额外指令；未知
+  记录仍 fail closed。这不改变 native Shell、文件或网络权限。
+
+私有证据保留在本次两端独立临时目录内，未发布 nonce、任务输入、
+rollout、数据库或认证文件。默认 observe 只读复查同一个固定 state；
+观察超时不重建或重提任务。验证字段仍如实保留 process/systemd 自动
+认证、独立物理宿主身份、生产 Leader scope、authority 宿主故障接管、
+未决效果重放为 false。
+
+这项证据证明 **正常云端 authority 尚在时，已结算的 Leader 原生会话
+可随选定完整上下文从云端到笔记本接管**。不证明业务中未知外部效果
+可自动恢复、不证明权威主机 HA、不证明 Pi/离线模型或全网最佳调度。
+
+同轮新增双代 Leader fencing、共享容量预留/provider journal API、
+agent 与 CLI 入口和固定分类候选诊断；617 项全套本机测试通过。
+容量/回执测试包括真实 loopback HTTP 认证，但不是实际工具执行；
+provider adapter 和独立结果验证继续实现，不把这些回执计为完成。

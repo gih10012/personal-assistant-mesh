@@ -9,6 +9,8 @@ import time
 import uuid
 from pathlib import Path
 
+_UNSPECIFIED = object()
+
 
 class Conflict(ValueError):
     pass
@@ -78,6 +80,10 @@ class Store:
                 db.execute('ALTER TABLE tasks ADD COLUMN paused_status TEXT')
             if 'paused_deadline' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
                 db.execute('ALTER TABLE tasks ADD COLUMN paused_deadline REAL')
+            if 'leader_epoch' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
+                # Do not invent a term for legacy active work. Unknown Leader
+                # bindings fail closed for that Mesh task, not native tools.
+                db.execute('ALTER TABLE tasks ADD COLUMN leader_epoch INTEGER')
             db.execute('INSERT OR IGNORE INTO native_sessions SELECT * FROM sessions')
             # A crash during network submission is NEVER treated as permission to retry.
             if recover_inflight:
@@ -307,7 +313,8 @@ class Store:
                     # A new task must not sidestep review by resuming the same
                     # native conversation under a different task ID or node.
                     continue
-                db.execute("UPDATE tasks SET status='running',node=?,epoch=epoch+1,deadline=?,attempts=attempts+1 WHERE id=?", (node, now + 90, row['id']))
+                db.execute("UPDATE tasks SET status='running',node=?,epoch=epoch+1,deadline=?,attempts=attempts+1,leader_epoch=? WHERE id=?",
+                           (node, now + 90, leader['epoch'] if 'leader' in required else None, row['id']))
                 checkpoint = json.loads(row['checkpoint'])
                 checkpoint['wait_children_requested'] = False
                 db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(checkpoint), row['id']))
@@ -326,14 +333,32 @@ class Store:
                 return result
         return None
 
+    def _task_is_live(self, db, task, node=_UNSPECIFIED, epoch=_UNSPECIFIED):
+        """One authority transaction checks both task and Leader generations.
+
+        This is only a managed task lease, never a native Shell/network gate.
+        A same-name re-elected Leader cannot revive the previous term's task.
+        Callers with an authenticated worker must also pass its node/epoch.
+        """
+        now = self.clock()
+        if (not task or task['status'] != 'running' or not task['node']
+                or task['deadline'] is None or task['deadline'] <= now
+                or (node is not _UNSPECIFIED and task['node'] != node)
+                or (epoch is not _UNSPECIFIED and (not isinstance(epoch, int) or isinstance(epoch, bool)
+                                           or task['epoch'] != epoch))):
+            return False
+        if 'leader' in json.loads(task['required']):
+            leader = db.execute('SELECT * FROM leader').fetchone()
+            if (task['leader_epoch'] is None or leader['node'] != task['node']
+                    or leader['deadline'] <= now or leader['epoch'] != task['leader_epoch']):
+                return False
+        return True
+
     def update_task(self, task_id, node, epoch, checkpoint=None, result=None, status=None):
         with self.transaction() as db:
             row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
             now = self.clock()
-            leader = db.execute('SELECT * FROM leader').fetchone()
-            if (not row or row['status'] != 'running' or row['node'] != node or row['epoch'] != epoch
-                    or row['deadline'] <= now or ('leader' in json.loads(row['required'])
-                    and (leader['node'] != node or leader['deadline'] <= now))):
+            if not self._task_is_live(db, row, node, epoch):
                 raise Conflict('stale_task_lease')
             if status is not None and status not in ('completed', 'failed', 'waiting_auth', 'waiting_backend', 'waiting_children', 'continuing', 'needs_review'):
                 raise ValueError('invalid_terminal_status')
@@ -370,10 +395,7 @@ class Store:
         fingerprint = hashlib.sha256(json.dumps([task_id, action, arguments], sort_keys=True).encode()).hexdigest()
         with self.transaction() as db:
             row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            leader = db.execute('SELECT * FROM leader').fetchone()
-            if (not row or row['status'] != 'running' or row['node'] != node or row['epoch'] != epoch
-                    or row['deadline'] <= self.clock() or ('leader' in json.loads(row['required'])
-                    and (leader['node'] != node or leader['deadline'] <= self.clock()))):
+            if not self._task_is_live(db, row, node, epoch):
                 raise Conflict('stale_task_lease')
             previous = db.execute('SELECT * FROM agent_actions WHERE id=?', (action_id,)).fetchone()
             if previous:
@@ -497,10 +519,7 @@ class Store:
             raise ValueError('invalid_session_payload')
         with self.transaction() as db:
             row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            leader = db.execute('SELECT * FROM leader').fetchone()
-            if (not row or row['status'] != 'running' or row['node'] != node or row['epoch'] != epoch
-                    or row['deadline'] <= self.clock() or ('leader' in json.loads(row['required'])
-                    and (leader['node'] != node or leader['deadline'] <= self.clock()))):
+            if not self._task_is_live(db, row, node, epoch):
                 raise Conflict('stale_task_lease')
             harness = payload.get('harness', 'codex')
             if harness not in ('codex', 'pi'):
@@ -562,22 +581,12 @@ class Store:
                 raise ValueError('invalid_question_answer')
 
     def _interaction_is_live(self, db, task, interaction):
-        if (not interaction or not task or task['status'] != 'running'
-                or task['epoch'] != interaction['epoch'] or task['deadline'] <= self.clock()):
-            return False
-        if 'leader' in json.loads(task['required']):
-            leader = db.execute('SELECT * FROM leader').fetchone()
-            if leader['node'] != task['node'] or leader['deadline'] <= self.clock():
-                return False
-        return True
+        return bool(interaction and self._task_is_live(db, task, epoch=interaction['epoch']))
 
     def interaction(self, task_id, node, epoch, identity, kind=None, params=None):
         with self.transaction() as db:
             task = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            leader = db.execute('SELECT * FROM leader').fetchone()
-            if (not task or task['node'] != node or task['epoch'] != epoch or task['status'] != 'running'
-                    or task['deadline'] <= self.clock() or ('leader' in json.loads(task['required'])
-                    and (leader['node'] != node or leader['deadline'] <= self.clock()))):
+            if not self._task_is_live(db, task, node, epoch):
                 raise Conflict('stale_task_lease')
             row = db.execute('SELECT * FROM interactions WHERE id=?', (identity,)).fetchone()
             if kind:
@@ -620,7 +629,7 @@ class Store:
             raise ValueError('invalid_steering')
         with self.transaction() as db:
             task = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            if not task or task['status'] != 'running' or task['deadline'] <= self.clock():
+            if not self._task_is_live(db, task):
                 raise Conflict('task_not_running')
             previous = db.execute('SELECT * FROM steering WHERE id=?', (identity,)).fetchone()
             if previous and (previous['task_id'] != task_id or previous['text'] != text or previous['epoch'] != task['epoch']):
@@ -631,7 +640,7 @@ class Store:
     def poll_steering(self, task_id, node, epoch, identity=None, state=None):
         with self.transaction() as db:
             task = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            if not task or task['node'] != node or task['epoch'] != epoch or task['status'] != 'running' or task['deadline'] <= self.clock():
+            if not self._task_is_live(db, task, node, epoch):
                 raise Conflict('stale_task_lease')
             if identity:
                 if state not in ('submitted', 'unknown'):
@@ -754,7 +763,7 @@ class Store:
 
     def task_status(self, task_id):
         with self.transaction() as db:
-            row = db.execute('SELECT id,status,node,epoch,result,checkpoint,scope FROM tasks WHERE id=?', (task_id,)).fetchone()
+            row = db.execute('SELECT id,status,node,epoch,leader_epoch,result,checkpoint,scope FROM tasks WHERE id=?', (task_id,)).fetchone()
             if not row:
                 raise ValueError('task_not_found')
             value = dict(row)

@@ -21,6 +21,9 @@ class Codex:
         self.tools, self.on_tool, self.on_activity = tools or [], on_tool, on_activity
         self.deferred = []
         self.on_interaction = on_interaction
+        memories = config.get('native_memories', True)
+        if not isinstance(memories, bool):
+            raise ValueError('invalid_native_memories_flag')
         root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
         env = os.environ.copy()
         if config.get('network_env_file'):
@@ -38,9 +41,12 @@ class Codex:
         # of this session's environment or a scratch use of a system variable.
         env['CODEX_HOME'] = root
         command = [config.get('executable', 'codex'), '-c', 'model_provider="openai"']
-        if config.get('native_memories', True):
-            command += ['-c', 'features.memories=true', '-c', 'memories.generate_memories=true',
-                        '-c', 'memories.use_memories=true']
+        enabled = 'true' if memories else 'false'
+        # Explicit false must override the profile's existing config too. The
+        # override applies only to this child; production defaults stay true.
+        command += ['-c', 'features.memories=' + enabled,
+                    '-c', 'memories.generate_memories=' + enabled,
+                    '-c', 'memories.use_memories=' + enabled]
         command += ['app-server', '--stdio']
         self.auth_home = root
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
