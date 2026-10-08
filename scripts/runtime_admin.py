@@ -13,9 +13,10 @@ from assistant_mesh.config import private_json
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
-    parser.add_argument('command', choices=['audit-effects', 'set-cloud-runtime'])
+    parser.add_argument('command', choices=['audit-effects', 'set-cloud-runtime', 'set-account-pool'])
     parser.add_argument('--executable')
     parser.add_argument('--sha256')
+    parser.add_argument('--auth-home', action='append')
     args = parser.parse_args()
     path = Path(args.config)
     value = private_json(path)
@@ -27,6 +28,22 @@ def main():
                 uncertain.append({'id': task_id, 'status': status})
         db.close()
         print(json.dumps({'unresolved_effects': uncertain}))
+        return
+    if args.command == 'set-account-pool':
+        if not args.auth_home:
+            parser.error('account pool requires explicit authorized auth-home paths')
+        from assistant_mesh.config import discover_codex_auth
+        homes = [discover_codex_auth(home, strict=True) for home in args.auth_home]
+        if len(set(homes)) != len(homes):
+            raise ValueError('duplicate_account_home')
+        backup = str(path) + datetime.datetime.utcnow().strftime('.before-accounts-%Y%m%dT%H%M%S')
+        shutil.copy2(str(path), backup)
+        value['codex_accounts'] = [{'auth_home': home} for home in homes]
+        with path.open('w', encoding='utf8') as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+        path.chmod(0o600)
+        print(json.dumps({'account_pool_configured': True, 'authorized_profiles': len(homes), 'backup_created': True,
+                          'communication_account_changed': False, 'effectful_turns_auto_replayed': False}))
         return
     if not args.executable or not args.sha256:
         parser.error('runtime update requires executable and verified sha256')

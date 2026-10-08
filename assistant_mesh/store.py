@@ -15,7 +15,7 @@ class Conflict(ValueError):
 
 
 class Store:
-    def __init__(self, path, clock=time.time):
+    def __init__(self, path, clock=time.time, recover_inflight=True):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path, self.clock = str(path), clock
@@ -80,8 +80,9 @@ class Store:
                 db.execute('ALTER TABLE tasks ADD COLUMN paused_deadline REAL')
             db.execute('INSERT OR IGNORE INTO native_sessions SELECT * FROM sessions')
             # A crash during network submission is NEVER treated as permission to retry.
-            db.execute("UPDATE outbox SET status='unknown' WHERE status='submitting'")
-            db.execute("UPDATE steering SET state='unknown' WHERE state='submitting'")
+            if recover_inflight:
+                db.execute("UPDATE outbox SET status='unknown' WHERE status='submitting'")
+                db.execute("UPDATE steering SET state='unknown' WHERE state='submitting'")
         os.chmod(self.path, 0o600)
 
     @contextlib.contextmanager
@@ -319,8 +320,8 @@ class Store:
                     native['state'] = json.loads(native['state'])
                     result['sessions'][native['harness']] = native
                 result['session'] = result['sessions'].get('codex') or result['sessions'].get('pi')
-                scope = result['context'].get('agent_id', 'owner')
-                result['memories'] = [dict(m) for m in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) ORDER BY updated DESC LIMIT 100', (scope, 'owner'))]
+                scopes = self.memory_scopes(result['context'])
+                result['memories'] = [dict(m) for m in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) ORDER BY updated DESC LIMIT 100', scopes)]
                 result['children'] = [dict(c) for c in db.execute('SELECT id,status,result FROM tasks WHERE parent_id=? ORDER BY created', (row['id'],))]
                 return result
         return None
@@ -380,7 +381,7 @@ class Store:
                     raise Conflict('action_id_content_conflict')
                 return json.loads(previous['response'])
             context = json.loads(row['context'])
-            scope = context.get('agent_id', 'owner')
+            scope, shared_scope = self.memory_scopes(context)
             if action == 'remember':
                 text = arguments['text']
                 if not isinstance(text, str) or not text.strip() or len(text.encode()) > 16000:
@@ -392,7 +393,7 @@ class Store:
                 query = arguments.get('query', '')
                 if not isinstance(query, str):
                     raise ValueError('invalid_query')
-                output = {'memories': [dict(r) for r in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) AND instr(lower(text),lower(?))>0 ORDER BY updated DESC LIMIT 100', (scope, 'owner', query))]}
+                output = {'memories': [dict(r) for r in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) AND instr(lower(text),lower(?))>0 ORDER BY updated DESC LIMIT 100', (scope, shared_scope, query))]}
             elif action == 'delegate':
                 text, required = arguments['input'], arguments.get('required') or ['agent']
                 if not isinstance(text, str) or not text.strip() or len(text.encode()) > 65536 or not isinstance(required, list) or not all(isinstance(c, str) for c in required):
@@ -401,7 +402,14 @@ class Store:
                 child_context = dict(context)
                 child_context['role'] = arguments.get('role', 'specialist')
                 child_context['project_id'] = arguments.get('project_id', context.get('project_id', 'general'))
-                child_context['session_scope'] = 'project:' + str(child_context['project_id']) + ':' + str(arguments.get('agent_id', child_context['role']))
+                identity = str(arguments.get('agent_id', child_context['role']))
+                if context.get('origin', {}).get('kind') == 'a2a':
+                    binding = [context.get('authority'), context.get('origin', {}).get('peer'), child_context['project_id'], identity]
+                    isolated = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
+                    child_context['session_scope'] = 'peer-project:' + isolated
+                    child_context['memory_scope'] = 'peer:' + isolated
+                else:
+                    child_context['session_scope'] = 'project:' + str(child_context['project_id']) + ':' + identity
                 db.execute('INSERT INTO tasks(id,parent_id,input,required,status,created,context,scope) VALUES(?,?,?,?,?,?,?,?)', (child, task_id, text, json.dumps(required), 'pending', self.clock(), json.dumps(child_context), self.session_scope(child_context)))
                 output = {'id': child, 'parent_id': task_id, 'status': 'pending'}
             elif action == 'children':
@@ -435,6 +443,8 @@ class Store:
         row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
         if not row or command not in ('pause', 'resume') or row['status'] == 'completed':
             raise ValueError('invalid_task_control')
+        if json.loads(row['context']).get('remote_proxy'):
+            raise Conflict('remote_proxy_requires_remote_control_protocol')
         checkpoint = json.loads(row['checkpoint'])
         if command == 'pause':
             if row['status'] != 'paused':
@@ -457,6 +467,14 @@ class Store:
                 status, deadline = 'continuing', row['paused_deadline']
         db.execute('UPDATE tasks SET status=?,node=NULL,epoch=epoch+1,deadline=?,paused_status=NULL,paused_deadline=NULL WHERE id=?', (status, deadline, task_id))
         return {'id': task_id, 'status': status}
+
+    @staticmethod
+    def memory_scopes(context):
+        if context.get('origin', {}).get('kind') == 'a2a':
+            scope = context.get('memory_scope') or 'peer:' + hashlib.sha256(json.dumps(
+                [context.get('authority'), context.get('origin', {}).get('peer'), context.get('project_id'), context.get('agent_id')], sort_keys=True).encode()).hexdigest()
+            return (scope, scope)  # no implicit personal owner-memory sharing
+        return (context.get('agent_id', 'owner'), 'owner')
 
     @staticmethod
     def session_scope(context):

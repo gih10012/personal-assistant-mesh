@@ -23,6 +23,10 @@
 - Codex 启动/认证不可用且尚未开始执行时，才尝试配置好的 Pi；不跨 harness 重放已起效 turn。Pi 真实兜底仍需配置/验收。
 - 复用已有 Codex 认证，从账户实时模型目录选择，不要求在面板粘贴 API Key。
 - 项目只读观察 API、viewer/operator 权限分离。浏览器鉴权由 Dots 产品层处理。
+- 资源/算力/性能/工具/连接的开放能力目录、租约、证据指标、资源图、exact scope/action 远端授权与审计；provider 声明不等于验证。
+- 独立节点 authority/worker、断网本地任务、持续 native 子 agent、持久重连退避与去重维护任务。
+- A2A 远端代理 child 回到原父账本并自动续接；SSH 另有执行 journal，未知结果不重放。当前自有 `mesh-a2a/1`，不冒称标准 A2A 兼容。
+- 实验性 native Live 同线程/账户 pin/权限与事件核心；真实连接、音频和常驻接线须另验收。
 
 ## 运行与验证
 
@@ -31,11 +35,14 @@ python3 -m unittest discover -s tests -v
 python3 -m assistant_mesh --config /absolute/private/server.json serve
 python3 -m assistant_mesh --config /absolute/private/worker.json worker
 python3 -m assistant_mesh --config /absolute/private/operator.json status
+python3 -m assistant_mesh --config /absolute/private/node.json node
 ```
 
 配置/token 必须是本人持有的私有普通文件，放在仓库外的 `0700` 目录。认证、数据库、聊天、rollout、媒体都不能发布。`scripts/configure.py --help` 与 `deploy/` 提供部署入口。RPC 只监听 loopback，跨设备用 SSH 隧道或明确部署的 TLS 入口。
 
-`auth_home` 由支持 `CODEX_HOME_OVERRIDE` 的 Codex wrapper 选择；原始二进制使用自身默认认证目录。不要改当前会话的全局 HOME/CODEX_HOME。
+`auth_home` 只传给专属 Codex 子进程；wrapper 和原始二进制均使用同一个受保护目录。不要改当前会话的全局 HOME/CODEX_HOME。显式 `codex_accounts` 可在启动/认证失败、尚未开始 turn 时使用另一个本人授权账户；不能借此重放已起效 turn。Chat/Live 的主账户 pin 独立于此推理池。
+
+两通道和拓扑见 [NETWORK](docs/NETWORK.md)，节点部署见 [NODE-RUNTIME](docs/NODE-RUNTIME.md)，远端自动续接见 [A2A-DELEGATION](docs/A2A-DELEGATION.md)，Live 边界见 [LIVE-BRIDGE](docs/LIVE-BRIDGE.md)，账号隔离见 [ACCOUNT-POLICY](docs/ACCOUNT-POLICY.md)。
 
 ## 控制接口
 
@@ -54,13 +61,17 @@ python3 -m assistant_mesh --config /absolute/private/operator.json status
 | `POST /v1/task/steer`, `/v1/steering` | 当前 native turn 注入后续指令 |
 | `POST /v1/inbox`, `/v1/notify`, `/v1/notify/status` | 归档、防重通知；accepted 不等于手机确认 |
 | `POST /v1/budget/reserve` | 默认零支出预留，不实施采购 |
+| `GET /v1/resources`, `/v1/resource`, `/v1/resource/graph`, `/v1/capability-events` | 动态能力、实测指标、图与近期审计 |
+| `POST /v1/resource/action` | provider 注册/观测/请求授权，operator 才能审批 |
+| `GET /v1/mesh/hello`, `/v1/mesh/links`, `/v1/mesh/task` | 认证节点、链路与原 sender 的任务结果 |
+| `POST /v1/mesh/delegate`, `/v1/mesh/send`, `/v1/mesh/report` | 活任务租约下远端子任务、原子防重接收、仅证据报告 |
 
 ## 未完成范围
 
-- 动态资源图、能力质量与授权生命周期正在扩展；字符串能力标签不等于完整资源调度。
+- 已有动态资源图和质量/授权账本；自动最佳调度、逐跳工具调用与实际性能测量仍需证据，不把目录当调度器。
 - Native rollout 路径恢复是实验性接口。活跃外部效果中断先核对，不自动重放；reconciliation/release 工作流尚未完成。
 - 仍是单一控制账本，没有宣称完全去中心化或消除单点。
-- Pi/离线模型、技能版本发布回滚、自维护、云端持久调度、远端媒体及跨夜手机收件仍需各自证据。
+- Pi/离线模型、技能版本发布回滚、模型主导自维护的真实修复、云端持续调度、远端媒体及跨夜手机收件仍需各自证据。
 - Dots fork 上游 browser live view、vault、语音和部分插件 UI 尚未完整接入 native runtime。界面存在不代表能力已接通。
 
 见 [Dots 能力对标](docs/BENCHMARK.md) 与 [实测记录](docs/ACCEPTANCE.md)。

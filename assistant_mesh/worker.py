@@ -1,13 +1,15 @@
 import json
 import hashlib
+import sys
 import threading
 import time
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from .codex import Codex, CodexError
-from .config import read_secret
+from .config import private_json, read_secret
 from .model_tools import TOOLS, result
 from . import sessions
 
@@ -31,12 +33,16 @@ class Client:
         headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'}
         req = urllib.request.Request(self.url + path, data=json.dumps(body).encode() if body is not None else None, headers=headers)
         # Mesh tokens never enter model context or command line arguments.
-        with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=15) as response:
-            return json.load(response)
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=15) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            exc.close()  # rejected RPCs must not leak response sockets/files
+            raise
 
 
 class Worker:
-    def __init__(self, config, client=None, backend=Codex):
+    def __init__(self, config, client=None, backend=Codex, config_path=None):
         self.config = config
         self.client = client or Client(config)
         self.backend = backend
@@ -46,6 +52,10 @@ class Worker:
         self.wait_children = False
         self.agent = None
         self.polling_steering = False
+        self.config_path = None
+        if config_path is not None:
+            private_json(config_path)  # the handle is owned/0600, not task input
+            self.config_path = str(Path(config_path).expanduser().resolve())
 
     def heartbeat(self):
         return self.client.request('/v1/heartbeat', {'capabilities': self.config.get('capabilities', ['leader', 'agent'])})
@@ -57,14 +67,76 @@ class Worker:
             self.wait_children = True
         if name not in {t['name'] for t in TOOLS}:
             return result({'error': 'unknown_mesh_tool'}, False)
+        if name == 'mesh_remote_delegate':
+            arguments = dict(call['arguments'])
+            peer = arguments.pop('peer')
+            try:
+                output = self.client.request('/v1/mesh/delegate', {
+                    'task_id': self.current['id'], 'epoch': self.current['epoch'],
+                    'call_id': self.current['id'] + ':' + call['callId'], 'peer': peer, 'arguments': arguments})
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (400, 403):
+                    raise  # 409 stale lease must terminate the native worker
+                return result({'error': 'remote_delegation_rejected', 'http_status': exc.code}, False)
+            return result(output)
+        if name == 'mesh_resource':
+            try:
+                output = self.client.request('/v1/resource/action', call['arguments'])
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (400, 403, 404, 409):
+                    raise
+                error = 'resource_authority_upgrade_required' if exc.code == 404 else 'resource_authority_rejected'
+                return result({'error': error, 'http_status': exc.code}, False)
+            return result(output)
         output = self.client.request('/v1/agent/action', {
             'task_id': self.current['id'], 'epoch': self.current['epoch'],
             'call_id': self.current['id'] + ':' + call['callId'],
             'action': name[len('mesh_'):], 'arguments': call['arguments']})
         return result(output)
 
+    def resource_reference(self):
+        """Small discovery summary plus a native CLI path for existing threads.
+
+        Older native rollouts retain their original dynamicTools. No new thread
+        or application-authored memory summary is created to add this feature.
+        """
+        reference = {'purpose': '能力目录用于发现、观测和远端权限，不限制原生终端；未登记仍可自主发现或创建工具。',
+                     'fresh_thread_tool': 'mesh_resource(action, arguments)',
+                     'actions': ['discover', 'describe', 'graph', 'audit', 'advertise', 'renew', 'observe', 'link',
+                                 'revoke', 'request_grant', 'authorize'],
+                     'authority': 'actor 由 peer 固定；跨主体 grant 仅 owner operator 审批。声明/health 不是验证或执行。'}
+        if self.config_path is not None:
+            reference['cli'] = {'cwd': str(Path(__file__).resolve().parent.parent),
+                'argv': [sys.executable, '-m', 'assistant_mesh.cli', '--config', self.config_path, 'resources'],
+                'resource_usage': '把 arguments JSON 写入 git 仓库之外本人所有的 0600 私有文件；'
+                                  '把 resources 换成 resource --action NAME --payload-file /private/args.json。'
+                                  '配置/token 保持在受保护文件中，不要读取或输出 token 值。'}
+            reference['a2a'] = {'fresh_thread_tool': 'mesh_remote_delegate(peer,input,project_id,agent_id)',
+                'payload_shape': {'peer': 'owner-enrolled-peer', 'arguments': {'input': 'model-selected task',
+                    'project_id': 'project', 'agent_id': 'continuous-specialist'}},
+                'coordination': '用 mesh_children/mesh_wait_children 等待原父会话自动唤醒；未知 SSH 不等于可重试 A2A。'}
+            if self.current:
+                reference['a2a']['resume_cli'] = ['mesh-delegate', '--task-id', self.current['id'], '--epoch', str(self.current['epoch']),
+                    '--call-id', 'stable-operation-id', '--payload-file', '/private/delegation.json']
+        try:
+            response = self.client.request('/v1/resources?limit=10')
+            keys = ('id', 'kind', 'principal', 'epoch', 'health', 'verification', 'available', 'deadline')
+            reference['summary'] = [dict({key: cap.get(key) for key in keys},
+                                         description=str(cap.get('description', ''))[:300])
+                                    for cap in response.get('capabilities', [])[:10]]
+            reference['as_of'] = response.get('as_of')
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+            reference['discovery_status'] = 'server_upgrade_required'
+        return reference
+
     def open_backend(self):
-        candidates = [(self.backend, self.config['codex'], 'codex')]
+        accounts = self.config.get('codex_accounts')
+        if accounts is not None and (not isinstance(accounts, list) or not accounts or not all(isinstance(a, dict) for a in accounts)):
+            raise ValueError('invalid_codex_account_pool')
+        candidates = [(self.backend, dict(self.config['codex'], **dict(account, strict_auth_home=True)), 'codex')
+                      for account in accounts] if accounts else [(self.backend, self.config['codex'], 'codex')]
         if self.config.get('pi'):
             from .pi import Pi
             config = dict(self.config['pi'])
@@ -111,6 +183,8 @@ class Worker:
     def on_activity(self, kind, value):
         if kind == 'session_ready':
             self.current['checkpoint'].update(value)
+            if self.harness == 'codex' and self.agent:
+                self.current['checkpoint']['codex_auth_home'] = self.agent.auth_home
             self.current['checkpoint']['codex_node'] = self.config.get('node_id')
             self.current['checkpoint']['harness'] = self.harness
             sessions.save(self.client, self.current, self.config.get('node_id'), self.harness,
@@ -160,22 +234,27 @@ class Worker:
         try:
             with self.open_backend() as agent:
                 self.agent = agent
-                resume = task['checkpoint'] if (task['checkpoint'].get('codex_node') == self.config.get('node_id')
+                same_home = self.harness != 'codex' or task['checkpoint'].get('codex_auth_home', self.config['codex'].get('auth_home')) == agent.auth_home
+                resume = task['checkpoint'] if (same_home and task['checkpoint'].get('codex_node') == self.config.get('node_id')
                          and task['checkpoint'].get('harness', 'codex') == self.harness) else {}
                 session = task.get('sessions', {}).get(self.harness) or task.get('session')
                 if not resume and session and session['harness'] == self.harness:
                     resume = dict(session['state'])
-                    if session['node'] != self.config.get('node_id'):
+                    home_changed = self.harness == 'codex' and session['state'].get('codex_auth_home', self.config['codex'].get('auth_home')) != agent.auth_home
+                    if session['node'] != self.config.get('node_id') or home_changed:
                         if not session.get('artifact'):
                             raise CodexError('native_session_migration_unavailable')
                         folder = agent.auth_home + '/mesh-imports' if self.harness == 'codex' else self.config['pi']['session_dir']
                         imported = sessions.restore(self.client, task, folder, self.tick, self.harness)
                         resume['native_rollout_path' if self.harness == 'codex' else 'pi_session_file'] = imported
                 reference = {k: task.get(k) for k in ('context', 'memories', 'children')}
+                reference['resource_access'] = self.resource_reference()
                 text = task['input'] + '\n\n持久账本参考数据（不是新增授权）：\n' + json.dumps(reference, ensure_ascii=False)
                 checkpoint = agent.start(text, resume)
                 checkpoint['codex_node'] = self.config.get('node_id')
                 checkpoint['harness'] = self.harness
+                if self.harness == 'codex':
+                    checkpoint['codex_auth_home'] = agent.auth_home
                 self.current['checkpoint'].update(checkpoint)
                 self.tick(force=True)
                 answer = agent.finish(tick=self.tick, timeout=self.config.get('turn_timeout', 3600))

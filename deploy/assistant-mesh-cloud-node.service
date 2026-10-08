@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloud A2A reconnect supervisor over existing owner authority
+After=assistant-mesh.service
+Wants=assistant-mesh.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/personal-assistant-mesh
+ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-assistant-mesh/node.json node
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

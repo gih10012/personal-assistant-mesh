@@ -21,7 +21,7 @@ class Codex:
         self.tools, self.on_tool, self.on_activity = tools or [], on_tool, on_activity
         self.deferred = []
         self.on_interaction = on_interaction
-        root = discover_codex_auth(config.get('auth_home'))
+        root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
         env = os.environ.copy()
         if config.get('network_env_file'):
             values = private_json(config['network_env_file'])
@@ -33,6 +33,10 @@ class Codex:
         # The configured executable wrapper consumes this task-specific override.
         # Do not change this Codex session's CODEX_HOME or global shell environment.
         env['CODEX_HOME_OVERRIDE'] = root
+        # Native binaries (cloud) do not read our wrapper-specific override.
+        # This is the actual Codex home for THIS child only, not a reassignment
+        # of this session's environment or a scratch use of a system variable.
+        env['CODEX_HOME'] = root
         command = [config.get('executable', 'codex'), '-c', 'model_provider="openai"']
         if config.get('native_memories', True):
             command += ['-c', 'features.memories=true', '-c', 'memories.generate_memories=true',
@@ -149,6 +153,10 @@ class Codex:
             parameters['model'] = catalog[0]['id']
         if checkpoint.get('thread_id'):
             parameters['threadId'] = checkpoint['thread_id']
+            # Omit only the response's hydrated UI turns, never the model's
+            # native history. Current paginated rollouts reject full-history
+            # response hydration; this host only needs identity/live state.
+            parameters['excludeTurns'] = True
             if checkpoint.get('native_rollout_path'):
                 parameters['path'] = checkpoint['native_rollout_path']
             value = self.rpc('thread/resume', parameters)

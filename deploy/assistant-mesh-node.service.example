@@ -1,0 +1,19 @@
+[Unit]
+Description=Personal assistant node-owned agent and mesh supervisor
+After=network.target
+# The node must also start without a network, tunnel, or global Leader.
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Github/personal-assistant-mesh
+ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-assistant-mesh/node.json node
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+# Adjust paths and measured resource limits for the owner's actual deployment.
+# Do not copy this over another service or run a second channel receiver.
+
+[Install]
+WantedBy=default.target

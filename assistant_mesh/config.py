@@ -22,10 +22,13 @@ def read_secret(path):
     return value
 
 
-def discover_codex_auth(preferred=None):
+def discover_codex_auth(preferred=None, strict=False):
     """Known credential sources only. No credential values in return value/logs."""
     candidates = [Path(preferred).expanduser()] if preferred else []
-    candidates += [Path.home() / '.codex-official', Path.home() / '.codex']
+    if strict and not preferred:
+        raise ValueError('pinned_codex_auth_home_required')
+    if not strict:
+        candidates += [Path.home() / '.codex-official', Path.home() / '.codex']
     for root in candidates:
         path = root / 'auth.json'
         if path.is_file() and not path.is_symlink() and not stat.S_IMODE(path.stat().st_mode) & 0o077:

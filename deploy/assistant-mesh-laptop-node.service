@@ -1,0 +1,15 @@
+[Unit]
+Description=Autonomous laptop agent node and authenticated A2A reconnect supervisor
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Github/personal-assistant-mesh
+ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-assistant-node/node.json node
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -40,6 +40,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual('native-thread', request['threadId'])
         self.assertEqual('/private/selected.jsonl', request['path'])
         self.assertEqual('catalog-model', request['model'])
+        self.assertTrue(request['excludeTurns'])
+        self.assertNotIn('history', request)  # never replace model context
         self.assertNotIn('dynamicTools', request)
         self.assertFalse(any(method == 'thread/start' for method, _ in agent.calls))
         self.assertEqual('native-thread', state['thread_id'])
