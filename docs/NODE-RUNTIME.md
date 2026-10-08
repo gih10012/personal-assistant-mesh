@@ -121,6 +121,31 @@ python3 -m assistant_mesh --config /absolute/private/node.json node
 
 ## 连续记忆、自治和恢复
 
+Codex 部署不能只检查 `--version`。维护工具支持同一官方完整 artifact 的
+保留布局安装，要求明确版本、target 和整个 artifact 的 SHA256：
+
+```sh
+python3 -m scripts.upgrade_runtime --artifact /private/codex-package.tar.gz \
+  --sha256 VERIFIED_WHOLE_ARTIFACT_SHA256 --version VERIFIED_VERSION \
+  --target VERIFIED_TARGET --install-dir /private/owned-runtime
+python3 -m scripts.runtime_admin --config /private/worker.json set-cloud-runtime \
+  --package-dir VERIFIED_INSTALL_RESULT_PACKAGE_DIR \
+  --sha256 VERIFIED_WHOLE_ARTIFACT_SHA256
+python3 -m scripts.probe_native_shell --config /private/worker.json
+```
+
+安装器验证主程序、同树 code-mode-host 和资源目录，对整个已保留 artifact
+和提取文件复核后才能切配置；不混装 helper，不覆盖已发布版本。此检查
+只在显式部署维护时运行，不是原生 turn/Shell 的额外门禁。版本配对不固定
+模型选择，也不是“不许 agent 安装别的工具”。probe 使用未知文件的哈希
+挑战与原生工具输出核验执行，不能仅凭模型说“执行成功”算通过。
+
+已有授权推理 profile 可在 turn **开始前**通过原生
+`account/rateLimits/read` 查询；明确耗尽才跳到下一已有 profile，未知或旧
+协议不构成禁止推理。它不购买 credits、消耗 resets 或更换 Chat/Live 主账号。
+启动后的 quota/网络失败仍保留任务和原生会话，不假设没有外部效果、也不
+用新 ID 自动重做；有确定零效果证据才可单独核对后续接。
+
 模型 runtime 的服务模板不额外设置 `NoNewPrivileges` 或 `PrivateTmp`，不会把 Mesh API 策略变成原生工具的进程权限/临时目录隔离。它仍以本人账户运行并受该账户既有 OS 权限约束，不新增 sudo 授权。只运行控制面或 SSH transport 的服务与模型 worker 分离。
 
 - 本地/A2A 任务的 native scope 由目的节点、认证主体、项目和 agent 身份组合哈希，支持同类项目连续 native thread，不与 `leader:owner` 或其他 peer 的记忆混用；Codex 原生 compaction 仍负责压缩。

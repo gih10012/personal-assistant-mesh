@@ -124,6 +124,41 @@ class Codex:
     def models(self):
         return self.rpc('model/list', {}).get('data', [])
 
+    def rate_limits(self):
+        """Read existing subscription quota, never buy credits or consume resets.
+
+        Only a definite exhausted Codex window prevents selecting this profile
+        before a managed turn starts. Unknown/stale/other-model buckets do not
+        imply that native inference is forbidden or unavailable.
+        """
+        value = self.rpc('account/rateLimits/read', {})
+        if not isinstance(value, dict):
+            return {'status': 'unknown'}
+        buckets = value.get('rateLimitsByLimitId')
+        bucket = buckets.get('codex') if isinstance(buckets, dict) else None
+        if not isinstance(bucket, dict):
+            bucket = value.get('rateLimits')
+            if not isinstance(bucket, dict) or bucket.get('limitId') not in (None, 'codex'):
+                return {'status': 'unknown'}
+        known, stale = False, False
+        exhausted = []
+        for name in ('primary', 'secondary'):
+            window = bucket.get(name)
+            if not isinstance(window, dict):
+                continue
+            percent, reset = window.get('usedPercent'), window.get('resetsAt')
+            if not isinstance(percent, (int, float)) or isinstance(percent, bool):
+                continue
+            known = True
+            if percent >= 100:
+                if isinstance(reset, (int, float)) and not isinstance(reset, bool) and reset > time.time():
+                    exhausted.append(reset)
+                else:
+                    stale = True  # stale or incomplete snapshot is not proof
+        if exhausted:
+            return {'status': 'exhausted', 'retry_at': max(exhausted)}
+        return {'status': 'available' if known and not stale else 'unknown'}
+
     def start(self, text, checkpoint=None):
         checkpoint = checkpoint or {}
         root = self.config['workspace']
@@ -233,6 +268,10 @@ class Codex:
                     replies.append(item.get('text', ''))
             if method == 'turn/completed' and params.get('turn', {}).get('id') == self.turn_id:
                 if params['turn'].get('status') != 'completed':
+                    error = params['turn'].get('error') or {}
+                    # Keep a fixed classification, not private provider text.
+                    if isinstance(error, dict) and error.get('codexErrorInfo') == 'usageLimitExceeded':
+                        raise CodexError('codex_usage_limit_exceeded')
                     raise CodexError('codex_turn_failed')
                 return '\n\n'.join(replies) or '任务已结束，但没有生成文字回答。'
         self.interrupt()

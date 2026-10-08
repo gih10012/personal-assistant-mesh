@@ -185,11 +185,14 @@ class MeshGatewayTests(unittest.TestCase):
         self.assertEqual(400, self.value(response)['http_status'])
         self.assertEqual(0, self.count('mesh_deliveries'))
 
-    def test_remote_content_conflict_409_still_terminates_native_worker(self):
+    def test_remote_content_conflict_409_is_failure_with_live_task_and_never_requeues(self):
         self.gateway('remote_delegate', {'peer': 'authorized-peer', 'input': 'first'}, call_id='same-remote-call')
-        with self.assertRaises(urllib.error.HTTPError) as failure:
-            self.gateway('remote_delegate', {'peer': 'authorized-peer', 'input': 'changed'}, call_id='same-remote-call')
-        self.assertEqual(409, failure.exception.code)
+        failure = self.gateway('remote_delegate', {'peer': 'authorized-peer', 'input': 'changed'}, call_id='same-remote-call')
+        self.assertFalse(failure['success'])
+        self.assertEqual(409, self.value(failure)['http_status'])
+        self.assertEqual('remote_delegation_conflict', self.value(failure)['error'])
+        self.assertFalse(self.value(failure)['retry_with_new_id'])
+        self.assertTrue(self.gateway('children')['success'])
         self.assertEqual(1, self.count('mesh_deliveries'))
 
     def test_stale_task_lease_409_is_not_hidden_as_resource_rejection(self):

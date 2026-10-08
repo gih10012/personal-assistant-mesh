@@ -79,3 +79,38 @@ Mesh。SDK 注册使用 shim，原生路径为事件管道模拟；不冒称安�
 修复后的完整 337 项测试在本机 Python 3.14 和云端 Python 3.6.8 均通过，
 含上述 14 项实际 TypeScript/HTTP 合同测试。CI 的慢启动 fixture 给予 10 秒
 启动时间，不改变认证、lease、执行或防重断言；新 CI 结果另行核对。
+
+## 2026-10-08：两机上线与实际 Shell 故障修复
+
+- 云端 authority、原生 worker、独立 A2A companion 已运行；本机独立节点、
+  原生 worker 与 SSH 通道已运行。云端访问本机的 reverse endpoint 实测是
+  本人持有的 0600 Unix socket，不是公网 TCP 端口；双向鉴权 hello 和 link
+  检查通过。本机原有工作终端未关闭。
+- 双方向各一条实际远端 `remember` 任务 completed，返回指定 ACK；相同
+  消息 ID/body 重放仍绑定同一接收任务。这证明真实推理和接收端防重，不
+  证明线程跨机器迁移或原生工具完整。
+- 节点重启后的 `recall` 确实恢复原 thread，但原生 turn 因配额耗尽失败。
+  本机指定失败轮的只读 `thread/turns/list` 与原生终态记录均确认
+  `usageLimitExceeded`，没有记录工具调用。本次 recall **尚未通过**，
+  不能以原 ID 找到就冒充连续记忆验收成功。
+- 云端先前只复制 standalone Codex：版本和文字推理正常，Shell 执行却在
+  缺少 `codex-code-mode-host` 时失败。补入官方 **同版本** 0.159.2 musl
+  helper，校验官方整个 helper artifact SHA256，再核对解压 binary；没有
+  混入本机其它版本，也没有新增原生 Shell 白名单。
+- 本机和云端分别执行真实原生 Shell 哈希挑战：预期 digest 不交给模型，
+  核对同一原生工具调用的实际输出与最终答案，两端都通过。云端第二次
+  通过的 probe 在启动前跳过额度满的第一 profile，用本人已授权第二
+  profile；该云端 profile 的旧登录态曾返回 routing discovery 401，
+  复用现有授权登录态并保留旧认证备份后实际成功。以上是独立原生 probe，
+  尚不替代 systemd worker 内完整工具链/所有 native 功能的验收。
+- 源码新增完整官方 package 安装/维护期校验和原生 Shell challenge。
+  完整 package 安装器有 13 项离线合同测试；此次云端即时修复的是匹配
+  helper，完整资源包的真实安装仍待下载、校验与执行，不能混为已完成。
+- `b5b953a` 的本机 Python 3.14、云端 Python 3.6.8 完整 372 项测试通过，
+  GitHub 对该 commit 的 Python 3.8/3.12/3.14 CI 成功。
+
+可选目录与 steering query/ACK 降级，保留未知结果而不重复 native steer。
+额外 Mesh action 的网络/服务错误按未知结果返回，原生 turn 可继续；真正
+当前 task fence 失效仍结束该受管任务。推理账户池新增原生配额预检，只在
+尚未开始 turn 时选择下一授权 profile；已开始的 task 不盲目重放。Chat/Live
+通信主账号不因此切换，也不自动购买 credits 或消耗 quota reset。

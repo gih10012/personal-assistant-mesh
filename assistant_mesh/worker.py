@@ -150,6 +150,32 @@ class Worker:
     def heartbeat(self):
         return self.client.request('/v1/heartbeat', {'capabilities': self.config.get('capabilities', ['leader', 'agent'])})
 
+    def _mesh_tool_failure(self, exc, domain, task_fenced):
+        """Extra Mesh RPC failure is not proof of non-execution or a native gate."""
+        status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
+        if status == 409 and task_fenced:
+            # HTTPError bodies are deliberately closed/private. Recheck the
+            # same task/Leader fence without a new action ID or result mutation.
+            # If this core check fails (including transport), keep failing closed
+            # for this managed task rather than assuming its lease is current.
+            lease = self.client.request('/v1/task/update', {'id': self.current['id'], 'epoch': self.current['epoch']})
+            if not isinstance(lease, dict) or lease.get('ok') is not True:
+                raise ValueError('task_fence_response_invalid')
+        error = domain + '_unavailable'
+        if status in (400, 401, 403):
+            error = domain + '_rejected'
+        elif status == 409:
+            error = domain + '_conflict' if task_fenced else domain + '_rejected'
+        elif status == 404 and domain == 'resource_authority':
+            error = 'resource_authority_upgrade_required'
+        failure = {'error': error, 'availability': 'unavailable', 'outcome': 'unknown',
+                   'automatic_retry': False, 'retry_with_new_id': False,
+                   'native_tools_intercepted': False,
+                   'retry_guidance': '未知结果可能已经提交；先核对原操作状态，保留同一操作身份，不因失败新建 ID 重做。原生能力不受此 Mesh 入口失败限制。'}
+        if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+            failure['http_status'] = status
+        return result(failure, False)
+
     def on_tool(self, call):
         self.tick(force=True)
         name = call['tool']
@@ -178,29 +204,24 @@ class Worker:
                 output = self.client.request('/v1/mesh/delegate', {
                     'task_id': self.current['id'], 'epoch': self.current['epoch'],
                     'call_id': self.current['id'] + ':' + call['callId'], 'peer': peer, 'arguments': arguments})
-            except urllib.error.HTTPError as exc:
-                if exc.code not in (400, 403):
-                    raise  # 409 stale lease must terminate the native worker
-                return result({'error': 'remote_delegation_rejected', 'http_status': exc.code}, False)
+            except (OSError, ValueError) as exc:
+                return self._mesh_tool_failure(exc, 'remote_delegation', True)
             return result(output)
         if name == 'mesh_resource':
             try:
                 output = self.client.request('/v1/resource/action', arguments)
-            except urllib.error.HTTPError as exc:
-                if exc.code not in (400, 403, 404, 409):
-                    raise
-                error = 'resource_authority_upgrade_required' if exc.code == 404 else 'resource_authority_rejected'
-                return result({'error': error, 'http_status': exc.code}, False)
+            except (OSError, ValueError) as exc:
+                # This API has resource epochs, not a task lease of its own.
+                # Its business 409 retains the existing resource semantics.
+                return self._mesh_tool_failure(exc, 'resource_authority', False)
             return result(output)
         try:
             output = self.client.request('/v1/agent/action', {
                 'task_id': self.current['id'], 'epoch': self.current['epoch'],
                 'call_id': self.current['id'] + ':' + call['callId'],
                 'action': name[len('mesh_'):], 'arguments': arguments})
-        except urllib.error.HTTPError as exc:
-            if exc.code not in (400, 403):
-                raise  # task/Leader lease conflicts still terminate this worker
-            return result({'error': 'mesh_coordination_rejected', 'http_status': exc.code}, False)
+        except (OSError, ValueError) as exc:
+            return self._mesh_tool_failure(exc, 'mesh_coordination', True)
         if name == 'mesh_wait_children':
             self.wait_children = True
         return result(output)
@@ -289,6 +310,13 @@ class Worker:
                                        on_interaction=self.on_interaction)
                 if not agent.account()['authenticated']:
                     raise CodexError(name + '_auth_required')
+                if name == 'codex' and callable(getattr(agent, 'rate_limits', None)):
+                    try:
+                        quota = agent.rate_limits()
+                    except (ValueError, OSError):
+                        quota = {'status': 'unknown'}  # optional API, not a native-tool gate
+                    if isinstance(quota, dict) and quota.get('status') == 'exhausted':
+                        raise CodexError('codex_usage_limit_exceeded')
                 self.harness = name
                 return agent
             except (ValueError, OSError) as exc:
