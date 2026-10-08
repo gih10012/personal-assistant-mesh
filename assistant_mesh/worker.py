@@ -222,6 +222,14 @@ class Worker:
                      'actions': ['discover', 'describe', 'graph', 'audit', 'advertise', 'renew', 'observe', 'link',
                                  'revoke', 'request_grant', 'authorize'],
                      'authority': 'actor 由 peer 固定；跨主体 grant 仅 owner operator 审批。声明/health 不是验证或执行。'}
+        # Only fixed host states enter the prompt, never exception messages or
+        # private response bodies. This is advisory, not a native-tool gate.
+        steering = (self.current or {}).get('checkpoint', {}).get('mesh_steering_status', {})
+        steering = steering if isinstance(steering, dict) else {}
+        states = {'query': ('not_polled', 'available', 'unavailable', 'permission_denied', 'server_upgrade_required'),
+                  'submission': ('none', 'submitted', 'unknown'), 'ack': ('none', 'acknowledged', 'unknown')}
+        reference['steering_status'] = {key: steering.get(key) if steering.get(key) in values else values[0]
+                                        for key, values in states.items()}
         if self.config_path is not None:
             reference['cli'] = {'cwd': str(Path(__file__).resolve().parent.parent),
                 'argv': [sys.executable, '-m', 'assistant_mesh.cli', '--config', self.config_path, 'resources'],
@@ -238,15 +246,20 @@ class Worker:
                     '--call-id', 'stable-operation-id', '--payload-file', '/private/delegation.json']
         try:
             response = self.client.request('/v1/resources?limit=10')
+            if (not isinstance(response, dict) or not isinstance(response.get('capabilities'), list)
+                    or not all(isinstance(cap, dict) for cap in response['capabilities'][:10])):
+                raise ValueError('optional_discovery_invalid_response')
             keys = ('id', 'kind', 'principal', 'epoch', 'health', 'verification', 'available', 'deadline')
             reference['summary'] = [dict({key: cap.get(key) for key in keys},
                                          description=str(cap.get('description', ''))[:300])
                                     for cap in response.get('capabilities', [])[:10]]
             reference['as_of'] = response.get('as_of')
+            reference['discovery_status'] = 'available'
         except urllib.error.HTTPError as exc:
-            if exc.code != 404:
-                raise
-            reference['discovery_status'] = 'server_upgrade_required'
+            reference['discovery_status'] = ('server_upgrade_required' if exc.code == 404 else
+                                             'permission_denied' if exc.code in (401, 403) else 'unavailable')
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            reference['discovery_status'] = 'unavailable'
         return reference
 
     def open_backend(self):
@@ -331,15 +344,95 @@ class Worker:
                 self.polling_steering = True
                 try:
                     body = {'task_id': self.current['id'], 'epoch': self.current['epoch']}
-                    event = self.client.request('/v1/steering', body)['steering']
-                    if event:
-                        outcome = 'unknown'
+                    scope = (body['task_id'], body['epoch'])
+                    if getattr(self, '_steering_scope', None) != scope:
+                        self._steering_scope = scope
+                        self._steering_receipts = {}
+                        self._steering_status = {'query': 'not_polled', 'submission': 'none', 'ack': 'none'}
+                    receipts, status = self._steering_receipts, self._steering_status
+
+                    def acknowledge(identity, outcome):
+                        try:
+                            response = self.client.request('/v1/steering', dict(body, id=identity, state=outcome))
+                            if not isinstance(response, dict) or response.get('ok') is not True:
+                                raise ValueError('optional_steering_invalid_ack')
+                        except urllib.error.HTTPError as exc:
+                            if exc.code == 409:
+                                raise  # steering also checks the current task lease
+                            receipts[identity]['state'] = status['submission'] = 'unknown'
+                            status['ack'] = 'unknown'
+                            return
+                        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                            receipts[identity]['state'] = status['submission'] = 'unknown'
+                            status['ack'] = 'unknown'
+                            return
+                        receipts[identity]['acked'] = True
+                        status['ack'] = 'acknowledged'
+
+                    # An ACK may have committed before its response was lost.
+                    # Repair only that bookkeeping, never resend native steer.
+                    # Bound optional repair to one request per heartbeat tick.
+                    repairing = next((identity for identity, receipt in receipts.items() if not receipt['acked']), None)
+                    if repairing is not None:
+                        status['submission'] = 'unknown'
+                        acknowledge(repairing, 'unknown')
+                    try:
+                        response = self.client.request('/v1/steering', body)
+                        if not isinstance(response, dict) or 'steering' not in response:
+                            raise ValueError('optional_steering_invalid_response')
+                        event = response['steering']
+                        if event is not None and (not isinstance(event, dict)
+                                or not isinstance(event.get('id'), str) or not event['id']
+                                or not isinstance(event.get('text'), str) or not event['text'].strip()
+                                or len(event['text'].encode('utf8')) > 32768
+                                or event.get('task_id', body['task_id']) != body['task_id']
+                                or event.get('epoch', body['epoch']) != body['epoch']
+                                or event.get('state', 'pending') not in ('pending', 'submitting', 'submitted', 'unknown')):
+                            raise ValueError('optional_steering_invalid_event')
+                    except urllib.error.HTTPError as exc:
+                        if exc.code == 409:
+                            raise
+                        status['query'] = ('server_upgrade_required' if exc.code == 404 else
+                                           'permission_denied' if exc.code in (401, 403) else 'unavailable')
+                        return
+                    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                        status['query'] = 'unavailable'
+                        return
+                    status['query'] = 'available'
+                    if event is not None:
+                        identity = event['id']
+                        if identity in receipts:
+                            status['submission'] = receipts[identity]['state']
+                            status['ack'] = 'acknowledged' if receipts[identity]['acked'] else 'unknown'
+                            if not receipts[identity]['acked'] and identity != repairing:
+                                acknowledge(identity, 'unknown')
+                            return
+                        if event.get('state', 'pending') != 'pending':
+                            # Existing terminal/inflight ledger evidence is not
+                            # permission to replay an already attempted event.
+                            outcome = 'submitted' if event['state'] == 'submitted' else 'unknown'
+                            receipts[identity] = {'state': outcome, 'acked': event['state'] != 'submitting'}
+                            status['submission'] = outcome
+                            status['ack'] = 'acknowledged' if receipts[identity]['acked'] else 'unknown'
+                            if not receipts[identity]['acked']:
+                                acknowledge(identity, 'unknown')
+                            return
+                        # Reserve BEFORE calling native RPC; a missing reply is
+                        # unknown, not proof that the steer was never received.
+                        receipts[identity] = {'state': 'unknown', 'acked': False}
+                        status['submission'] = 'unknown'
                         try:
                             self.agent.steer(event['text'])
-                            outcome = 'submitted'
-                        finally:
-                            self.client.request('/v1/steering', dict(body, id=event['id'], state=outcome))
+                        except (OSError, ValueError):
+                            pass
+                        else:
+                            receipts[identity]['state'] = status['submission'] = 'submitted'
+                        acknowledge(identity, receipts[identity]['state'])
                 finally:
+                    # Existing checkpoint/prompt carries safe advisory states;
+                    # core task-update and heartbeat failures above still raise.
+                    if getattr(self, '_steering_scope', None) == (self.current['id'], self.current['epoch']):
+                        self.current['checkpoint']['mesh_steering_status'] = dict(self._steering_status)
                     self.polling_steering = False
 
     def run_once(self):
