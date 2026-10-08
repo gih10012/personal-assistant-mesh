@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from assistant_mesh.codex import CodexError
 from assistant_mesh.networking import PROTOCOL, digest, native_scope
-from assistant_mesh.node import LOCAL_RUNTIME, Node, run
+from assistant_mesh.node import LOCAL_RUNTIME, LOCAL_WORKER, Node, run
 from assistant_mesh.remote import Remote
 from assistant_mesh.server import serve
 from assistant_mesh.store import Store
@@ -907,7 +907,9 @@ class NodeTests(unittest.TestCase):
                 worker.stop.wait(5)
         node = self.node(self.config('alice', port=0, start_worker=True), worker_factory=HeartbeatWorker)
         node.store.set('node_worker_failure', {'failures': 2, 'retry_at': 0})
-        node._incident('local-worker', 'local_worker_runtime_failed')
+        node._incident(LOCAL_WORKER, 'local_worker_runtime_failed', runtime=True)
+        node._incident(LOCAL_WORKER, 'connection_unavailable')
+        node._incident(LOCAL_RUNTIME, 'native_runtime_components_missing', runtime=True)
         node.start()
         self.wait(lambda: bool(node.store.status()['nodes']))
         node.step()
@@ -915,7 +917,204 @@ class NodeTests(unittest.TestCase):
         node.worker_started_at -= 31  # injected elapsed time, not inference
         node.step()
         self.assertEqual(0, node.store.get('node_worker_failure')['failures'])
-        self.assertEqual(0, self.incidents(node, 'local-worker')['active'])
+        self.assertEqual(0, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        self.assertEqual(1, self.incidents(node, LOCAL_WORKER)['active'])
+        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME, runtime=True)['active'])
+        self.assertFalse(node.status()['runtime_execution_verified'])
+
+    def test_same_named_peer_reconnect_never_settles_owned_worker_failure(self):
+        config = self.config('alice', central=True)
+        config['peers'] = [{'node': LOCAL_WORKER, 'client_config': config['local_worker_config']}]
+        node = self.node(config)
+        node._worker_failed(ValueError('PRIVATE_ERROR'))
+        node._incident(LOCAL_WORKER, 'connection_unavailable')
+        owned = self.incidents(node, LOCAL_WORKER, runtime=True)
+        peer = self.incidents(node, LOCAL_WORKER)
+        self.assertNotEqual(owned['task_id'], peer['task_id'])
+        self.assertEqual(2, node.store.status()['tasks']['pending'])
+        node._connected(LOCAL_WORKER)
+        self.assertEqual(1, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        self.assertEqual(0, self.incidents(node, LOCAL_WORKER)['active'])
+        self.assertTrue(node.status()['worker_attention_required'])
+        with node.store.transaction() as db:
+            event = db.execute('SELECT peer,operation,detail FROM node_events WHERE operation=?', ('worker_degraded',)).fetchone()
+            task = db.execute('SELECT input,context FROM tasks WHERE id=?', (owned['task_id'],)).fetchone()
+        self.assertIsNone(event['peer'])
+        self.assertEqual(LOCAL_WORKER, json.loads(event['detail'])['component'])
+        self.assertEqual(LOCAL_WORKER, json.loads(task['context'])['origin']['component'])
+        self.assertIn('不等于原生 Shell', task['input'])
+        self.assertNotIn('原生运行包组件缺失', task['input'])
+
+    def test_legacy_worker_fault_preserves_task_without_replay_or_peer_rewrite(self):
+        config = self.config('alice', central=True)
+        old = self.node(config)
+        task = 'maintenance-' + digest(['alice', LOCAL_WORKER, 4])
+        with old.store.transaction() as db:
+            db.execute('INSERT INTO node_incidents VALUES(?,?,?,?,?,?)',
+                       (LOCAL_WORKER, 4, 0, 'local_worker_runtime_failed', task, self.now))
+            db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
+                       (None, 'worker_failed', 'local_worker_runtime_failed', '{}', self.now))
+            db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
+                       (LOCAL_WORKER, 'link_degraded', 'local_worker_runtime_failed',
+                        json.dumps({'episode': 4, 'maintenance_task': task}), self.now))
+        node = self.node(config)
+        owned = self.incidents(node, LOCAL_WORKER, runtime=True)
+        self.assertEqual(4, owned['episode'])
+        self.assertEqual(task, owned['task_id'])
+        self.assertEqual(1, owned['active'])
+        self.assertEqual(0, self.incidents(node, LOCAL_WORKER)['active'])
+        self.assertEqual(0, node.store.status()['tasks'].get('pending', 0))
+        self.assertTrue(node.status()['worker_attention_required'])
+
+    def test_ambiguous_legacy_worker_fault_is_unknown_not_peer_reinterpreted(self):
+        for name, code in (('ambiguous', 'local_worker_runtime_failed'), ('actual-peer', 'connection_unavailable')):
+            config = self.config(name, central=True)
+            old = self.node(config)
+            with old.store.transaction() as db:
+                db.execute('INSERT INTO node_incidents VALUES(?,?,?,?,?,?)',
+                           (LOCAL_WORKER, 1, 1, code, None, self.now))
+            node = self.node(config)
+            self.assertIsNone(self.incidents(node, LOCAL_WORKER, runtime=True))
+            self.assertEqual('unknown' if name == 'ambiguous' else 'clear', node.status()['worker_incident_status'])
+            self.assertEqual(1, self.incidents(node, LOCAL_WORKER)['active'])
+            self.assertEqual(0, node.store.status()['tasks'].get('pending', 0))
+
+    def test_legacy_worker_task_event_requires_owned_failure_source(self):
+        config = self.config('alice', central=True)
+        old = self.node(config)
+        with old.store.transaction() as db:
+            db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
+                       (LOCAL_WORKER, 'link_degraded', 'local_worker_runtime_failed',
+                        json.dumps({'episode': 1, 'maintenance_task': None}), self.now))
+        node = self.node(config)
+        self.assertIsNone(self.incidents(node, LOCAL_WORKER, runtime=True))
+        self.assertEqual('unknown', node.status()['worker_incident_status'])
+
+    def test_worker_incident_write_failure_keeps_backoff_without_blocking_start(self):
+        node = self.node(self.config('alice', central=True, start_worker=True), worker_factory=UnavailableBackend)
+        with patch.object(node, '_incident', side_effect=OSError('PRIVATE_INCIDENT_WRITE')):
+            node.start()
+        self.assertEqual(1, node.store.get('node_worker_failure')['failures'])
+        self.assertTrue(node.status()['worker_attention_required'])
+        self.assertEqual('unknown', node.status()['worker_incident_status'])
+        self.assertNotIn('PRIVATE_INCIDENT_WRITE', json.dumps(node.status()))
+        node._observe_runtime(force=True)
+        self.assertEqual('unknown', node.status()['worker_incident_status'])
+        self.assertTrue(node.status()['worker_attention_required'])
+
+    def test_worker_health_rejects_prestart_stale_future_and_wrong_node_heartbeats(self):
+        class HealthyWorker:
+            def __init__(worker, *args, **kwargs):
+                worker.stop = threading.Event()
+            def run(worker):
+                worker.stop.wait(5)
+        node = self.node(self.config('alice', central=True, start_worker=True), worker_factory=HealthyWorker)
+        node._incident(LOCAL_WORKER, 'local_worker_runtime_failed', runtime=True)
+        node.start()
+        node.worker_started_at -= 31
+        node.store.heartbeat('other-node', ['agent'])
+        node._worker_healthy()
+        self.assertFalse(node.worker_health_recorded)
+        node.store.heartbeat('alice', ['agent', 'mesh.node:alice', 'leader'])
+        for seen in (node.worker_started_clock - 1, self.now - 61, self.now + 1):
+            with node.store.transaction() as db:
+                db.execute('UPDATE nodes SET seen=? WHERE id=?', (seen, 'alice'))
+            node._worker_healthy()
+            self.assertFalse(node.worker_health_recorded)
+            self.assertEqual(1, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        node.store.heartbeat('alice', ['agent', 'mesh.node:alice', 'leader'])
+        node._worker_healthy()
+        self.assertTrue(node.worker_health_recorded)
+        self.assertEqual(0, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        node._worker_healthy()
+        with node.store.transaction() as db:
+            self.assertEqual(1, db.execute("SELECT COUNT(*) FROM node_events WHERE operation='worker_recovered'").fetchone()[0])
+
+    def test_old_recovered_worker_incident_cannot_hide_new_optional_write_failure(self):
+        node = self.node(self.config('alice', central=True))
+        node._incident(LOCAL_WORKER, 'local_worker_runtime_failed', runtime=True)
+        with node.store.transaction() as db:
+            db.execute('UPDATE node_runtime_incidents SET active=0 WHERE peer=?', (LOCAL_WORKER,))
+        with patch.object(node, '_incident', side_effect=OSError('PRIVATE_NEW_INCIDENT_WRITE')):
+            node._worker_failed(ValueError('PRIVATE_FAILURE'))
+        node._observe_runtime(force=True)
+        self.assertEqual(0, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        self.assertEqual(1, node.store.get('node_worker_failure')['failures'])
+        self.assertEqual('unknown', node.status()['worker_incident_status'])
+        self.assertTrue(node.status()['worker_attention_required'])
+        self.assertNotIn('PRIVATE_', json.dumps(node.status()))
+
+    def test_optional_worker_status_meta_failure_never_stops_healthy_child(self):
+        class HealthyWorker:
+            def __init__(worker, *args, **kwargs):
+                worker.stop = threading.Event()
+            def run(worker):
+                worker.stop.wait(5)
+        node = self.node(self.config('alice', central=True, start_worker=True), worker_factory=HealthyWorker)
+        node.start()
+        get = node.store.get
+        def fail_worker_meta(key, *args):
+            if key == 'node_worker_failure':
+                raise OSError('PRIVATE_WORKER_META')
+            return get(key, *args)
+        with patch.object(node.store, 'get', side_effect=fail_worker_meta):
+            snapshot = node.step()
+        self.assertTrue(node.worker_thread.is_alive())
+        self.assertFalse(node.worker.stop.is_set())
+        self.assertEqual('unknown', snapshot['worker_incident_status'])
+        self.assertTrue(snapshot['worker_attention_required'])
+        self.assertNotIn('PRIVATE_WORKER_META', json.dumps(snapshot))
+
+    def test_failure_generation_blocks_old_heartbeat_from_clearing_new_failure(self):
+        class HealthyWorker:
+            def __init__(worker, *args, **kwargs):
+                worker.stop = threading.Event()
+            def run(worker):
+                worker.stop.wait(5)
+        node = self.node(self.config('alice', central=True, start_worker=True), worker_factory=HealthyWorker)
+        node.start()
+        node.store.heartbeat('alice', ['agent', 'mesh.node:alice', 'leader'])
+        node.worker_started_at -= 31
+        node._worker_failed(ValueError('PRIVATE_NEW_FAILURE'))
+        node._worker_healthy()
+        self.assertEqual(1, node.store.get('node_worker_failure')['failures'])
+        self.assertEqual(1, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        self.assertFalse(node.worker_health_recorded)
+
+    def test_optional_worker_recovery_write_failure_keeps_native_child_and_retries(self):
+        class HealthyWorker:
+            def __init__(worker, *args, **kwargs):
+                worker.stop = threading.Event()
+            def run(worker):
+                worker.stop.wait(5)
+        node = self.node(self.config('alice', central=True, start_worker=True), worker_factory=HealthyWorker)
+        node._incident(LOCAL_WORKER, 'local_worker_runtime_failed', runtime=True)
+        node.start()
+        node.store.heartbeat('alice', ['agent', 'mesh.node:alice', 'leader'])
+        node.worker_started_at -= 31
+        transaction = node.store.transaction
+        class AdvisoryFailure:
+            def __init__(proxy, db):
+                proxy.db = db
+            def execute(proxy, statement, *args):
+                if statement.startswith('UPDATE node_runtime_incidents SET active=0'):
+                    raise OSError('PRIVATE_RECOVERY_WRITE')
+                return proxy.db.execute(statement, *args)
+        @contextlib.contextmanager
+        def fail_recovery():
+            with transaction() as db:
+                yield AdvisoryFailure(db)
+        with patch.object(node.store, 'transaction', side_effect=fail_recovery):
+            node._worker_healthy()
+        self.assertTrue(node.worker_thread.is_alive())
+        self.assertFalse(node.worker.stop.is_set())
+        self.assertFalse(node.worker_health_recorded)
+        self.assertEqual(1, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        self.assertEqual('unknown', node.status()['worker_incident_status'])
+        node._worker_healthy()
+        self.assertTrue(node.worker_health_recorded)
+        self.assertEqual(0, self.incidents(node, LOCAL_WORKER, runtime=True)['active'])
+        self.assertEqual('clear', node.status()['worker_incident_status'])
 
     def test_cli_runner_rechecks_private_config_before_start(self):
         config = self.config('bob', central=True)

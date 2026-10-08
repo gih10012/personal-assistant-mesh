@@ -29,6 +29,7 @@ from .worker import Client, Worker
 # The component label is stored in a separate table. Mesh identifiers accept
 # any non-control text, so no printable prefix can reserve a safe namespace.
 LOCAL_RUNTIME = '@local-runtime'
+LOCAL_WORKER = 'local-worker'
 
 
 class PeerContractError(ValueError):
@@ -152,11 +153,15 @@ class Node:
                 db.execute(statement)
         self.runtime_legacy_unknown = False
         self._initialize_runtime_observer()
+        self.worker_legacy_unknown = False
+        self._initialize_worker_observer()
         self.stop_event, self.server_ready = threading.Event(), threading.Event()
         self.server, self.server_thread, self.worker, self.worker_thread = None, None, None, None
         self.server_error, self.runtime_config_path = None, None
         self.lock_file = None
         self.worker_started_at, self.worker_started_clock, self.worker_health_recorded = None, None, False
+        self.worker_state_lock = threading.Lock()
+        self.worker_failure_generation, self.worker_started_generation = 0, None
         self.runtime_observation, self.runtime_next_observation = None, 0
         self.runtime_observation_persisted = False
         self.verified = set()
@@ -201,9 +206,46 @@ class Node:
             db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
                        (peer, operation, code, canonical(detail or {}), self.store.clock()))
 
+    def _initialize_worker_observer(self):
+        """Migrate only evidenced owned-Worker failures, never same-name peers.
+
+        Legacy reconnect events could refer to either a peer or the Worker;
+        they cannot prove recovery. Preserve the original maintenance task
+        reference without creating, changing or replaying that task.
+        """
+        self.worker_legacy_unknown = True
+        try:
+            with self.store.transaction() as db:
+                db.execute('''CREATE TABLE IF NOT EXISTS node_runtime_incidents(
+                    peer TEXT PRIMARY KEY, episode INTEGER NOT NULL, active INTEGER NOT NULL,
+                    code TEXT NOT NULL, task_id TEXT, updated REAL NOT NULL)''')
+                current = db.execute('SELECT * FROM node_runtime_incidents WHERE peer=?', (LOCAL_WORKER,)).fetchone()
+                if current is None:
+                    event = db.execute('''SELECT sequence,detail,created FROM node_events WHERE peer=?
+                        AND operation=? AND code=? ORDER BY sequence DESC LIMIT 1''',
+                        (LOCAL_WORKER, 'link_degraded', 'local_worker_runtime_failed')).fetchone()
+                    if event:
+                        detail = json.loads(event['detail'])
+                        episode, task = detail.get('episode'), detail.get('maintenance_task')
+                        failed = db.execute('''SELECT 1 FROM node_events WHERE peer IS NULL
+                            AND operation=? AND code=? AND sequence<? LIMIT 1''',
+                            ('worker_failed', 'local_worker_runtime_failed', event['sequence'])).fetchone()
+                        if (not failed or not isinstance(episode, int) or isinstance(episode, bool) or episode < 1
+                                or (task is not None and task != 'maintenance-' + digest([self.node_id, LOCAL_WORKER, episode]))):
+                            raise ValueError('worker_legacy_evidence_ambiguous')
+                        db.execute('INSERT INTO node_runtime_incidents VALUES(?,?,?,?,?,?)',
+                                   (LOCAL_WORKER, episode, 1, 'local_worker_runtime_failed', task, event['created']))
+                    elif db.execute('SELECT 1 FROM node_incidents WHERE peer=? AND code=?',
+                                    (LOCAL_WORKER, 'local_worker_runtime_failed')).fetchone():
+                        raise ValueError('worker_legacy_evidence_ambiguous')
+            self.worker_legacy_unknown = False
+        except Exception:
+            pass  # optional attention bookkeeping must not block native work
+
     def _incident(self, peer, code, runtime=False):
         """One local maintenance task per failure episode, not each retry."""
         table = 'node_runtime_incidents' if runtime else 'node_incidents'
+        owned_worker = runtime and peer == LOCAL_WORKER
         with self.store.transaction() as db:
             previous = db.execute('SELECT * FROM ' + table + ' WHERE peer=?', (peer,)).fetchone()
             first = previous is None or not previous['active']
@@ -218,7 +260,11 @@ class Node:
                            'authority': 'local:' + self.node_id,
                            'origin': dict({'kind': 'node-maintenance', 'episode': episode},
                                           **({'component': peer} if runtime else {'peer': peer}))}
-                subject = ('诊断本节点原生运行包组件缺失（' + code + '）。'
+                subject = ('诊断本节点自有 Worker 启动失败或意外退出（' + code + '）。'
+                           '先核对实际执行器、启动配置和日志；自有 Worker 稳定运行与认证心跳仅证明进程恢复，'
+                           '不等于原生 Shell、模型或联网能力已恢复，相关能力须真实执行验收。'
+                           if owned_worker else
+                           '诊断本节点原生运行包组件缺失（' + code + '）。'
                            '先使用本节点 runtime_diagnose/运行包维护 CLI 核对实际布局与可用执行器；'
                            '坏 Shell 不能冒称执行了修复。有其它本人已授权的可用节点/原生路径时可请求其协助，'
                            '没有可用执行路径则保留故障证据并联系本人。修复布局不等于执行恢复，须真实执行验收。'
@@ -238,7 +284,8 @@ class Node:
                             self.store.clock(), canonical(context), context['session_scope']))
             if first or previous['code'] != code:
                 db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
-                       (None if runtime else peer, 'runtime_layout_degraded' if runtime else 'link_degraded',
+                       (None if runtime else peer, ('worker_degraded' if owned_worker else 'runtime_layout_degraded')
+                        if runtime else 'link_degraded',
                         code, canonical(dict({'episode': episode, 'maintenance_task': task_id},
                                              **({'component': peer} if runtime else {}))), self.store.clock()))
             db.execute('INSERT OR REPLACE INTO ' + table + ' VALUES(?,?,?,?,?,?)',
@@ -467,6 +514,8 @@ class Node:
         self.runtime_next_observation = time.monotonic() + 30
         if self.runtime_legacy_unknown:
             self._initialize_runtime_observer()
+        if self.worker_legacy_unknown:
+            self._initialize_worker_observer()
         try:
             path = self.runtime_config_path or self.config['local_worker_config']
             configured = private_json(path)
@@ -500,8 +549,13 @@ class Node:
             self.runtime_observation = dict(report, persistence_error='runtime_observation_record_failed')
 
     def _worker_failed(self, exc):
+        with self.worker_state_lock:
+            self._record_worker_failure(exc)
+
+    def _record_worker_failure(self, exc):
         if self.stop_event.is_set():
             return
+        self.worker_failure_generation += 1
         # Exception strings can contain credential-bearing URLs. Store only
         # typed codes and source locations, never repr(exc) or argument values.
         with self.store.transaction() as db:
@@ -514,7 +568,10 @@ class Node:
             failures = previous['failures'] + 1
             self.store._set(db, 'node_worker_failure', {'failures': failures,
                             'retry_at': self.store.clock() + min(300, 2 ** min(failures, 8))})
-        self._incident('local-worker', 'local_worker_runtime_failed')
+        try:
+            self._incident(LOCAL_WORKER, 'local_worker_runtime_failed', runtime=True)
+        except Exception:
+            self.worker_legacy_unknown = True
 
     def _ensure_worker(self):
         if not self.start_worker or self.stop_event.is_set():
@@ -531,22 +588,47 @@ class Node:
         except Exception as exc:
             self._worker_failed(exc)
             return
-        self.worker_thread = threading.Thread(target=self._worker_main)
-        self.worker_thread.daemon = True
-        self.worker_started_at, self.worker_started_clock = time.monotonic(), self.store.clock()
-        self.worker_health_recorded = False
-        self.worker_thread.start()
+        with self.worker_state_lock:
+            self.worker_thread = threading.Thread(target=self._worker_main)
+            self.worker_thread.daemon = True
+            self.worker_started_at, self.worker_started_clock = time.monotonic(), self.store.clock()
+            self.worker_started_generation = self.worker_failure_generation
+            self.worker_health_recorded = False
+            self.worker_thread.start()
 
     def _worker_healthy(self):
-        if self.worker_health_recorded or time.monotonic() - self.worker_started_at < 30:
+        with self.worker_state_lock:
+            self._record_worker_health()
+
+    def _record_worker_health(self):
+        if (self.worker_health_recorded or not self.worker_thread or not self.worker_thread.is_alive()
+                or self.worker_started_generation != self.worker_failure_generation
+                or time.monotonic() - self.worker_started_at < 30):
             return
         with self.store.transaction() as db:
             node = db.execute('SELECT seen FROM nodes WHERE id=?', (self.node_id,)).fetchone()
-            if not node or node['seen'] < self.worker_started_clock or node['seen'] <= self.store.clock() - 60:
+            now = self.store.clock()
+            if (not node or node['seen'] < self.worker_started_clock
+                    or node['seen'] <= now - 60 or node['seen'] > now):
                 return
             self.store._set(db, 'node_worker_failure', {'failures': 0, 'retry_at': 0})
-        self.worker_health_recorded = True
-        self._connected('local-worker')
+        try:
+            with self.store.transaction() as db:
+                incident = db.execute('SELECT * FROM node_runtime_incidents WHERE peer=?', (LOCAL_WORKER,)).fetchone()
+                if incident and incident['active']:
+                    db.execute('UPDATE node_runtime_incidents SET active=0,updated=? WHERE peer=?',
+                               (self.store.clock(), LOCAL_WORKER))
+                    db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
+                               (None, 'worker_recovered', 'owned_worker_heartbeat',
+                                canonical({'component': LOCAL_WORKER, 'episode': incident['episode'],
+                                           'execution_verified': False}), self.store.clock()))
+            self.worker_health_recorded = True
+            if incident is not None:
+                self.worker_legacy_unknown = False
+        except Exception:
+            self.worker_legacy_unknown = True
+            # Keep retrying optional recovery bookkeeping while this owned
+            # Worker stays healthy. Never settle a peer or a Shell incident.
 
     def start(self):
         if self.started:
@@ -614,13 +696,22 @@ class Node:
     def status(self):
         links = self.network.links()
         incident, incident_unknown = None, self.runtime_legacy_unknown
+        worker_incident, worker_unknown = None, self.worker_legacy_unknown
         try:
             with self.store.transaction() as db:
                 incident = db.execute('SELECT active FROM node_runtime_incidents WHERE peer=?', (LOCAL_RUNTIME,)).fetchone()
+                worker_incident = db.execute('SELECT active FROM node_runtime_incidents WHERE peer=?', (LOCAL_WORKER,)).fetchone()
         except Exception:
             # This optional telemetry read must not stop the owned native
             # child. Core authority/lease errors elsewhere remain failures.
             incident_unknown = True
+            worker_unknown = True
+        try:
+            worker_failures = self.store.get('node_worker_failure', {}).get('failures', 0)
+        except Exception:
+            worker_failures, worker_unknown = 0, True
+        if worker_failures and (worker_incident is None or not worker_incident['active']):
+            worker_unknown = True  # a failed optional write is not recovery
         return {'node': self.node_id, 'mode': links['mode'], 'links': links['links'],
                 'a2a_reachable': any(link['kind'] == 'a2a' and link['reachable'] for link in links['links']),
                 'leader_reachable': any(link['leader_available'] for link in links['links']),
@@ -638,6 +729,10 @@ class Node:
                     for runtime in (self.runtime_observation or {}).get('runtimes', [])
                     if isinstance(runtime, dict))),
                 'runtime_execution_verified': False,
+                'worker_incident_status': 'unknown' if worker_unknown else (
+                    'active' if worker_incident and worker_incident['active'] else 'clear'),
+                'worker_attention_required': bool(worker_unknown or (worker_incident and worker_incident['active'])
+                    or worker_failures),
                 'model_availability': 'not_verified_by_transport', 'observed': self.store.clock()}
 
     def run_forever(self):

@@ -163,6 +163,21 @@ Shell 已恢复。观测不自动切包、联网、消耗模型额度或重放�
 证据含糊则标 unknown，不将合法同名 peer 改作内部组件、不删历史或
 重放任务。可选 schema/migration 失败也不停止原生 Worker。
 
+自有 Worker 的启动失败/意外退出同样使用独立组件记录（`local-worker`），
+不与合法同名 A2A peer 共用故障、维护任务或恢复事件。节点状态分别报告
+`worker_incident_status` / `worker_attention_required` 和运行包组件的
+`runtime_incident_status` / `runtime_attention_required`。监督器拥有的同一代
+Worker 存活至少 30 秒，并且收到本次启动后、最近 60 秒内且不在未来的
+本节点认证心跳，才可清其启动故障。故障与恢复串行登记，失败 generation
+防止旧健康检查抹掉新失败；这个恢复**不证明 Shell、模型或网络已验证**，
+不清运行包故障或 peer 故障。外部 Worker companion 不冒称拥有该进程。
+
+旧 Worker 故障只凭固定事件链、episode 和原维护任务身份保守迁移；不改
+旧 peer 行、不创建/重放旧任务，含糊证据保持 unknown。可选记账失败时，
+即使旧组件行是已恢复也不能掩盖新失败；状态查询/恢复记账错误不关闭
+健康原生 Worker。核心 authority/任务租约和启动退避错误不被这些
+可选观察的异常处理吞掉。
+
 常驻 Worker 的真实执行验收使用已有 authority，不创建独立 Codex：
 
 ```sh
