@@ -22,52 +22,57 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path, self.clock = str(path), clock
         with self.transaction() as db:
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY, body TEXT NOT NULL, created REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS tasks(
+            # executescript implicitly commits BEGIN IMMEDIATE. Keep schema
+            # creation, check-then-ALTER migrations and recovery in ONE writer
+            # transaction, including when several node services start at once.
+            statements = (
+                'CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+                'CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY, body TEXT NOT NULL, created REAL NOT NULL)',
+                '''CREATE TABLE IF NOT EXISTS tasks(
                     id TEXT PRIMARY KEY, parent_id TEXT, input TEXT NOT NULL, required TEXT NOT NULL,
                     status TEXT NOT NULL, node TEXT, epoch INTEGER NOT NULL DEFAULT 0,
                     deadline REAL, checkpoint TEXT NOT NULL DEFAULT '{}', result TEXT,
-                    created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
-                CREATE TABLE IF NOT EXISTS nodes(
+                    created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)''',
+                '''CREATE TABLE IF NOT EXISTS nodes(
                     id TEXT PRIMARY KEY, capabilities TEXT NOT NULL, score REAL NOT NULL,
-                    seen REAL NOT NULL, details TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS leader(
+                    seen REAL NOT NULL, details TEXT NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS leader(
                     singleton INTEGER PRIMARY KEY CHECK(singleton=1), node TEXT, epoch INTEGER NOT NULL,
-                    deadline REAL NOT NULL);
-                INSERT OR IGNORE INTO leader VALUES(1,NULL,0,0);
-                CREATE TABLE IF NOT EXISTS outbox(
+                    deadline REAL NOT NULL)''',
+                'INSERT OR IGNORE INTO leader VALUES(1,NULL,0,0)',
+                '''CREATE TABLE IF NOT EXISTS outbox(
                     id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, body TEXT NOT NULL,
                     status TEXT NOT NULL, client_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}',
-                    created REAL NOT NULL, context_version TEXT);
-                CREATE TABLE IF NOT EXISTS reservations(
+                    created REAL NOT NULL, context_version TEXT)''',
+                '''CREATE TABLE IF NOT EXISTS reservations(
                     id TEXT PRIMARY KEY, amount INTEGER NOT NULL, status TEXT NOT NULL,
-                    created REAL NOT NULL, fingerprint TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS renewals(
+                    created REAL NOT NULL, fingerprint TEXT NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS renewals(
                     id TEXT PRIMARY KEY, node TEXT NOT NULL, marker TEXT NOT NULL,
-                    status TEXT NOT NULL, created REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS memories(
-                    id TEXT PRIMARY KEY, scope TEXT NOT NULL, text TEXT NOT NULL, updated REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS agent_actions(
-                    id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, response TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS sessions(
+                    status TEXT NOT NULL, created REAL NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS memories(
+                    id TEXT PRIMARY KEY, scope TEXT NOT NULL, text TEXT NOT NULL, updated REAL NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS agent_actions(
+                    id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, response TEXT NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS sessions(
                     scope TEXT PRIMARY KEY, node TEXT NOT NULL, harness TEXT NOT NULL,
-                    state TEXT NOT NULL, artifact TEXT, updated REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS native_sessions(
+                    state TEXT NOT NULL, artifact TEXT, updated REAL NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS native_sessions(
                     scope TEXT NOT NULL, node TEXT NOT NULL, harness TEXT NOT NULL,
                     state TEXT NOT NULL, artifact TEXT, updated REAL NOT NULL,
-                    PRIMARY KEY(scope,harness));
-                CREATE TABLE IF NOT EXISTS session_chunks(
+                    PRIMARY KEY(scope,harness))''',
+                '''CREATE TABLE IF NOT EXISTS session_chunks(
                     id TEXT NOT NULL, part INTEGER NOT NULL, body BLOB NOT NULL,
-                    PRIMARY KEY(id,part));
-                CREATE TABLE IF NOT EXISTS interactions(
+                    PRIMARY KEY(id,part))''',
+                '''CREATE TABLE IF NOT EXISTS interactions(
                     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, epoch INTEGER NOT NULL,
-                    kind TEXT NOT NULL, params TEXT NOT NULL, answer TEXT, created REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS steering(
+                    kind TEXT NOT NULL, params TEXT NOT NULL, answer TEXT, created REAL NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS steering(
                     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, epoch INTEGER NOT NULL,
-                    text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
-            ''')
+                    text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending')''',
+            )
+            for statement in statements:
+                db.execute(statement)
             if 'media_items' not in [r[1] for r in db.execute('PRAGMA table_info(outbox)')]:
                 db.execute('ALTER TABLE outbox ADD COLUMN media_items TEXT')
             if 'retry_count' not in [r[1] for r in db.execute('PRAGMA table_info(outbox)')]:
@@ -94,11 +99,27 @@ class Store:
     @contextlib.contextmanager
     def transaction(self):
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute('PRAGMA journal_mode=WAL')
-        db.execute('PRAGMA busy_timeout=10000')
-        db.execute('BEGIN IMMEDIATE')
         try:
+            db.row_factory = sqlite3.Row
+            # The explicit WAL setup loop owns a single ten-second wait budget,
+            # rather than stacking SQLite's busy timeout on every retry.
+            db.execute('PRAGMA busy_timeout=0')
+            # Concurrent first opens can race on rollback->WAL conversion.
+            # SQLite may return BUSY without invoking its busy handler. Retry
+            # ONLY this setup statement, before BEGIN/yield; never replay the
+            # caller's task writes or hide a non-lock database error.
+            expires = time.monotonic() + 10
+            while True:
+                try:
+                    db.execute('PRAGMA journal_mode=WAL')
+                    break
+                except sqlite3.OperationalError as error:
+                    remaining = expires - time.monotonic()
+                    if str(error) not in ('database is locked', 'database is busy') or remaining <= 0:
+                        raise
+                    time.sleep(min(0.05, remaining))
+            db.execute('PRAGMA busy_timeout=10000')
+            db.execute('BEGIN IMMEDIATE')
             yield db
             db.commit()
         except BaseException:

@@ -295,3 +295,38 @@ rollout、数据库或认证文件。默认 observe 只读复查同一个固定 
 agent 与 CLI 入口和固定分类候选诊断；617 项全套本机测试通过。
 容量/回执测试包括真实 loopback HTTP 认证，但不是实际工具执行；
 provider adapter 和独立结果验证继续实现，不把这些回执计为完成。
+
+### 同轮正式版本部署与启动竞态
+
+`06cf088` 的同一冻结源码在本机 Python 3.14 和云端 Python 3.6.8
+分别通过 617 项完整测试，公开
+[GitHub CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37811446369)
+实际 success。之后才在无 running 任务、无 submitting 消息的边界更新
+正式云端 authority/worker/companion 与笔记本 node/worker。正式升级
+与上面的隔离接管是两个阶段：升级时唯一接收器确实有一次受控重启，
+不能把隔离验收阶段的“不重启接收器”延伸为全轮声明。
+
+部署前一致 SQLite 备份与云端旧源码完整保留；升级后云端原有
+12 completed / 5 failed 任务、笔记本 4 completed 任务没有改写。
+原有 27 accepted 消息记录保留；随后发出的唯一阶段通知有稳定防重
+ID，按同 ID 查询确认服务 accepted，累计为 28 accepted，但手机收件
+未独立验证。私有 Unix reverse tunnel 保持原进程，不新增公开入口，
+也没有使用阿里云控制台或 EaseCation RAM 账号。
+
+正式服务同时启动时，cloud companion 首次遇到 SQLite
+`database schema has changed`，systemd 在既有退避规则下重启一次
+后恢复。这是实际暴露的初始化竞态，不能把 active 状态当作没有故障。
+根因是 `executescript` 隐式提交已有 writer transaction，使 DDL 与
+check-then-ALTER 迁移不再原子。后续修复改为同一事务内逐条静态 SQL，
+并保证 setup 失败关闭连接；只对 WAL 设置已知锁错误用单一十秒预算
+重试，不重放任何业务 SQL。新增 14 项测试包括真实 8-thread / 6-spawn-
+process 冷启动与旧表迁移、失败回滚、历史保留和 setup 关闭连接。
+
+同时新增可选的 owner-installed provider callback 库与 28 项测试，
+包含真实本地 SHA 读取、loopback HTTP、子进程退出后不重放和结算
+响应丢失后的同 ID 恢复。这些本地测试不证明两台宿主的实际受管能力
+执行或独立性能验证，也不把库误称为常驻全网调度器。原生 Shell、
+MCP、联网与文件功能不受新增 callback journal 限制。
+
+修复后的本机 Python 3.14.7 完整回归为 659 项通过；云端兼容性和
+这一后续版本的正式部署须分别核验，不从本机测试结果推断。

@@ -36,8 +36,26 @@ python3 -m assistant_mesh.cli --config /PRIVATE/worker.json allocation --action 
 
 owner 操作：define_pool、renew_pool、revoke_pool、bind_pool、expire。认证节点可读其允许范围及使用 reserve、inspect、pending、accept、start、unknown、settle、decline、cancel；core 再校验 provider 或原 actor。viewer 没有此变更入口。
 
+## 宿主安装的 provider 执行桥
+
+`assistant_mesh.provider.ManagedProvider` 提供可由宿主安装的 callback 桥：owner 绑定固定 handle、capability epoch、action 和 Python callable；模型的 plan 不能安装/替换它，也不会作为 Shell 源码执行。scope/workload 在调用前再与认证 authority 的实际 plan 核对。
+
+provider 使用独立私有本地 SQLite journal，绑定稳定 authority/provider 身份；同 operation/capability 使用文件锁。accept/start/invocation intent 在对应 RPC/调用前落盘，只有本次新 `start.execute_once=true` 才首次调用 callback。重启、请求超时、active/unknown marker 都不会自动再调用。实际 callback 的结果和静止声明先落盘，随后才结算；结算响应丢失可按原 ID 重报已记录的结果，不重做工具操作。
+
+```python
+from assistant_mesh.provider import Adapter, ManagedProvider
+
+# owner_callback 是宿主自行安装的函数，不从模型输入 eval/import。
+provider = ManagedProvider(provider_client, "/PRIVATE/provider.sqlite", "node:cloud",
+    {"installed-capability": Adapter("installed-version-1", 1, "compute", owner_callback)},
+    authority_id="stable-owned-authority")
+provider.run_pending()
+```
+
+callback 必须自行实现有界执行，并返回实际 result_reference 与 resource_quiescent；异常、超时或 PID 消失都不能代替它。`local_invocation_intent_recorded` 与 `local_invocation_started` 分开，未知 intent 不假报已调用。所有结果仍标 `provider_reported`，独立验证为 false。
+
 ## 必须继续实现和验收
 
-现在没有自动创建子任务或执行模型提交的命令。下一段必须把 journal 接入真正的 provider adapter 和效果账本：稳定 ID 的实际 admission/start、活进程/已产出结果的核对、静止证据、独立结果验证，以及组合路径的逐跳失败恢复。请求超时不证明未执行，不能换 operation ID 重做。
+这是一项宿主库，还未默认接入 Node 常驻自动执行，也没有自动创建原账本子任务或执行未批准的模型命令。下一段必须接通各节点实际安装/版本升级、真正能力执行和独立结果验证、进程/产出核对，以及组合路径的逐跳失败恢复。请求超时不证明未执行，不能换 operation ID 重做。
 
 尚未宣称：分布式多权威容量一致性、真正最佳调度、实时 CPU/GPU 强制配额、迁移未决外部效果、独立验证 provider 的结果。真实计量和资源适配器也不能仅凭 unit fixtures 或 HTTP 回执标为完成。

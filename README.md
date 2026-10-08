@@ -26,7 +26,7 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 - 复用已有 Codex 认证，从账户实时模型目录选择，不要求在面板粘贴 API Key。
 - 项目只读观察 API、viewer/operator 权限分离。浏览器鉴权由 Dots 产品层处理。
 - 资源/算力/性能/工具/连接的开放能力目录、租约、证据指标、资源图、exact scope/action 远端授权与审计；provider 声明不等于验证。
-- 模型选择能力/路径后的事务型共享容量预留、provider 接收/启动/未知/结算回执；只有受管 Mesh 合同受此管控，不接管原生工具。实际执行适配器仍待接通，见 [共享容量与回执合同](docs/MANAGED-ALLOCATIONS.md)。
+- 模型选择能力/路径后的事务型共享容量预留、provider 接收/启动/未知/结算回执；宿主可安装固定版本 callback 和持久执行 journal。只有受管 Mesh 合同受此管控，不接管原生工具；常驻自动调度与真实跨节点能力执行仍待接通，见 [共享容量与回执合同](docs/MANAGED-ALLOCATIONS.md)。
 - 统一的 `mesh(action, arguments)` 额外工具入口；旧 `mesh_*` 保留，连续旧线程不重建。见 [模型入口合同](docs/MESH-GATEWAY.md)。
 - 独立节点 authority/worker、断网本地任务、持续 native 子 agent、持久重连退避与去重维护任务。
 - A2A 远端代理 child 回到原父账本并自动续接；SSH 另有执行 journal，未知结果不重放。当前自有 `mesh-a2a/1`，不冒称标准 A2A 兼容。

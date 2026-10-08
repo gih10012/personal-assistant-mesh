@@ -41,33 +41,37 @@ class Network:
     def __init__(self, store, node_id):
         self.store, self.node_id = store, identifier(node_id)
         with store.transaction() as db:
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS mesh_links(
+            # Static statements preserve Store's writer transaction. A script
+            # would implicitly commit it before issuing the first CREATE.
+            statements = (
+                '''CREATE TABLE IF NOT EXISTS mesh_links(
                     peer TEXT NOT NULL, kind TEXT NOT NULL, failures INTEGER NOT NULL,
                     retry_at REAL NOT NULL, seen REAL, deadline REAL NOT NULL,
                     state TEXT NOT NULL, leader TEXT, authority TEXT,
                     leader_epoch INTEGER NOT NULL DEFAULT 0, latency_ms REAL,
-                    PRIMARY KEY(peer,kind));
-                CREATE TABLE IF NOT EXISTS mesh_messages(
+                    PRIMARY KEY(peer,kind))''',
+                '''CREATE TABLE IF NOT EXISTS mesh_messages(
                     sender TEXT NOT NULL, message_id TEXT NOT NULL,
                     fingerprint TEXT NOT NULL, task_id TEXT NOT NULL,
-                    created REAL NOT NULL, PRIMARY KEY(sender,message_id));
-                CREATE TABLE IF NOT EXISTS mesh_deliveries(
+                    created REAL NOT NULL, PRIMARY KEY(sender,message_id))''',
+                '''CREATE TABLE IF NOT EXISTS mesh_deliveries(
                     peer TEXT NOT NULL, message_id TEXT NOT NULL,
                     fingerprint TEXT NOT NULL, body TEXT NOT NULL,
                     state TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
                     deadline REAL NOT NULL DEFAULT 0, response TEXT,
-                    created REAL NOT NULL, PRIMARY KEY(peer,message_id));
-                CREATE TABLE IF NOT EXISTS mesh_executions(
+                    created REAL NOT NULL, PRIMARY KEY(peer,message_id))''',
+                '''CREATE TABLE IF NOT EXISTS mesh_executions(
                     peer TEXT NOT NULL, request_id TEXT NOT NULL,
                     fingerprint TEXT NOT NULL, state TEXT NOT NULL,
                     result TEXT, created REAL NOT NULL,
-                    PRIMARY KEY(peer,request_id));
-                CREATE TABLE IF NOT EXISTS mesh_reports(
+                    PRIMARY KEY(peer,request_id))''',
+                '''CREATE TABLE IF NOT EXISTS mesh_reports(
                     sender TEXT NOT NULL, report_id TEXT NOT NULL,
                     fingerprint TEXT NOT NULL, body TEXT NOT NULL,
-                    created REAL NOT NULL, PRIMARY KEY(sender,report_id));
-            ''')
+                    created REAL NOT NULL, PRIMARY KEY(sender,report_id))''',
+            )
+            for statement in statements:
+                db.execute(statement)
 
     def probe_due(self, peer, kind='a2a'):
         self._link_key(peer, kind)
