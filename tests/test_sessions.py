@@ -1,7 +1,10 @@
 import base64
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from assistant_mesh.store import Store, Conflict
 from assistant_mesh import sessions
@@ -45,12 +48,164 @@ class SessionTests(unittest.TestCase):
 
     def test_native_artifact_roundtrip_without_prompt_summarization(self):
         original = Path(self.temp.name) / 'native.jsonl'
-        data = b'{"type":"session_meta","payload":{"id":"native-id"}}\n' + b'{"type":"compacted","native":true}\n' * 20000
+        identity = '01a116fc-8aae-7001-a0e2-07a1073c5bcb'
+        data = self.native_data(identity) + b'{"type":"compacted","native":true}\n' * 20000
         original.write_bytes(data)
-        sessions.save(self, self.task, 'n', 'codex', {'thread_id': 'native-id'}, original)
-        restored = sessions.restore(self, self.task, Path(self.temp.name) / 'import')
+        self.task['checkpoint'] = {'thread_id': identity, 'harness': 'codex'}
+        sessions.save(self, self.task, 'n', 'codex', {'thread_id': identity}, original)
+        restored = sessions.restore(self, self.task, Path(self.temp.name) / 'sessions')
         self.assertEqual(data, Path(restored).read_bytes())
         self.assertEqual(0o600, Path(restored).stat().st_mode & 0o777)
+        self.assertEqual('rollout-2026-10-07T12-13-14-' + identity + '.jsonl', Path(restored).name)
+        self.assertEqual(data, Path(sessions.restore(self, self.task, Path(self.temp.name) / 'sessions')).read_bytes())
+
+    def native_data(self, identity='01a116fc-8aae-7001-a0e2-07a1073c5bcb'):
+        return (json.dumps({'type': 'session_meta', 'payload': {'id': identity,
+            'timestamp': '2026-10-07T12:13:14.123Z', 'history_mode': 'paginated'}}) + '\n').encode()
+
+    def prepare_artifact(self, data=None):
+        identity = '01a116fc-8aae-7001-a0e2-07a1073c5bcb'
+        self.task['checkpoint'] = {'thread_id': identity, 'harness': 'codex'}
+        original = Path(self.temp.name) / 'selected.jsonl'
+        original.write_bytes(data or self.native_data())
+        sessions.save(self, self.task, 'n', 'codex', {'thread_id': identity}, original)
+        return Path(self.temp.name) / 'sessions'
+
+    def test_selected_id_and_metadata_must_match(self):
+        folder = self.prepare_artifact(self.native_data('01a116fc-8aae-7001-a0e2-07a1073c5bcc'))
+        with self.assertRaisesRegex(ValueError, 'thread_mismatch'):
+            sessions.restore(self, self.task, folder)
+        self.assertEqual([], list(folder.rglob('*.jsonl')))
+
+    def test_metadata_and_selected_identity_fail_closed(self):
+        folder = self.prepare_artifact(b'{"type":"session_meta","payload":{"id":"bad"}}\n')
+        self.task['checkpoint'] = {'thread_id': 'bad'}
+        with self.assertRaisesRegex(ValueError, 'selected_thread_required'):
+            sessions.restore(self, self.task, folder)
+        self.store.update_task(self.task['id'], 'n', self.task['epoch'], status='completed')
+        self.store.create_task('next validation')
+        self.task = self.store.claim('n')
+        self.task.pop('session', None)
+        self.task.pop('sessions', None)
+        self.task['checkpoint']['thread_id'] = '01a116fc-8aae-7001-a0e2-07a1073c5bcb'
+        folder = self.prepare_artifact(b'{"type":"unexpected"}\n')
+        with self.assertRaisesRegex(ValueError, 'metadata_invalid'):
+            sessions.restore(self, self.task, folder)
+
+    def test_import_cannot_overwrite_newer_native_history(self):
+        folder = self.prepare_artifact()
+        destination = Path(sessions.restore(self, self.task, folder))
+        newer = destination.read_bytes() + b'{"type":"new_native_turn"}\n'
+        destination.write_bytes(newer)
+        with self.assertRaisesRegex(ValueError, 'destination_conflict'):
+            sessions.restore(self, self.task, folder)
+        self.assertEqual(newer, destination.read_bytes())
+
+    def test_import_refuses_symlink_destination_and_wrong_root(self):
+        folder = self.prepare_artifact()
+        destination = Path(sessions.restore(self, self.task, folder))
+        target = Path(self.temp.name) / 'untouched.jsonl'
+        target.write_bytes(b'untouched')
+        destination.unlink()
+        destination.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, 'destination_unsafe'):
+            sessions.restore(self, self.task, folder)
+        self.assertEqual(b'untouched', target.read_bytes())
+        with self.assertRaisesRegex(ValueError, 'sessions_directory_required'):
+            sessions.restore(self, self.task, Path(self.temp.name) / 'random-import')
+
+    def test_restore_requires_absolute_paths_for_both_harnesses(self):
+        self.prepare_artifact()
+        for harness, folder in (('codex', Path('sessions')), ('pi', Path('pi-native'))):
+            with self.assertRaisesRegex(ValueError, 'restore_absolute_path_required'):
+                sessions.restore(self, self.task, folder, harness=harness)
+        folder = Path(self.temp.name) / '..' / Path(self.temp.name).name / 'sessions'
+        with self.assertRaisesRegex(ValueError, 'restore_absolute_path_required'):
+            sessions.restore(self, self.task, folder)
+
+    def test_restore_rejects_symlink_auth_home_ancestor_before_writing(self):
+        self.prepare_artifact()
+        actual = Path(self.temp.name) / 'actual-auth-home'
+        actual.mkdir(mode=0o700)
+        alias = Path(self.temp.name) / 'linked-auth-home'
+        alias.symlink_to(actual, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'restore_ancestor_symlink'):
+            sessions.restore(self, self.task, alias / 'sessions')
+        self.assertFalse((actual / 'sessions').exists())
+
+    def test_restore_rejects_symlink_date_directory_and_cleans_stage(self):
+        folder = self.prepare_artifact()
+        folder.mkdir(mode=0o700)
+        target = Path(self.temp.name) / 'unrelated-date-directory'
+        target.mkdir(mode=0o700)
+        (folder / '2026').symlink_to(target, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'directory_unsafe'):
+            sessions.restore(self, self.task, folder)
+        self.assertEqual([], list(target.iterdir()))
+        self.assertEqual([], list(folder.glob('native-rollout-*')))
+
+    def test_restore_rejects_nonsticky_writable_ancestor_without_chmod(self):
+        self.prepare_artifact()
+        ancestor = Path(self.temp.name) / 'unsafe-shared'
+        ancestor.mkdir(mode=0o700)
+        for mode in (0o777, 0o775, 0o770):
+            ancestor.chmod(mode)
+            try:
+                with self.assertRaisesRegex(ValueError, 'restore_ancestor_unsafe'):
+                    sessions.restore(self, self.task, ancestor / 'new-auth-home' / 'sessions')
+                self.assertEqual(mode, ancestor.stat().st_mode & 0o7777)
+                self.assertFalse((ancestor / 'new-auth-home').exists())
+            finally:
+                ancestor.chmod(0o700)
+
+    def test_restore_accepts_sticky_shared_ancestor_and_private_child(self):
+        self.prepare_artifact()
+        ancestor = Path(self.temp.name) / 'sticky-shared'
+        ancestor.mkdir(mode=0o700)
+        ancestor.chmod(0o1777)
+        auth_home = ancestor / 'owner-private-auth'
+        auth_home.mkdir(mode=0o700)
+        restored = Path(sessions.restore(self, self.task, auth_home / 'sessions'))
+        self.assertEqual(self.native_data(), restored.read_bytes())
+        self.assertEqual(0o1777, ancestor.stat().st_mode & 0o7777)
+        self.assertEqual(0o700, auth_home.stat().st_mode & 0o7777)
+        self.assertEqual(0o600, restored.stat().st_mode & 0o7777)
+
+    def test_restore_preserves_existing_0755_native_directories(self):
+        self.prepare_artifact()
+        auth_home = Path(self.temp.name) / 'existing-auth-home'
+        folder = auth_home / 'sessions'
+        folder.mkdir(mode=0o755, parents=True)
+        auth_home.chmod(0o755)
+        folder.chmod(0o755)
+        restored = Path(sessions.restore(self, self.task, folder))
+        self.assertEqual(0o755, auth_home.stat().st_mode & 0o7777)
+        self.assertEqual(0o755, folder.stat().st_mode & 0o7777)
+        self.assertEqual(0o600, restored.stat().st_mode & 0o7777)
+
+    def test_restore_rejects_foreign_owned_ancestor_even_if_not_writable(self):
+        self.prepare_artifact()
+        ancestor = Path(self.temp.name) / 'foreign-controlled'
+        ancestor.mkdir(mode=0o755)
+        original = Path.lstat
+        def foreign_owner(path):
+            metadata = original(path)
+            if path == ancestor:
+                fields = list(metadata)
+                fields[4] = os.getuid() + 1
+                return os.stat_result(fields)
+            return metadata
+        with patch('assistant_mesh.sessions.Path.lstat', foreign_owner):
+            with self.assertRaisesRegex(ValueError, 'restore_ancestor_unsafe'):
+                sessions.restore(self, self.task, ancestor / 'new-auth-home' / 'sessions')
+        self.assertFalse((ancestor / 'new-auth-home').exists())
+
+    def test_pi_opaque_native_format_is_not_rewritten_as_codex(self):
+        original = Path(self.temp.name) / 'pi.jsonl'
+        original.write_bytes(b'opaque pi native record\n')
+        sessions.save(self, self.task, 'n', 'pi', {'thread_id': 'pi-native'}, original)
+        restored = sessions.restore(self, self.task, Path(self.temp.name) / 'pi-native', harness='pi')
+        self.assertEqual(original.read_bytes(), Path(restored).read_bytes())
 
     def test_incomplete_upload_does_not_replace_good_native_session(self):
         sessions.save(self, self.task, 'n', 'codex', {'thread_id': 'good'})

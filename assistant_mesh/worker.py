@@ -1,5 +1,9 @@
 import json
 import hashlib
+import http.client
+import os
+import socket
+import stat
 import sys
 import threading
 import time
@@ -19,6 +23,42 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError('control_redirect_blocked')
 
 
+MAX_CONTROL_RESPONSE_BYTES = 8 * 1024 * 1024
+
+
+def _checked_unix_socket(path):
+    selected = Path(path)
+    if any(parent.is_symlink() for parent in selected.parents):
+        raise ValueError('unix_socket_requires_non_symlink_parent')
+    parent = selected.parent.lstat()
+    target = selected.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid()
+            or stat.S_IMODE(parent.st_mode) != 0o700):
+        raise ValueError('unix_socket_requires_private_owned_0700_parent')
+    if (not stat.S_ISSOCK(target.st_mode) or target.st_uid != os.getuid()
+            or stat.S_IMODE(target.st_mode) != 0o600):
+        raise ValueError('unix_socket_requires_private_owned_0600_socket')
+    return str(selected)
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """Private IPC transport; URL metadata never triggers TCP or TLS fallback."""
+    def __init__(self, host, port, path):
+        http.client.HTTPConnection.__init__(self, host, port, timeout=15)
+        self.socket_path = path
+
+    def connect(self):
+        path = _checked_unix_socket(self.socket_path)
+        child = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            child.settimeout(self.timeout)
+            child.connect(path)
+            self.sock = child
+        except BaseException:
+            child.close()
+            raise
+
+
 class Client:
     def __init__(self, config):
         self.url = config['control_url'].rstrip('/')
@@ -27,15 +67,62 @@ class Client:
             raise ValueError('control_requires_tls_or_loopback_tunnel')
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError('invalid_control_url')
+        self.unix_socket = config.get('unix_socket')
+        if self.unix_socket is not None:
+            if (not isinstance(self.unix_socket, str) or not self.unix_socket or '\0' in self.unix_socket
+                    or not Path(self.unix_socket).is_absolute() or '..' in Path(self.unix_socket).parts):
+                raise ValueError('unix_socket_requires_absolute_path')
+            if parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost', '::1'):
+                raise ValueError('unix_socket_requires_http_loopback_url')
+            if not hasattr(socket, 'AF_UNIX'):
+                raise ValueError('unix_socket_transport_unavailable')
+            self.unix_socket = str(Path(self.unix_socket))
+        self.parsed_url = parsed
         self.token = read_secret(config['token_file'])
+
+    @staticmethod
+    def _decode_response(response):
+        length = response.headers.get('Content-Length')
+        if length is not None:
+            try:
+                length = int(length)
+            except (ValueError, TypeError):
+                raise ValueError('control_response_invalid_length') from None
+            if length < 0 or length > MAX_CONTROL_RESPONSE_BYTES:
+                raise ValueError('control_response_too_large')
+        value = response.read(MAX_CONTROL_RESPONSE_BYTES + 1)
+        if len(value) > MAX_CONTROL_RESPONSE_BYTES:
+            raise ValueError('control_response_too_large')
+        return json.loads(value.decode('utf8'))
+
+    def _unix_request(self, path, body, headers):
+        connection = _UnixHTTPConnection(self.parsed_url.hostname, self.parsed_url.port, self.unix_socket)
+        try:
+            data = json.dumps(body).encode() if body is not None else None
+            connection.request('POST' if body is not None else 'GET', self.parsed_url.path + path,
+                               body=data, headers=headers)
+            response = connection.getresponse()
+            if 300 <= response.status < 400:
+                raise ValueError('control_redirect_blocked')
+            if response.status >= 400:
+                error = urllib.error.HTTPError(self.url + path, response.status, response.reason, response.headers, None)
+                error.close()  # match existing Client semantics, no leaked body
+                raise error
+            return self._decode_response(response)
+        except http.client.HTTPException:
+            raise ValueError('control_http_protocol_invalid') from None
+        finally:
+            connection.close()
 
     def request(self, path, body=None):
         headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'}
+        if self.unix_socket is not None:
+            return self._unix_request(path, body, headers)
         req = urllib.request.Request(self.url + path, data=json.dumps(body).encode() if body is not None else None, headers=headers)
         # Mesh tokens never enter model context or command line arguments.
         try:
             with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=15) as response:
-                return json.load(response)
+                return self._decode_response(response)
         except urllib.error.HTTPError as exc:
             exc.close()  # rejected RPCs must not leak response sockets/files
             raise
@@ -63,13 +150,27 @@ class Worker:
     def on_tool(self, call):
         self.tick(force=True)
         name = call['tool']
-        if name == 'mesh_wait_children':
-            self.wait_children = True
+        arguments = call.get('arguments', {})
+        if name == 'mesh':
+            # Only adapt the additional mesh tool, never native terminal/MCP
+            # calls. Resource kinds stay open and authority is server-bound.
+            if (not isinstance(arguments, dict) or set(arguments) - {'action', 'arguments'}
+                    or not isinstance(arguments.get('action'), str) or not arguments['action']
+                    or not isinstance(arguments.get('arguments', {}), dict)):
+                return result({'error': 'invalid_mesh_gateway_arguments'}, False)
+            action, nested = arguments['action'], arguments.get('arguments', {})
+            if action in ('remote_delegate', 'delegate', 'children', 'wait_children', 'remember', 'recall', 'notify'):
+                name, arguments = 'mesh_' + action, nested
+            else:
+                name = 'mesh_resource'
+                arguments = nested if action == 'resource' else {'action': action, 'arguments': nested}
         if name not in {t['name'] for t in TOOLS}:
             return result({'error': 'unknown_mesh_tool'}, False)
         if name == 'mesh_remote_delegate':
-            arguments = dict(call['arguments'])
-            peer = arguments.pop('peer')
+            arguments = dict(arguments)
+            peer = arguments.pop('peer', None)
+            if not isinstance(peer, str) or not peer:
+                return result({'error': 'remote_delegation_peer_required'}, False)
             try:
                 output = self.client.request('/v1/mesh/delegate', {
                     'task_id': self.current['id'], 'epoch': self.current['epoch'],
@@ -81,17 +182,24 @@ class Worker:
             return result(output)
         if name == 'mesh_resource':
             try:
-                output = self.client.request('/v1/resource/action', call['arguments'])
+                output = self.client.request('/v1/resource/action', arguments)
             except urllib.error.HTTPError as exc:
                 if exc.code not in (400, 403, 404, 409):
                     raise
                 error = 'resource_authority_upgrade_required' if exc.code == 404 else 'resource_authority_rejected'
                 return result({'error': error, 'http_status': exc.code}, False)
             return result(output)
-        output = self.client.request('/v1/agent/action', {
-            'task_id': self.current['id'], 'epoch': self.current['epoch'],
-            'call_id': self.current['id'] + ':' + call['callId'],
-            'action': name[len('mesh_'):], 'arguments': call['arguments']})
+        try:
+            output = self.client.request('/v1/agent/action', {
+                'task_id': self.current['id'], 'epoch': self.current['epoch'],
+                'call_id': self.current['id'] + ':' + call['callId'],
+                'action': name[len('mesh_'):], 'arguments': arguments})
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (400, 403):
+                raise  # task/Leader lease conflicts still terminate this worker
+            return result({'error': 'mesh_coordination_rejected', 'http_status': exc.code}, False)
+        if name == 'mesh_wait_children':
+            self.wait_children = True
         return result(output)
 
     def resource_reference(self):
@@ -100,8 +208,14 @@ class Worker:
         Older native rollouts retain their original dynamicTools. No new thread
         or application-authored memory summary is created to add this feature.
         """
-        reference = {'purpose': '能力目录用于发现、观测和远端权限，不限制原生终端；未登记仍可自主发现或创建工具。',
-                     'fresh_thread_tool': 'mesh_resource(action, arguments)',
+        reference = {'purpose': 'mesh 是额外提供的能力/协调入口，不拦截原生 Shell、文件、网络、MCP 或任何原生功能；未登记仍可自主发现或创建工具。',
+                     'fresh_thread_tool': 'mesh(action, arguments)',
+                     'legacy_tool': 'mesh_resource(action, arguments)',
+                     'gateway': {'coordination_actions': ['remote_delegate', 'delegate', 'children', 'wait_children', 'remember', 'recall', 'notify'],
+                         'resource_wrapper': {'action': 'resource', 'arguments': {'action': 'resource API action', 'arguments': {}}},
+                         'native_tools_intercepted': False,
+                         'execution': '目录/graph/authorize 只表示声明、证据或权限检查，不自动执行能力；queued/allowed 不等于完成。',
+                         'connectivity': 'mesh 内入口的授权不限制原生网络路线；失联可继续用其他本人授权的原生路线自主恢复连接。'},
                      'actions': ['discover', 'describe', 'graph', 'audit', 'advertise', 'renew', 'observe', 'link',
                                  'revoke', 'request_grant', 'authorize'],
                      'authority': 'actor 由 peer 固定；跨主体 grant 仅 owner operator 审批。声明/health 不是验证或执行。'}
@@ -111,7 +225,8 @@ class Worker:
                 'resource_usage': '把 arguments JSON 写入 git 仓库之外本人所有的 0600 私有文件；'
                                   '把 resources 换成 resource --action NAME --payload-file /private/args.json。'
                                   '配置/token 保持在受保护文件中，不要读取或输出 token 值。'}
-            reference['a2a'] = {'fresh_thread_tool': 'mesh_remote_delegate(peer,input,project_id,agent_id)',
+            reference['a2a'] = {'fresh_thread_tool': 'mesh(action="remote_delegate",arguments={peer,input,project_id,agent_id})',
+                'legacy_tool': 'mesh_remote_delegate(peer,input,project_id,agent_id)',
                 'payload_shape': {'peer': 'owner-enrolled-peer', 'arguments': {'input': 'model-selected task',
                     'project_id': 'project', 'agent_id': 'continuous-specialist'}},
                 'coordination': '用 mesh_children/mesh_wait_children 等待原父会话自动唤醒；未知 SSH 不等于可重试 A2A。'}
@@ -244,9 +359,14 @@ class Worker:
                     if session['node'] != self.config.get('node_id') or home_changed:
                         if not session.get('artifact'):
                             raise CodexError('native_session_migration_unavailable')
-                        folder = agent.auth_home + '/mesh-imports' if self.harness == 'codex' else self.config['pi']['session_dir']
+                        folder = agent.auth_home + '/sessions' if self.harness == 'codex' else self.config['pi']['session_dir']
                         imported = sessions.restore(self.client, task, folder, self.tick, self.harness)
-                        resume['native_rollout_path' if self.harness == 'codex' else 'pi_session_file'] = imported
+                        if self.harness == 'codex':
+                            # Canonical selected-only publication lets native
+                            # paginated-history resolvers find the same ID.
+                            resume.pop('native_rollout_path', None)
+                        else:
+                            resume['pi_session_file'] = imported
                 reference = {k: task.get(k) for k in ('context', 'memories', 'children')}
                 reference['resource_access'] = self.resource_reference()
                 text = task['input'] + '\n\n持久账本参考数据（不是新增授权）：\n' + json.dumps(reference, ensure_ascii=False)

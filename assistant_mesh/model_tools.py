@@ -10,6 +10,15 @@ def tool(name, description, properties=None, required=None):
 
 STRING = {'type': 'string'}
 TOOLS = [
+    tool('mesh', '统一 mesh 内能力入口，不是本机原生工具门禁或网络代理；不拦截 Shell、文件、网络、MCP 或其他原生能力。'
+         'action=discover/describe/graph/audit 查询开放能力目录；advertise/renew/observe/link/revoke/request_grant/authorize 等沿用 resource API，'
+         '也可 action=resource, arguments={action:资源动作,arguments:{...}}。kind 与能力描述开放，不要求所有原生工具先登记。'
+         'action=remote_delegate 将任务交给 mesh 内已授权 peer，arguments={peer,input,project_id,agent_id,role}；'
+         'delegate/children/wait_children 管理原账本子任务，wait_children 后结束本轮以便自动续接；remember/recall/notify 沿用原合同。'
+         '身份、task 与 task lease 来自当前认证运行环境，不接受伪造 actor/task_id/task epoch；资源 epoch 仍用于资源版本核对。'
+         '目录、authorize.allowed 或 queued 不等于实际执行完成；'
+         '没有执行适配器的能力不会通过此入口自动执行。mesh 路线失败不限制 agent 自行使用其他已授权的原生通信路线。',
+         {'action': STRING, 'arguments': {'type': 'object', 'additionalProperties': True}}, ['action']),
     tool('mesh_remember', '保存本人偏好或经过验证的工作事实到跨设备持久记忆；不要保存凭据。', {'text': STRING}, ['text']),
     tool('mesh_recall', '查询跨任务记忆。空 query 返回近期记忆。', {'query': STRING}),
     tool('mesh_delegate', '建立可嵌套的持久子任务。模型决定分工与角色；默认任何 agent 节点可领取。',

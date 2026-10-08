@@ -167,6 +167,16 @@ class NodeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'secret_requires'):
             self.node(config)
 
+    def test_offline_maintenance_keeps_native_paths_available(self):
+        node = self.node(self.config('alice'))
+        node._incident('bob', 'transport_unavailable')
+        with node.store.transaction() as db:
+            text = db.execute('SELECT input FROM tasks').fetchone()[0]
+        self.assertIn('不拦截任何原生 Shell、网络或其他功能', text)
+        self.assertIn('不同联网路径重新连接已授权 peer', text)
+        self.assertIn('不要求原生工具或新路线先注册', text)
+        self.assertIn('擅自信任新 peer', text)
+
     def test_node_worker_routing_and_identity_are_config_bound(self):
         for mutation in ('worker-route', 'server-route', 'server-node', 'worker-token', 'duplicate-role-token'):
             config = self.config('alice-' + mutation)

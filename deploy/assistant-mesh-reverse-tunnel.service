@@ -1,11 +1,12 @@
 [Unit]
-Description=Loopback-only reverse A2A link to owner-enrolled laptop node
+Description=Private Unix-socket reverse A2A link to owner-enrolled laptop node
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ssh -F %h/.ssh/config -N -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -R 127.0.0.1:17681:127.0.0.1:17681 ai-server
+ExecStartPre=/usr/bin/ssh -F %h/.ssh/config -o ConnectTimeout=15 -o BatchMode=yes -o StrictHostKeyChecking=yes ai-server /usr/bin/python3 /home/ai_agent/.local/share/personal-assistant-mesh/scripts/check_reverse_socket.py --path /home/ai_agent/.local/state/personal-assistant-mesh/laptop-a2a.sock
+ExecStart=/usr/bin/ssh -F %h/.ssh/config -N -o ConnectTimeout=15 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o StreamLocalBindMask=0177 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -R /home/ai_agent/.local/state/personal-assistant-mesh/laptop-a2a.sock:127.0.0.1:17681 ai-server
 Restart=always
 RestartSec=5
 UMask=0077

@@ -40,7 +40,7 @@
 
 ## 当前部署路径
 
-本人现有 laptop 和 cloud 两个节点：本地独立节点端口 17681，云端原控制面 17680。前向/反向 SSH 各自只监听 loopback；没有公开明文 RPC。云端 companion 不重复启动 iLink、authority 或 worker。新节点服务不覆盖旧服务或 desktop 登录。
+本人现有 laptop 和 cloud 两个节点：本地独立节点端口 17681，云端原控制面 17680。前向 SSH 只监听 loopback；反向 SSH 使用云端本人 0700 私有目录中的 0600 Unix socket，不开反向 TCP 端口。该选择避开云端既有 `GatewayPorts=yes` 强制公网绑定，无需改全局 sshd。socket 缺失或不私有时拒绝，不回退 TCP。云端 companion 不重复启动 iLink、authority 或 worker。新节点服务不覆盖旧服务或 desktop 登录。
 
 `scripts/configure_nodes.py` 显式生成/更新私有配置并先备份现有配置；不自动联网发现凭据或授权陌生节点。示例脚本只演示这两台已授权机器的 enrollment，不是模型能力、整个网络拓扑或未来平台列表的上限。其他终端可以通过同协议及明确 enrollment 接入，手机/蓝牙/LAN 网关仍各有平台和权限验收。
 

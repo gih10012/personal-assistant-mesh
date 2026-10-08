@@ -48,7 +48,7 @@ def update(path, value):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['prepare-laptop', 'apply-cloud'])
+    parser.add_argument('command', choices=['prepare-laptop', 'apply-cloud', 'pin-reverse-socket'])
     parser.add_argument('--state', required=True)
     parser.add_argument('--source-worker')
     parser.add_argument('--cloud-state')
@@ -91,11 +91,19 @@ def main():
              'reconcile_remote_children': True, 'peers': [
                  {'node': 'cloud', 'authority': 'cloud', 'client_config': str(root / 'cloud-client.json'), 'report_results': True}]})
         save(root / 'cloud-client-for-laptop.json', {'control_url': 'http://127.0.0.1:17681',
-                                                   'token_file': str(cloud / 'cloud-to-laptop.token')})
+            'token_file': str(cloud / 'cloud-to-laptop.token'),
+            'unix_socket': str(cloud / 'laptop-a2a.sock')})
         save(root / 'node-cloud.json', {'node_id': 'cloud', 'local_server_config': str(cloud / 'server.json'),
              'local_worker_config': str(cloud / 'cloud-worker.json'), 'start_server': False, 'start_worker': False,
              'auto_maintenance': True, 'poll_interval': 1, 'reconcile_remote_children': True,
              'peers': [{'node': 'laptop', 'authority': 'laptop', 'client_config': str(cloud / 'laptop-client.json'), 'report_results': True}]})
+    elif args.command == 'pin-reverse-socket':
+        if not args.cloud_state:
+            parser.error('pin-reverse-socket requires cloud-state')
+        path = root / 'cloud-client-for-laptop.json'
+        value = private_json(path)
+        value['unix_socket'] = str(Path(args.cloud_state) / 'laptop-a2a.sock')
+        update(path, value)
     else:
         if not args.server_config or not args.worker_config:
             parser.error('apply-cloud requires server-config and worker-config')
@@ -124,7 +132,7 @@ def main():
         worker['capabilities'] = sorted(set(worker.get('capabilities', []) + ['agent', 'mesh.node:cloud', 'a2a.send']))
         update(args.server_config, server)
         update(args.worker_config, worker)
-    print(json.dumps({'prepared': True, 'node': 'laptop' if args.command == 'prepare-laptop' else 'cloud',
+    print(json.dumps({'prepared': True, 'node': 'cloud' if args.command == 'apply-cloud' else 'laptop',
                       'private_state': str(root), 'additional_spend_enabled': False}))
 
 

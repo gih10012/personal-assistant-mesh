@@ -398,12 +398,18 @@ class Store:
                 text, required = arguments['input'], arguments.get('required') or ['agent']
                 if not isinstance(text, str) or not text.strip() or len(text.encode()) > 65536 or not isinstance(required, list) or not all(isinstance(c, str) for c in required):
                     raise ValueError('invalid_child_task')
+                # Local children inherit machine fences even when the model
+                # supplies its own capability requirements. Crossing machines
+                # requires the explicit authenticated remote delegate route.
+                fences = [cap for cap in json.loads(row['required']) if cap.startswith('mesh.node:')]
+                required = sorted(set(required + fences))
                 child = hashlib.sha256(('child-' + action_id).encode()).hexdigest()
                 child_context = dict(context)
                 child_context['role'] = arguments.get('role', 'specialist')
                 child_context['project_id'] = arguments.get('project_id', context.get('project_id', 'general'))
                 identity = str(arguments.get('agent_id', child_context['role']))
-                if context.get('origin', {}).get('kind') == 'a2a':
+                child_context['agent_id'] = identity
+                if context.get('origin', {}).get('kind') in ('a2a', 'node-maintenance'):
                     binding = [context.get('authority'), context.get('origin', {}).get('peer'), child_context['project_id'], identity]
                     isolated = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
                     child_context['session_scope'] = 'peer-project:' + isolated
@@ -470,7 +476,7 @@ class Store:
 
     @staticmethod
     def memory_scopes(context):
-        if context.get('origin', {}).get('kind') == 'a2a':
+        if context.get('origin', {}).get('kind') in ('a2a', 'node-maintenance'):
             scope = context.get('memory_scope') or 'peer:' + hashlib.sha256(json.dumps(
                 [context.get('authority'), context.get('origin', {}).get('peer'), context.get('project_id'), context.get('agent_id')], sort_keys=True).encode()).hexdigest()
             return (scope, scope)  # no implicit personal owner-memory sharing

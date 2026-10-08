@@ -173,7 +173,11 @@ class Node:
                            'origin': {'kind': 'node-maintenance', 'peer': peer, 'episode': episode}}
                 text = ('诊断本节点与已授权 peer ' + peer + ' 的连接故障（' + code + '），检查本节点服务、'
                         '私有配置引用、日志、已配置模型及已授权连接；有可用模型时自主分析并验证修复。'
-                        '没有离线模型不得声称脱网推理成功。不要扫描、新增主机、自动审批、购买算力或输出凭据。'
+                        'Mesh 是额外的受管能力入口，不拦截任何原生 Shell、网络或其他功能；'
+                        '可自主使用原生能力排障，并尝试本人已授权范围内的不同联网路径重新连接已授权 peer。'
+                        '不要求原生工具或新路线先注册；成功验证后可把路线登记为推荐的 Mesh 能力。'
+                        '没有离线模型不得声称脱网推理成功。不要探索未授权主机、擅自信任新 peer、'
+                        '自动审批、购买算力或输出凭据。'
                         '只维护本节点的任务和环境，不接管全球 Leader，不复制或重放全球任务。'
                         '故障与重连记录在本节点 private ledger 的 node_events / mesh_links。')
                 db.execute('INSERT OR IGNORE INTO tasks(id,input,required,status,created,context,scope) VALUES(?,?,?,?,?,?,?)',

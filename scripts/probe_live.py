@@ -63,10 +63,10 @@ def main():
                         sandbox='read-only', approval_policy='never')
         agent = Codex(selected)
         evidence['phase'] = 'restore-selected-rollout'
-        restored = sessions.restore(client, task, str(Path(agent.auth_home) / 'mesh-live-imports'), tick)
+        restored = sessions.restore(client, task, str(Path(agent.auth_home) / 'sessions'), tick)
         native_id = native['state']['thread_id']
         evidence['phase'] = 'resume-original-thread'
-        thread = agent.rpc('thread/resume', {'threadId': native_id, 'path': restored,
+        thread = agent.rpc('thread/resume', {'threadId': native_id,
                                            'cwd': selected['workspace'], 'sandbox': 'read-only',
                                            'approvalPolicy': 'never', 'excludeTurns': True})['thread']
         if thread['id'] != native_id:

@@ -88,7 +88,7 @@ python3 -m assistant_mesh --config /absolute/private/node.json node
 }
 ```
 
-Codex 的实际启动命令和认证目录要沿用本人已授权部署，不能只把示例路径原样填进去；默认不接新收费 API。`laptop-to-cloud.json`：
+原生 Shell、联网和其他 runtime 功能保留；Mesh 是额外提供的全网受管能力入口，不是限制本机工具的门禁。意外脱网后 agent 仍能自主联网、排障、尝试其他路径重并网；新路线核验后可以登记成推荐/调优的 Mesh 能力。远端 Mesh 调用检查认证和授权，不阻断原生功能。见 [核心合同](MESH-PRINCIPLES.md)。Codex 的实际启动命令和认证目录要沿用本人已授权部署，不能只把示例路径原样填进去；默认不接新收费 API。`laptop-to-cloud.json`：
 
 ```json
 {
@@ -99,11 +99,29 @@ Codex 的实际启动命令和认证目录要沿用本人已授权部署，不�
 
 这里 `17680` 是已配置的 **SSH 隧道本地端口**，不是明文跨网地址。cloud authority 必须把该 token 绑定到 `role=agent_peer,node=laptop`，并明确授予 `a2a.delegate`/需要时 `a2a.report`。token 是文件引用，不进入模型提示词、命令行或公仓。
 
+### 云端访问 laptop：私有 Unix reverse endpoint
+
+反向入口不开放 TCP。cloud `laptop-client.json` 结构如下，替换为 cloud 本人绝对路径：
+
+```json
+{
+  "control_url": "http://127.0.0.1:17681",
+  "token_file": "/absolute/private/cloud-to-laptop.token",
+  "unix_socket": "/absolute/private/laptop-a2a.sock"
+}
+```
+
+`unix_socket` 存在时只有 AF_UNIX 通道；`control_url` 仅作 loopback 协议元数据，不连接它的 TCP 端口。socket 每次请求核验本人所有、0600、直接父目录0700、所有祖先无 symlink；缺失或权限不正确直接拒绝，不使用环境代理、重定向或 TCP 兜底。响应读取上限8MiB。
+
+先部署新的 Client 和 `check_reverse_socket.py`，再安装 [reverse service](../deploy/assistant-mesh-reverse-tunnel.service)。云端实际 `StreamLocalBindMask` 须产生0600 socket，客户端选项不是远端验证替代。启动前 guard 只删除此精确路径下本人私有且连接明确返回 ECONNREFUSED 的 stale socket；活连接、普通文件、symlink 或任何不确定错误保留并拒绝启动。不能用 `rm -f` 或 ssh 全局 `StreamLocalBindUnlink` 绕过保护。云端 `GatewayPorts=yes` 时 `-R 127.0.0.1:端口` 也不能保证私有，因此不得启动旧 TCP reverse unit。
+
 中央服务器 companion 使用自身 `node_id`、既有 `local_server_config`/`local_worker_config`，并设置 `start_server=false,start_worker=false`。此时可以引用中央既有 Leader worker 的配置；监督器不会启停它，不复制 ClawBot receiver。既有 worker 和 server peer 仍须包含自身 `mesh.node:<node_id>` routing capability。
 
 嵌入模式的 Worker/授权 peer 禁止 `leader` capability，只有本人固定 `node` 和本机 routing capability；配置中的 local-worker token 必须只匹配 server 中一个正确的 worker peer。**`mesh.node:*` 是任务目的机器的 fence，不是模型工具白名单，也不是性能等级**。性能、模型、资源和可达路径在动态能力目录表达，而不靠硬编码角色排代。
 
 ## 连续记忆、自治和恢复
+
+模型 runtime 的服务模板不额外设置 `NoNewPrivileges` 或 `PrivateTmp`，不会把 Mesh API 策略变成原生工具的进程权限/临时目录隔离。它仍以本人账户运行并受该账户既有 OS 权限约束，不新增 sudo 授权。只运行控制面或 SSH transport 的服务与模型 worker 分离。
 
 - 本地/A2A 任务的 native scope 由目的节点、认证主体、项目和 agent 身份组合哈希，支持同类项目连续 native thread，不与 `leader:owner` 或其他 peer 的记忆混用；Codex 原生 compaction 仍负责压缩。
 - 维护任务使用本节点独立 scope/memory scope、固定目的机器 routing capability。每个故障 episode 只创建一个任务，重试不会每轮新建“修复”任务。一次完整健康轮次才结束 episode；只收到 `hello=200` 不足以证明 delegation/report 权限正常。

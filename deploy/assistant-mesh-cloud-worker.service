@@ -10,8 +10,8 @@ ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-a
 Restart=on-failure
 RestartSec=10
 UMask=0077
-NoNewPrivileges=true
-PrivateTmp=true
+# Do not add a native-tool privilege or temporary-files namespace restriction.
+# The owner's existing OS permissions still apply; no new privileges are granted.
 # Native runtime measured above 350 MiB. The cloud has existing services;
 # pressure can use its configured swap, without unbounded memory growth.
 MemoryHigh=500M

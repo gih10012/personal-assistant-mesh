@@ -9,7 +9,7 @@ ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-a
 Restart=on-failure
 RestartSec=5
 UMask=0077
-NoNewPrivileges=true
+# This node owns a native worker; Mesh policies do not sandbox native tools.
 
 [Install]
 WantedBy=default.target
