@@ -12,7 +12,11 @@ RestartSec=10
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-MemoryMax=350M
+# Native runtime measured above 350 MiB. The cloud has existing services;
+# pressure can use its configured swap, without unbounded memory growth.
+MemoryHigh=500M
+MemoryMax=650M
+MemoryLimit=650M
 
 [Install]
 WantedBy=default.target

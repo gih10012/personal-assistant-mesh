@@ -93,7 +93,7 @@ class ProtocolTests(unittest.TestCase):
         agent.on_activity = lambda name, params: activities.append(name)
         agent.events.put({'id': 10, 'method': 'item/permissions/requestApproval', 'params': {}})
         agent.event(timeout=.1)
-        self.assertNotEqual({'decision': 'accept'}, sent[0].get('result'))
+        self.assertEqual({'permissions': {}, 'scope': 'turn'}, sent[0]['result'])
         self.assertEqual(['approval_required'], activities)
 
     def test_finish_ignores_commentary_and_other_thread_results(self):

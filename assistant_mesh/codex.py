@@ -87,7 +87,10 @@ class Codex:
             elif '/requestApproval' in value['method']:
                 if self.on_activity:
                     self.on_activity('approval_required', value.get('params', {}))
-                self.send({'id': value['id'], 'result': {'decision': 'decline'}})
+                # Permissions requests use a different response schema from
+                # command/file approvals. Grant nothing, without corrupting RPC.
+                denied = {'permissions': {}, 'scope': 'turn'} if value['method'] == 'item/permissions/requestApproval' else {'decision': 'decline'}
+                self.send({'id': value['id'], 'result': denied})
             else:
                 self.send({'id': value['id'], 'error': {'code': -32601, 'message': 'Host interaction unavailable; ask owner in reply.'}})
         return value
