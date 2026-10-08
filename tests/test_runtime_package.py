@@ -110,6 +110,19 @@ class RuntimePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'package_tree_mismatch'):
             verify_installation(package['package_dir'], digest)
 
+    def test_implicit_nested_directories_are_safe_with_group_write_umask(self):
+        previous = os.umask(0o002)
+        try:
+            digest = self.archive()
+            package = self.install(digest)
+        finally:
+            os.umask(previous)
+        payload = Path(package['package_dir']) / 'payload'
+        for directory in payload.rglob('*'):
+            if directory.is_dir():
+                self.assertFalse(directory.stat().st_mode & 0o022)
+        self.assertTrue(verify_installation(package['package_dir'], digest)['complete_package_verified'])
+
     def test_complete_looking_noncanonical_manifest_is_not_published(self):
         for key, old, new in (('entrypoint', 'bin/codex', 'elsewhere/codex'),
                               ('resourcesDir', 'codex-resources', 'elsewhere-resources'),

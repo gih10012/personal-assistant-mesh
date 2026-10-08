@@ -1,6 +1,7 @@
 """Real loopback HTTP range fixtures; no public download, model, or credentials."""
 import contextlib
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -11,13 +12,14 @@ import threading
 import time
 import unittest
 import urllib.request
+import urllib.parse
 from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scripts.fetch_artifact import ArtifactFetchError, _SafeRedirect, fetch_artifact, main
+from scripts.fetch_artifact import ArtifactFetchError, _ExplicitProxy, _ResumeParts, _SafeRedirect, fetch_artifact, main
 
 
 class FixtureServer(socketserver.ThreadingMixIn, HTTPServer):
@@ -117,6 +119,322 @@ class ArtifactFetchTests(unittest.TestCase):
     def assert_clean(self):
         self.assertFalse(self.output.exists())
         self.assertEqual([], list(self.root.iterdir()))
+
+    @contextlib.contextmanager
+    def forward_proxy(self):
+        captured, owner = [], self
+
+        class Forward(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                captured.append((self.path, dict(self.headers)))
+                target = urllib.parse.urlsplit(self.path)
+                if (target.scheme != 'http' or target.hostname != '127.0.0.1'
+                        or target.port != owner.server.server_port):
+                    self.send_error(400)
+                    return
+                connection = http.client.HTTPConnection(target.hostname, target.port, timeout=3)
+                try:
+                    connection.request('GET', target.path, headers={
+                        'Range': self.headers['Range'], 'Accept-Encoding': self.headers['Accept-Encoding']})
+                    reply = connection.getresponse()
+                    body = reply.read()
+                    self.send_response(reply.status)
+                    for key in ('Content-Range', 'Content-Encoding', 'Location'):
+                        if reply.getheader(key) is not None:
+                            self.send_header(key, reply.getheader(key))
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                finally:
+                    connection.close()
+
+        server = FixtureServer(('127.0.0.1', 0), Forward)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
+        try:
+            yield 'http://127.0.0.1:' + str(server.server_port), captured
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+
+    def test_explicit_proxy_real_range_transport_ignores_environment_and_bypass(self):
+        with self.forward_proxy() as (endpoint, captured):
+            with patch.dict(os.environ, {'http_proxy': 'http://user:DO_NOT_PRINT@invalid:1',
+                    'HTTP_PROXY': 'http://invalid:2', 'NO_PROXY': '*', 'no_proxy': '*'}):
+                result = self.fetch(proxy_url=endpoint)
+        self.assertTrue(result['sha256_verified'])
+        self.assertEqual(4, len(captured))
+        self.assertTrue(all(url == self.base + '/valid' for url, headers in captured))
+        self.assertTrue(all(not set(key.lower() for key in headers) & {
+            'cookie', 'authorization', 'proxy-authorization'} for url, headers in captured))
+        self.assertEqual(self.body, self.output.read_bytes())
+
+    def test_explicit_proxy_preserves_partial_resume_and_redirect_contract(self):
+        lengths = [end - start + 1 for start, end in self.segments()]
+        directory = self.checkpoint([lengths[0], 11, 12, 13])
+        before = self.checkpoint_snapshot(directory)
+        with self.forward_proxy() as (endpoint, captured):
+            result = self.fetch('/redirect', proxy_url=endpoint, resume_parts_directory=directory)
+        self.assertTrue(result['sha256_verified'])
+        self.assertEqual(3, result['network_parts'])
+        self.assertEqual(6, len(captured))
+        self.assertEqual(before, self.checkpoint_snapshot(directory))
+
+    def test_default_transport_never_inherits_proxy_environment(self):
+        with self.forward_proxy() as (endpoint, captured):
+            with patch.dict(os.environ, {'http_proxy': endpoint, 'HTTP_PROXY': endpoint,
+                                        'NO_PROXY': '', 'no_proxy': ''}):
+                self.assertTrue(self.fetch()['sha256_verified'])
+        self.assertEqual([], captured)
+
+    def test_explicit_proxy_rejects_credentials_query_fragment_socks_and_controls(self):
+        for endpoint in ('http://user:DO_NOT_PRINT@127.0.0.1:7890',
+                'https://user@127.0.0.1', 'http://127.0.0.1:7890?token=DO_NOT_PRINT',
+                'http://127.0.0.1:7890#secret', 'socks5h://127.0.0.1:7890',
+                'http://127.0.0.1:0', 'http://127.0.0.1:7890/path',
+                'http://127.0.0.1:7890\nDO_NOT_PRINT'):
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(ArtifactFetchError) as failed:
+                    self.fetch(proxy_url=endpoint)
+                self.assertNotIn('DO_NOT_PRINT', str(failed.exception))
+                self.assertNotIn('127.0.0.1', str(failed.exception))
+        self.assertEqual([], self.requests)
+        self.assert_clean()
+
+    def test_explicit_proxy_https_mapping_and_connect_do_not_consult_bypass(self):
+        handler = _ExplicitProxy({'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'})
+        request = urllib.request.Request('https://example.invalid/artifact')
+        with patch('urllib.request.proxy_bypass', side_effect=AssertionError('environment consulted')):
+            self.assertIsNone(handler.proxy_open(request, 'http://127.0.0.1:7890', 'https'))
+        self.assertEqual('127.0.0.1:7890', request.host)
+        self.assertEqual('example.invalid', request._tunnel_host)
+        self.assertFalse(any(key.lower() == 'proxy-authorization' for key in request.headers))
+
+    def test_cli_proxy_is_explicit_redacted_and_not_an_implicit_configuration_change(self):
+        argv = ['fetch_artifact', '--url', 'https://example.invalid/a', '--size', str(len(self.body)),
+            '--sha256', self.digest, '--output', str(self.output), '--proxy-url', 'http://127.0.0.1:7890']
+        output = io.StringIO()
+        with patch('sys.argv', argv), contextlib.redirect_stdout(output):
+            with patch('scripts.fetch_artifact.fetch_artifact', return_value={'sha256': self.digest}) as fetch:
+                self.assertEqual(0, main())
+        self.assertEqual('http://127.0.0.1:7890', fetch.call_args[1]['proxy_url'])
+        self.assertNotIn('127.0.0.1', output.getvalue())
+        self.assertNotIn('proxy_url', output.getvalue())
+
+    def segments(self, workers=4):
+        quotient, remainder = divmod(len(self.body), min(workers, len(self.body)))
+        start, segments = 0, []
+        for index in range(min(workers, len(self.body))):
+            length = quotient + (1 if index < remainder else 0)
+            segments.append((start, start + length - 1))
+            start += length
+        return segments
+
+    def checkpoint(self, prefixes=None, workers=4):
+        directory = self.root / 'checkpoint'
+        directory.mkdir(mode=0o700)
+        lengths = [end - start + 1 for start, end in self.segments(workers)]
+        prefixes = lengths if prefixes is None else prefixes
+        for index, ((start, end), prefix) in enumerate(zip(self.segments(workers), prefixes)):
+            part = directory / 'part-{:03d}'.format(index)
+            part.write_bytes(self.body[start:start + prefix])
+            part.chmod(0o600)
+        return directory
+
+    def checkpoint_snapshot(self, directory):
+        return {part.name: (part.read_bytes(), part.stat().st_mode, part.stat().st_mtime_ns)
+                for part in directory.iterdir()}
+
+    def assert_checkpoint_preserved(self, directory, before):
+        self.assertEqual(before, self.checkpoint_snapshot(directory))
+        self.assertFalse(self.output.exists())
+        self.assertEqual([directory], list(self.root.iterdir()))
+
+    def test_resume_partial_and_completed_parts_only_fetches_missing_exact_ranges(self):
+        lengths = [end - start + 1 for start, end in self.segments()]
+        prefixes = [lengths[0], 17, 0, lengths[3]]
+        directory = self.checkpoint(prefixes)
+        before = self.checkpoint_snapshot(directory)
+        result = self.fetch(resume_parts_directory=directory)
+        self.assertEqual(self.body, self.output.read_bytes())
+        self.assertTrue(result['sha256_verified'])
+        self.assertEqual(sum(prefixes), result['resumed_bytes'])
+        self.assertEqual(2, result['network_parts'])
+        ranges = sorted(headers['Range'] for _, headers in self.requests)
+        segments = self.segments()
+        self.assertEqual(sorted(['bytes={}-{}'.format(segments[1][0] + 17, segments[1][1]),
+                                 'bytes={}-{}'.format(*segments[2])]), ranges)
+        self.assertEqual(before, self.checkpoint_snapshot(directory))
+        self.assertEqual(0o600, self.output.stat().st_mode & 0o777)
+        self.assertEqual({directory, self.output}, set(self.root.iterdir()))
+
+    def test_resume_all_completed_parts_does_not_use_network(self):
+        directory = self.checkpoint()
+        before = self.checkpoint_snapshot(directory)
+        result = self.fetch(resume_parts_directory=directory)
+        self.assertEqual([], self.requests)
+        self.assertEqual(0, result['network_parts'])
+        self.assertEqual(len(self.body), result['resumed_bytes'])
+        self.assertEqual(self.body, self.output.read_bytes())
+        self.assertEqual(before, self.checkpoint_snapshot(directory))
+
+    def test_resume_wrong_prefix_still_requires_complete_official_sha(self):
+        directory = self.checkpoint([31, 0, 0, 0])
+        part = directory / 'part-000'
+        part.write_bytes(b'x' + part.read_bytes()[1:])
+        before = self.checkpoint_snapshot(directory)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_sha256_mismatch'):
+            self.fetch(resume_parts_directory=directory)
+        self.assert_checkpoint_preserved(directory, before)
+
+    def test_resume_requires_exact_all_part_names_and_matching_worker_count(self):
+        directory = self.checkpoint([0] * 4)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_part_set_mismatch'):
+            self.fetch(workers=8, resume_parts_directory=directory)
+        unknown = directory / 'metadata.json'
+        unknown.write_text('not an authorized part name')
+        unknown.chmod(0o600)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_part_set_mismatch'):
+            self.fetch(resume_parts_directory=directory)
+        unknown.unlink()
+        (directory / 'part-003').rename(directory / 'part-3')
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_part_set_mismatch'):
+            self.fetch(resume_parts_directory=directory)
+        self.assertEqual([], self.requests)
+        self.assertFalse(self.output.exists())
+
+    def test_resume_private_directory_and_part_permissions_are_not_chmodded(self):
+        directory = self.checkpoint([0] * 4)
+        directory.chmod(0o755)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_private_owned_directory_required'):
+            self.fetch(resume_parts_directory=directory)
+        self.assertEqual(0o755, directory.stat().st_mode & 0o777)
+        directory.chmod(0o700)
+        part = directory / 'part-000'
+        part.chmod(0o644)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_private_owned_part_required'):
+            self.fetch(resume_parts_directory=directory)
+        self.assertEqual(0o644, part.stat().st_mode & 0o777)
+        self.assertEqual([], self.requests)
+
+    def test_resume_symlink_directory_part_and_hardlinks_are_rejected(self):
+        directory = self.checkpoint([0] * 4)
+        alias = self.root / 'checkpoint-link'
+        alias.symlink_to(directory, target_is_directory=True)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_symlink_not_supported'):
+            self.fetch(resume_parts_directory=alias)
+        alias.unlink()
+        part = directory / 'part-000'
+        part.unlink()
+        part.symlink_to(directory / 'part-001')
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_private_owned_part_required'):
+            self.fetch(resume_parts_directory=directory)
+        part.unlink()
+        os.link(str(directory / 'part-001'), str(part))
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_private_owned_part_required'):
+            self.fetch(resume_parts_directory=directory)
+        self.assertEqual([], self.requests)
+
+    def test_resume_oversized_prefix_and_nonregular_part_rejected_before_network(self):
+        directory = self.checkpoint()
+        part = directory / 'part-000'
+        part.write_bytes(part.read_bytes() + b'oversized')
+        before = self.checkpoint_snapshot(directory)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_prefix_too_large'):
+            self.fetch(resume_parts_directory=directory)
+        self.assert_checkpoint_preserved(directory, before)
+        part.unlink()
+        part.mkdir(mode=0o700)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_private_owned_part_required'):
+            self.fetch(resume_parts_directory=directory)
+        self.assertEqual([], self.requests)
+
+    def test_resume_rejects_metadata_owner_mismatch(self):
+        directory = self.checkpoint([0] * 4)
+        original_stat = os.stat
+        def changed_owner(path, *args, **kwargs):
+            metadata = original_stat(path, *args, **kwargs)
+            if path == 'part-000' and kwargs.get('dir_fd') is not None:
+                values = {key: getattr(metadata, key) for key in ('st_dev', 'st_ino', 'st_uid',
+                    'st_mode', 'st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns')}
+                values['st_uid'] += 1
+                return SimpleNamespace(**values)
+            return metadata
+        with patch('scripts.fetch_artifact.os.stat', side_effect=changed_owner):
+            with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_private_owned_part_required'):
+                self.fetch(resume_parts_directory=directory)
+        self.assertEqual([], self.requests)
+
+    def test_resume_checkpoint_changed_during_copy_is_rejected_before_network(self):
+        directory = self.checkpoint([31] * 4)
+        original_read = _ResumeParts._read
+        def changed_read(snapshot, name, deadline, destination=None):
+            digest = original_read(snapshot, name, deadline, destination)
+            if destination is not None and name == 'part-000':
+                changed = directory / 'part-003'
+                changed.write_bytes(b'x' * 31)
+            return digest
+        with patch.object(_ResumeParts, '_read', changed_read):
+            with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_checkpoint_changed'):
+                self.fetch(resume_parts_directory=directory)
+        self.assertEqual([], self.requests)
+        self.assertFalse(self.output.exists())
+        self.assertEqual([directory], list(self.root.iterdir()))
+
+    def test_resume_checkpoint_changed_after_copy_never_publishes(self):
+        directory = self.checkpoint([31] * 4)
+        from scripts.fetch_artifact import _part
+        changed_once = threading.Event()
+        def changed_part(*args, **kwargs):
+            result = _part(*args, **kwargs)
+            with self.lock:
+                if not changed_once.is_set():
+                    changed_once.set()
+                    (directory / 'part-000').write_bytes(b'x' * 31)
+            return result
+        with patch('scripts.fetch_artifact._part', side_effect=changed_part):
+            with self.assertRaisesRegex(ArtifactFetchError, 'artifact_resume_checkpoint_changed'):
+                self.fetch(resume_parts_directory=directory)
+        self.assertTrue(changed_once.is_set())
+        self.assertFalse(self.output.exists())
+        self.assertEqual([directory], list(self.root.iterdir()))
+
+    def test_resume_wrong_range_or_deadline_preserves_checkpoint_and_old_output(self):
+        directory = self.checkpoint([17] * 4)
+        before = self.checkpoint_snapshot(directory)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_part_range_mismatch'):
+            self.fetch('/wrong-start', resume_parts_directory=directory)
+        self.assert_checkpoint_preserved(directory, before)
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_fetch_deadline'):
+            self.fetch('/drip', timeout=0.2, deadline=0.08, resume_parts_directory=directory)
+        self.assert_checkpoint_preserved(directory, before)
+        self.output.write_bytes(b'old-user-owned-output')
+        self.output.chmod(0o600)
+        self.requests.clear()
+        with self.assertRaisesRegex(ArtifactFetchError, 'artifact_existing_output_mismatch'):
+            self.fetch(resume_parts_directory=directory)
+        self.assertEqual(b'old-user-owned-output', self.output.read_bytes())
+        self.assertEqual([], self.requests)
+        self.assertEqual(before, self.checkpoint_snapshot(directory))
+
+    def test_cli_explicit_resume_handle_is_passed_without_new_identity_or_secrets(self):
+        directory = self.checkpoint([0] * 4)
+        argv = ['fetch_artifact', '--url', 'https://example.invalid/a', '--size', str(len(self.body)),
+                '--sha256', self.digest, '--output', str(self.output), '--workers', '4',
+                '--resume-parts-directory', str(directory)]
+        output = io.StringIO()
+        with patch('sys.argv', argv), contextlib.redirect_stdout(output):
+            with patch('scripts.fetch_artifact.fetch_artifact', return_value={'sha256': self.digest}) as fetch:
+                self.assertEqual(0, main())
+        self.assertEqual(str(directory), fetch.call_args[1]['resume_parts_directory'])
+        self.assertEqual(self.digest, json.loads(output.getvalue())['sha256'])
+        self.assertNotIn('url', json.loads(output.getvalue()))
+        self.assertEqual([], self.requests)
 
     def test_real_parallel_exact_ranges_hash_permissions_and_no_credentials(self):
         result = self.fetch('/parallel')

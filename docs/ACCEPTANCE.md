@@ -149,3 +149,13 @@ Mesh。SDK 注册使用 shim，原生路径为事件管道模拟；不冒称安�
 调用者不能指定其它 config/path。诊断没有接管原生工具；当前仅是观察和
 推荐维护句柄，**不是自动自修闭环**。云端本次新增测试与实际完整包安装
 将在完成后另记，不能将本机测试算作云端验收。
+
+云端随后发现 Python 3.6 的递归 mkdir 在默认 umask 下给中间目录增加了
+group-write。安装器改为逐层显式建目录，维护/探针夹具亦逐层 0700；原有
+可信路径规则未放宽。增加显式只读分段续传、无凭据单次代理和常驻 Worker
+Shell 探针后，本机完整 479 项测试通过。其中 transport 的 33 项覆盖实际
+loopback forward proxy、环境 bypass 不参与、resume/redirect/whole SHA256；
+Worker 探针 15 项通过，使用离线 backend fixture 与真实鉴权 HTTP，不将
+这些 fixture 当作常驻模型执行已经通过。相同源码在云端 Python 3.6.8 完整
+479 项亦通过。真实完整包和部署者核对的 worker
+进程内挑战结果继续另记。

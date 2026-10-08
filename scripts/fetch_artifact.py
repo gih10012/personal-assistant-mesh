@@ -64,6 +64,45 @@ def _remaining(deadline, stopped=None):
     return remaining
 
 
+def _proxy_endpoint(proxy_url):
+    if proxy_url is None:
+        return None
+    if (not isinstance(proxy_url, str) or not proxy_url
+            or any(ord(char) <= 32 or ord(char) == 127 for char in proxy_url)):
+        raise ArtifactFetchError('artifact_credential_free_http_proxy_required')
+    try:
+        value = urllib.parse.urlsplit(proxy_url)
+        port, host = value.port, value.hostname
+    except ValueError:
+        raise ArtifactFetchError('artifact_credential_free_http_proxy_required') from None
+    if value.scheme not in ('http', 'https'):
+        raise ArtifactFetchError('artifact_proxy_protocol_not_supported')
+    if (not host or value.username is not None or value.password is not None
+            or '?' in proxy_url or '#' in proxy_url or value.path not in ('', '/')
+            or (port is not None and not 0 < port < 65536)):
+        raise ArtifactFetchError('artifact_credential_free_http_proxy_required')
+    return value
+
+
+class _ExplicitProxy(urllib.request.ProxyHandler):
+    """Per-fetch mapping without environment bypass or proxy authentication.
+
+    stdlib ProxyHandler.proxy_open consults NO_PROXY even with an explicit
+    mapping. Keep its request-routing behavior, but never consult that branch
+    or synthesize a Proxy-Authorization header.
+    """
+    def proxy_open(self, request, proxy, protocol):
+        if getattr(request, '_artifact_explicit_proxy_set', False):
+            return None
+        endpoint = _proxy_endpoint(proxy)
+        original = request.type
+        request.set_proxy(endpoint.netloc, endpoint.scheme)
+        request._artifact_explicit_proxy_set = True
+        if original == endpoint.scheme or original == 'https':
+            return None
+        return self.parent.open(request, timeout=request.timeout)
+
+
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
     def __init__(self, deadline, allow_loopback_http=False):
         self.deadline = deadline
@@ -105,13 +144,15 @@ def _header(response, name):
     return values[0] if values else None
 
 
-def _part(url, start, end, size, destination, timeout, deadline, stopped, allow_loopback_http):
+def _part(url, start, end, size, destination, timeout, deadline, stopped, allow_loopback_http,
+          prefix_size=None, proxy_url=None):
     expected = end - start + 1
     request = urllib.request.Request(url, headers={
         'Range': 'bytes={}-{}'.format(start, end), 'Accept-Encoding': 'identity'})
     # No credential, cookie, or environment-derived proxy-auth channel. Native
     # networking/proxy configuration elsewhere is neither changed nor restricted.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+    proxies = {} if proxy_url is None else {'http': proxy_url, 'https': proxy_url}
+    opener = urllib.request.build_opener(_ExplicitProxy(proxies),
         _SafeRedirect(deadline, allow_loopback_http))
     try:
         with opener.open(request, timeout=min(timeout, _remaining(deadline, stopped))) as response:
@@ -128,8 +169,15 @@ def _part(url, start, end, size, destination, timeout, deadline, stopped, allow_
             length = _header(response, 'Content-Length')
             if length is not None and (re.fullmatch(r'[0-9]+', length) is None or int(length) != expected):
                 raise ArtifactFetchError('artifact_part_length_mismatch')
-            descriptor = os.open(str(destination), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL if prefix_size is None else
+                     os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK)
+            descriptor = os.open(str(destination), flags, 0o600)
             with os.fdopen(descriptor, 'wb') as output:
+                if prefix_size is not None:
+                    metadata = os.fstat(output.fileno())
+                    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
+                            or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_size != prefix_size):
+                        raise ArtifactFetchError('artifact_resume_stage_changed')
                 received = 0
                 while True:
                     _remaining(deadline, stopped)
@@ -195,15 +243,125 @@ def _already_present(parent_descriptor, name, size, sha256):
     return True
 
 
+def _fingerprint(metadata):
+    return (metadata.st_dev, metadata.st_ino, metadata.st_uid, metadata.st_mode,
+            metadata.st_nlink, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+
+class _ResumeParts:
+    """An explicit owned snapshot, copied and checked without modifying it."""
+    def __init__(self, directory, lengths):
+        self.descriptor = None
+        self.lengths, self.metadata, self.hashes = lengths, {}, {}
+        try:
+            self.directory = Path(directory)
+            if not self.directory.is_absolute() or '..' in self.directory.parts:
+                raise ArtifactFetchError('artifact_resume_absolute_directory_required')
+            for candidate in (self.directory,) + tuple(self.directory.parents):
+                if candidate.is_symlink():
+                    raise ArtifactFetchError('artifact_resume_symlink_not_supported')
+            self.descriptor = os.open(str(self.directory), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            metadata = os.fstat(self.descriptor)
+            if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid()
+                    or stat.S_IMODE(metadata.st_mode) != 0o700):
+                raise ArtifactFetchError('artifact_resume_private_owned_directory_required')
+            self.directory_metadata = _fingerprint(metadata)
+            self.names = ['part-{:03d}'.format(index) for index in range(len(lengths))]
+            if set(os.listdir(self.descriptor)) != set(self.names):
+                raise ArtifactFetchError('artifact_resume_part_set_mismatch')
+            for name, length in zip(self.names, lengths):
+                metadata = os.stat(name, dir_fd=self.descriptor, follow_symlinks=False)
+                if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
+                        or metadata.st_nlink != 1 or stat.S_IMODE(metadata.st_mode) != 0o600):
+                    raise ArtifactFetchError('artifact_resume_private_owned_part_required')
+                if metadata.st_size > length:
+                    raise ArtifactFetchError('artifact_resume_prefix_too_large')
+                self.metadata[name] = _fingerprint(metadata)
+            self.check_metadata()
+        except ArtifactFetchError:
+            self.close()
+            raise
+        except Exception:
+            self.close()
+            raise ArtifactFetchError('artifact_resume_unavailable') from None
+
+    def close(self):
+        if self.descriptor is not None:
+            os.close(self.descriptor)
+            self.descriptor = None
+
+    def check_metadata(self):
+        try:
+            if (_fingerprint(os.fstat(self.descriptor)) != self.directory_metadata
+                    or _fingerprint(self.directory.lstat()) != self.directory_metadata
+                    or set(os.listdir(self.descriptor)) != set(self.names)):
+                raise ArtifactFetchError('artifact_resume_checkpoint_changed')
+            for name in self.names:
+                if _fingerprint(os.stat(name, dir_fd=self.descriptor, follow_symlinks=False)) != self.metadata[name]:
+                    raise ArtifactFetchError('artifact_resume_checkpoint_changed')
+        except ArtifactFetchError:
+            raise
+        except Exception:
+            raise ArtifactFetchError('artifact_resume_checkpoint_changed') from None
+
+    def _read(self, name, deadline, destination=None):
+        try:
+            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.descriptor)
+            with os.fdopen(descriptor, 'rb') as source:
+                if _fingerprint(os.fstat(source.fileno())) != self.metadata[name]:
+                    raise ArtifactFetchError('artifact_resume_checkpoint_changed')
+                digest, copied = hashlib.sha256(), 0
+                while True:
+                    _remaining(deadline)
+                    body = source.read(CHUNK_SIZE)
+                    if not body:
+                        break
+                    copied += len(body)
+                    if copied > self.metadata[name][5]:
+                        raise ArtifactFetchError('artifact_resume_checkpoint_changed')
+                    digest.update(body)
+                    if destination is not None:
+                        destination.write(body)
+                if (copied != self.metadata[name][5]
+                        or _fingerprint(os.fstat(source.fileno())) != self.metadata[name]):
+                    raise ArtifactFetchError('artifact_resume_checkpoint_changed')
+                return digest.hexdigest()
+        except ArtifactFetchError:
+            raise
+        except Exception:
+            raise ArtifactFetchError('artifact_resume_checkpoint_changed') from None
+
+    def copy_to(self, stage, deadline):
+        for name in self.names:
+            descriptor = os.open(str(stage / name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, 'wb') as output:
+                self.hashes[name] = self._read(name, deadline, output)
+        self.check_metadata()
+        return [self.metadata[name][5] for name in self.names]
+
+    def verify(self, deadline):
+        self.check_metadata()
+        for name in self.names:
+            if self._read(name, deadline) != self.hashes[name]:
+                raise ArtifactFetchError('artifact_resume_checkpoint_changed')
+        self.check_metadata()
+
+
 def fetch_artifact(url, size, sha256, output, workers=4, timeout=30, deadline=600,
-                   allow_loopback_http=False):
+                   allow_loopback_http=False, resume_parts_directory=None, proxy_url=None):
     """Fetch exact ranges then publish one verified 0600 file, never overwrite.
 
     timeout is the socket-operation bound; deadline bounds the overall transfer.
     allow_loopback_http is only for explicit offline/local HTTP fixtures. There
     are intentionally no caller-supplied headers, tokens, cookies, or auth args.
+    Resume requires an explicit snapshot and the original URL/size/SHA/workers;
+    a prefix has no independent trust until the complete artifact SHA matches.
+    proxy_url is an explicit credential-free HTTP(S) transport for this fetch,
+    never inherited from the environment. SOCKS requires a different transport;
+    rejecting it here does not restrict the owner's native curl/network tools.
     """
     _url(url, allow_loopback_http, initial=True)
+    _proxy_endpoint(proxy_url)
     if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
         raise ArtifactFetchError('artifact_positive_size_required')
     if not isinstance(sha256, str) or re.fullmatch(r'[0-9a-fA-F]{64}', sha256) is None:
@@ -215,24 +373,31 @@ def fetch_artifact(url, size, sha256, output, workers=4, timeout=30, deadline=60
         if (not isinstance(value, (int, float)) or isinstance(value, bool)
                 or not math.isfinite(value) or value <= 0):
             raise ArtifactFetchError('artifact_positive_timeout_required')
+    count = min(workers, size)
+    quotient, remainder = divmod(size, count)
+    lengths = [quotient + (1 if index < remainder else 0) for index in range(count)]
     output, parent_descriptor = _output_parent(output)
+    resume = None
     try:
+        if resume_parts_directory is not None:
+            resume = _ResumeParts(resume_parts_directory, lengths)
         if _already_present(parent_descriptor, output.name, size, sha256):
             return {'output': str(output), 'size': size, 'sha256': sha256,
                     'sha256_verified': True, 'already_present': True}
         expires, stopped = time.monotonic() + deadline, threading.Event()
-        count = min(workers, size)
         with tempfile.TemporaryDirectory(prefix='.artifact-fetch-', dir=str(output.parent)) as scratch:
             stage, parts, offset = Path(scratch), [], 0
-            quotient, remainder = divmod(size, count)
+            prefixes = resume.copy_to(stage, expires) if resume is not None else [0] * count
             with concurrent.futures.ThreadPoolExecutor(max_workers=count) as pool:
                 futures = []
                 for index in range(count):
-                    length = quotient + (1 if index < remainder else 0)
+                    length, prefix = lengths[index], prefixes[index]
                     part = stage / 'part-{:03d}'.format(index)
                     parts.append(part)
-                    futures.append(pool.submit(_part, url, offset, offset + length - 1, size, part,
-                        timeout, expires, stopped, allow_loopback_http))
+                    if prefix < length:
+                        futures.append(pool.submit(_part, url, offset + prefix, offset + length - 1,
+                            size, part, timeout, expires, stopped, allow_loopback_http,
+                            prefix if resume is not None else None, proxy_url))
                     offset += length
                 try:
                     for future in concurrent.futures.as_completed(futures):
@@ -258,6 +423,9 @@ def fetch_artifact(url, size, sha256, output, workers=4, timeout=30, deadline=60
                 artifact.flush()
                 os.fsync(artifact.fileno())
             _remaining(expires)
+            if resume is not None:
+                resume.verify(expires)
+                _remaining(expires)
             try:
                 # Hardlink publishes the whole file atomically on the same
                 # filesystem and, unlike rename/replace, never overwrites.
@@ -267,8 +435,11 @@ def fetch_artifact(url, size, sha256, output, workers=4, timeout=30, deadline=60
             except FileExistsError:
                 already_present = _already_present(parent_descriptor, output.name, size, sha256)
             return {'output': str(output), 'size': size, 'sha256': sha256,
-                    'sha256_verified': True, 'already_present': already_present, 'workers': count}
+                    'sha256_verified': True, 'already_present': already_present, 'workers': count,
+                    'resumed_bytes': sum(prefixes), 'network_parts': len(futures)}
     finally:
+        if resume is not None:
+            resume.close()
         os.close(parent_descriptor)
 
 
@@ -281,6 +452,8 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--timeout', type=float, default=30, help='socket-operation timeout in seconds')
     parser.add_argument('--deadline', type=float, default=600, help='overall deadline in seconds')
+    parser.add_argument('--resume-parts-directory', help='explicit owned 0700 snapshot of every original part')
+    parser.add_argument('--proxy-url', help='explicit credential-free HTTP(S) proxy for this fetch; no SOCKS/auth')
     args, unsupported = parser.parse_known_args()
     if unsupported:
         # argparse's default error embeds unknown values (potential tokens).
@@ -288,7 +461,8 @@ def main():
         return 1
     try:
         result = fetch_artifact(args.url, args.size, args.sha256, args.output,
-                                args.workers, args.timeout, args.deadline)
+                                args.workers, args.timeout, args.deadline,
+                                resume_parts_directory=args.resume_parts_directory, proxy_url=args.proxy_url)
     except ArtifactFetchError as error:
         print(json.dumps({'ok': False, 'error': str(error)}))
         return 1

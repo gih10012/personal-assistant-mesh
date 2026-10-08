@@ -175,7 +175,13 @@ def install_package(artifact, sha256, version, target, install_dir):
                 payload.mkdir(mode=0o700)
                 for name, member in members.items():
                     path = payload / name
-                    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                    # pathlib's recursive mkdir gives intermediate directories
+                    # its default 0777 mode on older Python. Create each level
+                    # explicitly, independent of the host's group-write umask.
+                    parent = payload
+                    for component in PurePosixPath(name).parts[:-1]:
+                        parent = parent / component
+                        parent.mkdir(mode=0o755, exist_ok=True)
                     if member.isdir():
                         path.mkdir(mode=0o755, exist_ok=True)
                     else:

@@ -149,6 +149,23 @@ canonical package manifest 和组件元数据，不读 auth/token/历史、不�
 `layout=complete` **不是**来源/完整性、活跃进程、模型、Shell 或网络验证。
 agent 参考数据同时提供 install/switch/probe 的推荐句柄，未自动执行。
 
+常驻 Worker 的真实执行验收使用已有 authority，不创建独立 Codex：
+
+```sh
+python3 -m scripts.probe_worker_shell \
+  --operator-config /private/operator.json --worker-config /private/worker.json \
+  --server-config /private/server.json --state /private/probe-state.json \
+  --submit --timeout 180
+```
+
+在该 Worker 所在节点运行，state 放在已存在的本人 0700、git 之外目录。
+仅显式 `--submit` 提交一个固定 ID/body、独立 scope、固定目的节点的任务；
+默认只查同一 state。超时不新建 ID、不重放模型，不修改 Global Leader
+线程或工作区。完成还须核对同节点/授权 profile/指定原生 turn 的实际
+挑战命令、匹配 call_id 的未知哈希输出与最终答案。`--server-config` 只读
+交叉核对该任务账本，原生会话读取仅选这条探针。探针不自动证明 systemd
+或 /proc 进程身份，部署者须另行核对；requested read-only 不是原生沙箱。
+
 官方 [0.159.2 install-context](https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/install-context/src/lib.rs)
 从 canonical `bin/codex` 发现 sibling resources/PATH；维护安装器据此校验
 布局，并保留/复核归档目录权限。不会为模型另造资源路径或限制其原生 PATH。
@@ -186,6 +203,13 @@ python3 -m scripts.fetch_artifact --url PUBLIC_HTTPS_RELEASE_URL \
 全部组装校验后才 0600 原子发布；既有错误内容不覆盖。它不接受账号凭据，
 不继承环境代理，也不修改原生网络/代理环境。原生 curl、fish、SSH 或其它
 下载方式仍可使用；此额外能力的失败不表示这些原生能力不可用。
+
+可显式加 `--resume-parts-directory /private/parts-snapshot` 复用本人所有的
+0700 分段快照，维持原 size/SHA256/workers。严格检查全部分段及权限，
+只下载每段缺失后缀；快照不修改，整包仍需同一官方 SHA256 才发布。需要
+已授权代理时可显式加 `--proxy-url http://127.0.0.1:PORT`；只作用本次下载，
+无凭据、query、fragment 或 SOCKS 支持，不读环境 proxy/bypass 或改全局
+网络配置。其它原生下载工具和代理路线不受这些额外接口限制。
 
 模型 runtime 的服务模板不额外设置 `NoNewPrivileges` 或 `PrivateTmp`，不会把 Mesh API 策略变成原生工具的进程权限/临时目录隔离。它仍以本人账户运行并受该账户既有 OS 权限约束，不新增 sudo 授权。只运行控制面或 SSH transport 的服务与模型 worker 分离。
 
