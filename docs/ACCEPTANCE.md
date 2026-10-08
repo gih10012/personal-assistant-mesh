@@ -1,0 +1,27 @@
+# 运行证据与待验收
+
+2026-10-07 至 2026-10-08。公开记录不含账号、私有消息正文、服务器 IP 或凭据。
+
+## 已观察到
+
+- 本地官方 Codex 认证完成真实模型请求，无新 API Key。
+- 原生全功能环境实际写文件并读回，不是只给建议的只读 worker。
+- Leader 实际创建持久子任务；子任务完成后父任务跨轮次自动恢复并得出正确结果。
+- 前文回忆测试禁止文件和 mesh 手工记忆：第一项仅在 native context 记住测试内容；重启自己的 worker 后，新任务准确回忆。它证明该原生 thread 连续，不证明所有 native memories 已后台生成。
+- 云端微信持续记录轮询/outbox，受理多条项目通知；每条仍 `delivery_verified=false`，未冒充手机确认。
+- 云端 Codex 0.159.2 传输完成，SHA-256 与本机一致，版本执行正常。
+- 测试覆盖 scope/harness 隔离、Leader/task fence、未决效果不重放、畸形答案不毒化批次、native plan/goal/steer 请求、归档和发送防重。
+
+## 不可据此推断
+
+- 跨机器 native thread 的实际接续和完整接管。
+- 断电跨夜继续工作、手机真实收到主动通知。
+- Native memories 后台提取/合并已完成；它有 idle/quota 条件。
+- Pi/离线模型已真实可用；适配不是后备服务。
+- pause 立即 interrupt 进程：它立即 fence 账本，worker 观察失效后退出。
+- 活跃外部效果已核对可恢复：当前 needs_review、不重放，reconciliation/release 仍需实现。
+- 云端媒体、browser live view、vault、语音、所有插件、技能回滚、自维护已完成。
+- 单权威控制面无单点或已完全去中心化。
+
+后续实测分别记录任务状态、真实输出、作用节点、native 身份、故障/恢复步骤及效果核对。
+服务 active 和单元测试不替代端到端验收。

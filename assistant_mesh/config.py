@@ -6,7 +6,7 @@ from pathlib import Path
 
 def private_json(path):
     path = Path(path).expanduser()
-    if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) & 0o077:
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid() or stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ValueError('private_config_requires_regular_0600_file')
     with path.open(encoding='utf8') as handle:
         return json.load(handle)
@@ -14,7 +14,7 @@ def private_json(path):
 
 def read_secret(path):
     path = Path(path).expanduser()
-    if path.is_symlink() or stat.S_IMODE(path.stat().st_mode) & 0o077:
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid() or stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ValueError('secret_requires_regular_0600_file')
     value = path.read_text().strip()
     if len(value) < 32:

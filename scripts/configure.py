@@ -27,10 +27,15 @@ def main():
     parser.add_argument('--remote-codex', required=True)
     parser.add_argument('--remote-auth-home', required=True)
     parser.add_argument('--local-auth-home', required=True)
+    parser.add_argument('--capture-network', action='store_true', help='Capture current proxy variables privately for background Codex')
     args = parser.parse_args()
     root, remote = Path(args.state), Path(args.remote_state)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     root.chmod(0o700)
+    if args.capture_network:
+        values = {k: os.environ[k] for k in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+                                            'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy') if k in os.environ}
+        save(root / 'network.json', values)
     for name in ('operator', 'cloud', 'laptop'):
         path = root / (name + '.token')
         if not path.exists():
@@ -50,7 +55,8 @@ def main():
             'auth_home': args.remote_auth_home, 'workspace': str(remote / 'workspace')}))
     save(root / 'laptop-worker.json', dict(common, token_file=str(root / 'laptop.token'), node_id='laptop',
         capabilities=['leader', 'codex.readonly'], codex={'executable': '/usr/local/bin/codex',
-            'auth_home': args.local_auth_home, 'workspace': str(root / 'workspace')}))
+            'auth_home': args.local_auth_home, 'workspace': str(root / 'workspace'),
+            **({'network_env_file': str(root / 'network.json')} if args.capture_network else {})}))
     save(root / 'operator.json', dict(common, token_file=str(root / 'operator.token')))
     save(root / 'cloud-operator.json', dict(common, token_file=str(remote / 'operator.token')))
     (root / 'workspace').mkdir(mode=0o700, exist_ok=True)

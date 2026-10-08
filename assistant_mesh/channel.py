@@ -79,9 +79,11 @@ class ILink:
         return self.request('getupdates', {'get_updates_buf': cursor}, 40)
 
     def send(self, row):
-        message = {'to_user_id': self.account['ilink_user_id'], 'client_id': row['client_id'],
+        message = {'from_user_id': '', 'to_user_id': self.account['ilink_user_id'], 'client_id': row['client_id'],
                    'message_type': 2, 'message_state': 2,
                    'item_list': [{'type': 1, 'text_item': {'text': row['body']}}]}
+        if row.get('media_items'):
+            message['item_list'] = json.loads(row['media_items'])
         if row.get('context_token'):
             message['context_token'] = row['context_token']
         return self.request('sendmessage', {'msg': message}, 15)

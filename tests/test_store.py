@@ -107,7 +107,8 @@ class LedgerTests(unittest.TestCase):
         self.assertIsNone(self.store.next_send())
         self.store.ingest([self.message(text='ClawBot 自动刷新 test')], 'c', 'owner', 'bot')
         second = self.store.next_send()
-        self.assertEqual(first['client_id'], second['client_id'])
+        self.assertNotEqual(first['client_id'], second['client_id'])
+        self.assertEqual(first['id'], second['id'])
         self.store.finish_send('x', 'rejected')
         self.assertIsNone(self.store.next_send())
 
@@ -149,6 +150,41 @@ class LedgerTests(unittest.TestCase):
 
     def test_state_permissions(self):
         self.assertEqual(0o600, os.stat(self.store.path).st_mode & 0o777)
+
+    def test_recovery_ticket_reserved_once_before_effect(self):
+        self.store.enqueue('x', 'hello')
+        self.store.next_send()
+        self.store.finish_send('x', 'rejected')
+        ticket = self.store.claim_renewal('laptop')
+        self.assertTrue(ticket['marker'].startswith('ClawBot 自动刷新'))
+        self.assertIsNone(self.store.claim_renewal('laptop'))
+
+    def test_rejected_notification_only_has_one_recovery_submission(self):
+        self.store.enqueue('x', 'hello')
+        self.store.next_send()
+        self.store.finish_send('x', 'rejected')
+        self.store.ingest([self.message(text='ClawBot 自动刷新 test')], 'c', 'owner', 'bot')
+        self.store.next_send()
+        self.store.finish_send('x', 'rejected')
+        self.store.ingest([self.message('2', text='ClawBot 自动刷新 test2', create_time_ms=200)], 'c2', 'owner', 'bot')
+        self.assertIsNone(self.store.next_send())
+        self.assertIsNone(self.store.claim_renewal('laptop'))
+
+    def test_backend_wait_retries_without_notification_storm(self):
+        self.store.heartbeat('n', ['leader'])
+        task_id = self.store.create_task('test')
+        for _ in range(3):
+            task = self.store.claim('n')
+            self.store.update_task(task_id, 'n', task['epoch'], result='waiting', status='waiting_backend')
+            self.now += 61
+            self.store.heartbeat('n', ['leader'])
+        self.assertEqual({'pending': 1}, self.store.status()['outbox'])
+
+    def test_old_input_is_archived_not_executed_on_activation(self):
+        self.store.set('activate_after_ms', 1000)
+        self.store.ingest([self.message(create_time_ms=100)], 'c', 'owner', 'bot')
+        self.assertEqual({}, self.store.status()['tasks'])
+        self.assertEqual(1, len(self.store.inbox()['items']))
 
 
 if __name__ == '__main__':

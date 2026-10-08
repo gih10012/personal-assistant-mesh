@@ -1,24 +1,30 @@
 # Personal Assistant Mesh
 
-独立、轻量的个人助理控制面：笔记本关机不停止微信入口，任务持久保存后交给可用的 Leader。
+面向通用个人助理的持久执行与能力网络。以 Dots 的长任务、连续上下文、主动协作为产品对标，使用 **Codex 原生 app-server 为主、显式配置的 Pi 为备选**，不是 OpenClaw/OpenCode 扩展，也不是 OpenAI Dots 的源码。
 
-这是 OpenClaw 的配套扩展项目，不是 OpenAI Dots 的官方源码，也不声称完整实现 Dots。
-首个版本使用 Codex app-server，复用本人已登录的 ChatGPT 认证；不需要新建 OpenAI API Key。
+产品入口基于真实 fork：[personal-assistant-dots](https://github.com/gih10012/personal-assistant-dots)。控制面不依赖面板在线；面板是任务、能力和成果的观察窗口，不是模型的工具白名单。
 
-## 当前能力
+## 设计方向
 
-- Python 标准库 + SQLite WAL，无 Redis、数据库服务器或常开桌面依赖。
-- 独立微信 iLink 长轮询；整批消息、任务、回复上下文和游标在同一事务中持久保存。
-- 消息去重、稳定出站请求 ID、发送未知结果不自动重试。
-- 已绑定本人身份核对；第三人/群聊消息不触发任务。
-- 设备能力目录、90 秒 Leader/任务租约、旧执行者提交隔离、任务检查点。
-- Codex stdio app-server worker，自动发现 `.codex-official` / `.codex` 的已有认证。
-- 本机和云端 worker；本机消失后云端接管只读工作，本机专属工作等待对应能力。
-- 无模型的 `/status`、`/pause <完整任务ID>`、`/resume <完整任务ID>`。
-- 每节点独立 token 与授权能力；RPC 仅监听 loopback，通过 SSH 隧道跨设备。
-- 默认零支出；预算预留支持并发限制和请求防重，尚不执行采购或扣款。
+任务、能力、机器和网络路径解耦。CPU/GPU、模型推理、工具、存储和可达性都应成为可发现、可度量、可组合的能力；质量指标要有单位、样本时间、来源和验证证据，不能把节点自报当成实测。
 
-## 运行
+模型可以利用原生终端、文件、联网和已配置 MCP，自行发现能力、创建工具、测试与部署。注册用于跨节点发现、证据和授权，不规定所有工具必须先注册才能在已授权宿主运行。新主体或远端资源的授权、零支出预算、未决外部副作用由控制面核对，不由模型的自然语言声明替代。
+
+## 已实现的执行基础
+
+- 标准库、SQLite WAL、单权威事务账本；无 Redis 或常开桌面依赖。
+- 独立云端微信 iLink 入口：整批消息、任务、上下文和游标原子落盘；稳定出站 ID，未知结果不重试。
+- 节点能力目录、Leader/任务租约和 epoch fencing；旧执行者不能继续提交。
+- Leader 原生 thread 跨任务连续，子 agent 按项目/身份复用；上下文压缩由 Codex 自己维护。
+- 只传输选定的原生 rollout 用于跨机恢复，不复制整个认证目录或其他聊天。跨机实际验收见 [ACCEPTANCE](docs/ACCEPTANCE.md)。
+- Native memories 通过进程级配置开启；后台生成有 idle/quota 条件，不等于每轮即时写入，也不等于 mesh 手工事实记忆。
+- 模型创建持久子任务、等待结果后自动唤醒；没有硬编码的委派深度或工具白名单。
+- 原生 `/plan`、`/goal`、`/steer` 接线；问题和单次审批可持久回复。
+- Codex 启动/认证不可用且尚未开始执行时，才尝试配置好的 Pi；不跨 harness 重放已起效 turn。Pi 真实兜底仍需配置/验收。
+- 复用已有 Codex 认证，从账户实时模型目录选择，不要求在面板粘贴 API Key。
+- 项目只读观察 API、viewer/operator 权限分离。浏览器鉴权由 Dots 产品层处理。
+
+## 运行与验证
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -27,36 +33,34 @@ python3 -m assistant_mesh --config /absolute/private/worker.json worker
 python3 -m assistant_mesh --config /absolute/private/operator.json status
 ```
 
-配置必须为本人持有的普通 `0600` 文件；配置/认证/token/数据库存储在仓库外的 `0700` 私有目录。
-配置生成器 `scripts/configure.py --help` 和 `deploy/` 提供本人 Linux/systemd 部署模板。
-配置中的 `auth_home` 通过支持 `CODEX_HOME_OVERRIDE` 的 Codex wrapper 选择；原始 Codex 可执行文件使用自身默认认证目录。
-不复制整个 Codex 主目录，不导出聊天历史，不把认证信息放到模型提示中。
+配置/token 必须是本人持有的私有普通文件，放在仓库外的 `0700` 目录。认证、数据库、聊天、rollout、媒体都不能发布。`scripts/configure.py --help` 与 `deploy/` 提供部署入口。RPC 只监听 loopback，跨设备用 SSH 隧道或明确部署的 TLS 入口。
 
-## 接口
+`auth_home` 由支持 `CODEX_HOME_OVERRIDE` 的 Codex wrapper 选择；原始二进制使用自身默认认证目录。不要改当前会话的全局 HOME/CODEX_HOME。
 
-所有 `/v1/*` 需要 Bearer token；`/healthz` 仅返回服务存活状态。
+## 控制接口
 
-| 接口 | 权限/行为 |
+所有 `/v1/*` 需要 Bearer token。node 身份由凭据绑定，不能从请求体伪造。viewer 不能创建任务、控制执行、批准问题或发通知。
+
+| 接口 | 用途 |
 | --- | --- |
-| `GET /v1/status` | 已认证状态查询，不返回消息正文或凭据 |
-| `POST /v1/heartbeat` | node token，仅发布管理员授权能力，节点身份由 token 绑定 |
-| `POST /v1/claim` | node token，原子领取匹配任务，返回执行 epoch |
-| `POST /v1/task/update` | node token，必须持有未过期租约与当前 epoch |
-| `POST /v1/tasks` | operator 创建任务，可指定父任务及能力 |
-| `POST /v1/task/status` | operator 查看任务状态 |
-| `POST /v1/inbox` | operator 按归档游标读取消息，不泄露上下文 token |
-| `POST /v1/notify` | operator 向绑定本人入队通知，稳定 request_id |
-| `POST /v1/notify/status` | operator 查询原发送结果，不重新发送 |
-| `POST /v1/budget/reserve` | operator 按最小货币单位预留预算，未配置则拒绝 |
+| `GET /v1/status` | 脱敏运行状态 |
+| `GET /v1/projects` | operator/viewer 按游标观察实际任务，不建另一套面板任务库 |
+| `POST /v1/heartbeat`, `/v1/claim`, `/v1/task/update` | 节点声明、领取、fenced 更新 |
+| `POST /v1/tasks`, `/v1/task/control` | owner 创建、暂停、恢复 |
+| `POST /v1/task/status` | operator/viewer 查看实际结果和原生状态 |
+| `POST /v1/agent/action` | 模型记忆、委派、等待、通知 |
+| `POST /v1/session` | 同 scope/harness 的选定原生状态同步 |
+| `POST /v1/interaction`, `/v1/interaction/resolve` | 问题/单次审批与 owner 回答 |
+| `POST /v1/task/steer`, `/v1/steering` | 当前 native turn 注入后续指令 |
+| `POST /v1/inbox`, `/v1/notify`, `/v1/notify/status` | 归档、防重通知；accepted 不等于手机确认 |
+| `POST /v1/budget/reserve` | 默认零支出预留，不实施采购 |
 
-## 边界与后续里程碑
+## 未完成范围
 
-- 当前 worker 为只读，不是已开放采购、任意终端管理的全权限助理。
-- 微信服务端可能拒绝长期空闲后的主动发送。明确 `-2` 仅在新回复上下文到来后尝试；网络未知结果不重发。
-- 已受理不等于手机实际收件；保留 `delivery_verified=false`，真实收件单独验收。
-- 附件私存但下载/理解尚未集成；现有 skill 的媒体功能不能自动算作云端验收通过。
-- 初版单一控制账本，不声称控制入口本身无单点故障。网络分区不允许两个全局执行者同时提交。
-- 跨主机不能直接恢复只存在另一台机器的 Codex thread；在新主机重新执行只读任务，不能重放可能产生外部效果的任务。
-- 后续：OpenClaw 插件接入、模型兜底、技能版本发布与回滚、受限执行/审批、询价与采购适配、跨夜可靠性观察。
+- 动态资源图、能力质量与授权生命周期正在扩展；字符串能力标签不等于完整资源调度。
+- Native rollout 路径恢复是实验性接口。活跃外部效果中断先核对，不自动重放；reconciliation/release 工作流尚未完成。
+- 仍是单一控制账本，没有宣称完全去中心化或消除单点。
+- Pi/离线模型、技能版本发布回滚、自维护、云端持久调度、远端媒体及跨夜手机收件仍需各自证据。
+- Dots fork 上游 browser live view、vault、语音和部分插件 UI 尚未完整接入 native runtime。界面存在不代表能力已接通。
 
-公开仓库只存代码与脱敏配置示例。运行证据记录必须去除账号、消息正文、IP 与凭据。
+见 [Dots 能力对标](docs/BENCHMARK.md) 与 [实测记录](docs/ACCEPTANCE.md)。

@@ -1,5 +1,6 @@
 """Single-authority SQLite ledger. All lease checks use the authority's clock."""
 import contextlib
+import base64
 import hashlib
 import json
 import os
@@ -41,9 +42,46 @@ class Store:
                 CREATE TABLE IF NOT EXISTS reservations(
                     id TEXT PRIMARY KEY, amount INTEGER NOT NULL, status TEXT NOT NULL,
                     created REAL NOT NULL, fingerprint TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS renewals(
+                    id TEXT PRIMARY KEY, node TEXT NOT NULL, marker TEXT NOT NULL,
+                    status TEXT NOT NULL, created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS memories(
+                    id TEXT PRIMARY KEY, scope TEXT NOT NULL, text TEXT NOT NULL, updated REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS agent_actions(
+                    id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, response TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS sessions(
+                    scope TEXT PRIMARY KEY, node TEXT NOT NULL, harness TEXT NOT NULL,
+                    state TEXT NOT NULL, artifact TEXT, updated REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS native_sessions(
+                    scope TEXT NOT NULL, node TEXT NOT NULL, harness TEXT NOT NULL,
+                    state TEXT NOT NULL, artifact TEXT, updated REAL NOT NULL,
+                    PRIMARY KEY(scope,harness));
+                CREATE TABLE IF NOT EXISTS session_chunks(
+                    id TEXT NOT NULL, part INTEGER NOT NULL, body BLOB NOT NULL,
+                    PRIMARY KEY(id,part));
+                CREATE TABLE IF NOT EXISTS interactions(
+                    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, epoch INTEGER NOT NULL,
+                    kind TEXT NOT NULL, params TEXT NOT NULL, answer TEXT, created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS steering(
+                    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, epoch INTEGER NOT NULL,
+                    text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
             ''')
+            if 'media_items' not in [r[1] for r in db.execute('PRAGMA table_info(outbox)')]:
+                db.execute('ALTER TABLE outbox ADD COLUMN media_items TEXT')
+            if 'retry_count' not in [r[1] for r in db.execute('PRAGMA table_info(outbox)')]:
+                db.execute('ALTER TABLE outbox ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0')
+            if 'context' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
+                db.execute("ALTER TABLE tasks ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
+            if 'scope' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
+                db.execute("ALTER TABLE tasks ADD COLUMN scope TEXT NOT NULL DEFAULT 'leader:owner'")
+            if 'paused_status' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
+                db.execute('ALTER TABLE tasks ADD COLUMN paused_status TEXT')
+            if 'paused_deadline' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
+                db.execute('ALTER TABLE tasks ADD COLUMN paused_deadline REAL')
+            db.execute('INSERT OR IGNORE INTO native_sessions SELECT * FROM sessions')
             # A crash during network submission is NEVER treated as permission to retry.
             db.execute("UPDATE outbox SET status='unknown' WHERE status='submitting'")
+            db.execute("UPDATE steering SET state='unknown' WHERE state='submitting'")
         os.chmod(self.path, 0o600)
 
     @contextlib.contextmanager
@@ -104,18 +142,36 @@ class Store:
             db.execute('UPDATE leader SET node=?,epoch=epoch+1,deadline=?', (node, now + 90 if node else 0))
             return dict(db.execute('SELECT * FROM leader').fetchone())
 
-    def create_task(self, text, required=None, parent_id=None, task_id=None):
+    def create_task(self, text, required=None, parent_id=None, task_id=None, context=None):
         if not isinstance(text, str) or not text.strip() or len(text.encode('utf8')) > 65536:
             raise ValueError('invalid_task_input')
         required = required or ['leader']
         if not isinstance(required, list) or not all(isinstance(x, str) for x in required):
             raise ValueError('invalid_required')
+        context = context or {}
+        if not isinstance(context, dict) or len(json.dumps(context).encode()) > 32768:
+            raise ValueError('invalid_task_context')
+        context = dict(context)
+        if text.startswith('/plan '):
+            context.setdefault('mode', 'plan')
+        elif text.startswith('/goal '):
+            objective = text[6:].strip()
+            if not objective or len(objective) > 4000:
+                raise ValueError('invalid_goal_objective')
+            context.setdefault('goal', {'objective': objective, 'status': 'active'})
         with self.transaction() as db:
             task_id = task_id or uuid.uuid4().hex
+            previous = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if previous:
+                if (previous['input'] != text or json.loads(previous['required']) != required
+                        or previous['parent_id'] != parent_id or json.loads(previous['context']) != context):
+                    raise Conflict('task_id_content_conflict')
+                return task_id
             if parent_id and not db.execute('SELECT 1 FROM tasks WHERE id=?', (parent_id,)).fetchone():
                 raise ValueError('parent_not_found')
-            db.execute('INSERT INTO tasks(id,parent_id,input,required,status,created) VALUES(?,?,?,?,?,?)',
-                       (task_id, parent_id, text, json.dumps(required), 'pending', self.clock()))
+            scope = self.session_scope(context)
+            db.execute('INSERT INTO tasks(id,parent_id,input,required,status,created,context,scope) VALUES(?,?,?,?,?,?,?,?)',
+                       (task_id, parent_id, text, json.dumps(required), 'pending', self.clock(), json.dumps(context), scope))
             return task_id
 
     def ingest(self, messages, cursor, owner, bot):
@@ -148,21 +204,73 @@ class Store:
                     raise ValueError('invalid_items')
                 text = '\n'.join(str(i.get('text_item', {}).get('text', '')) for i in items if isinstance(i, dict) and i.get('type') == 1).strip()
                 if text.startswith('ClawBot 自动刷新'):
+                    db.execute("UPDATE renewals SET status='context_observed' WHERE marker=? AND status='reserved'", (text,))
                     continue
                 if text in ('/status', '状态', '助理状态'):
                     self._enqueue(db, 'status-' + message_id, self._status_text(db))
+                elif text.startswith('/answer ') or text.startswith('/approve ') or text.startswith('/deny '):
+                    parts = text.split(' ', 2)
+                    identity = parts[1]
+                    interaction = db.execute('SELECT * FROM interactions WHERE id=?', (identity,)).fetchone()
+                    task = db.execute('SELECT * FROM tasks WHERE id=?', (interaction['task_id'],)).fetchone() if interaction else None
+                    if not self._interaction_is_live(db, task, interaction) or interaction['answer'] is not None:
+                        self._enqueue(db, 'control-' + message_id, '请求不存在、已回答或原会话已经中断。')
+                        continue
+                    if parts[0] == '/answer' and interaction['kind'] == 'question' and len(parts) == 3:
+                        questions = json.loads(interaction['params']).get('questions', [])
+                        if len(questions) == 1:
+                            answer = {'answers': {questions[0]['id']: {'answers': [parts[2]]}}}
+                        else:
+                            try:
+                                answer = json.loads(parts[2])
+                            except ValueError:
+                                self._enqueue(db, 'control-' + message_id, '多个问题请使用 answers JSON 按问题 ID 回答。')
+                                continue
+                    elif parts[0] in ('/approve', '/deny') and interaction['kind'] == 'approval':
+                        answer = {'decision': 'accept' if parts[0] == '/approve' else 'decline'}
+                    else:
+                        self._enqueue(db, 'control-' + message_id, '回答类型不匹配。')
+                        continue
+                    try:
+                        self._validate_interaction_answer(interaction, answer)
+                    except ValueError:
+                        # A user typo is an archived invalid command, not a bad
+                        # transport batch. Keep its inbox entry and continue so
+                        # following commands and the cursor still commit.
+                        self._enqueue(db, 'control-' + message_id, '回答格式无效；请按原问题 ID 提交完整的 answers JSON。')
+                        continue
+                    db.execute('UPDATE interactions SET answer=? WHERE id=?', (json.dumps(answer), identity))
+                    self._enqueue(db, 'control-' + message_id, '回答已交给原生 Codex 会话。')
+                elif text.startswith('/steer '):
+                    parts = text.split(' ', 2)
+                    target = db.execute('SELECT epoch,status FROM tasks WHERE id=?', (parts[1],)).fetchone() if len(parts) == 3 else None
+                    if target and target['status'] == 'running':
+                        db.execute('INSERT OR IGNORE INTO steering(id,task_id,epoch,text) VALUES(?,?,?,?)', (message_id, parts[1], target['epoch'], parts[2]))
+                        self._enqueue(db, 'control-' + message_id, '补充要求已保存，将插入当前运行轮次。')
+                    else:
+                        self._enqueue(db, 'control-' + message_id, '仅运行中的任务可接收 /steer；请指定完整任务 ID。')
                 elif text.startswith('/pause ') or text.startswith('/resume '):
                     command, target = text.split(' ', 1)
-                    row = db.execute('SELECT status FROM tasks WHERE id=?', (target.strip(),)).fetchone()
-                    if row and row['status'] in ('pending', 'running', 'paused'):
-                        db.execute('UPDATE tasks SET status=?,node=NULL,epoch=epoch+1,deadline=NULL WHERE id=?',
-                                   ('paused' if command == '/pause' else 'pending', target.strip()))
-                        self._enqueue(db, 'control-' + message_id, '已' + ('暂停' if command == '/pause' else '恢复') + '任务 ' + target.strip())
-                    else:
+                    try:
+                        control = self._control_task(db, target.strip(), command[1:])
+                    except Conflict:
+                        self._enqueue(db, 'control-' + message_id, '任务可能已产生外部效果，需要先核对实际执行状态；未重新运行。')
+                    except ValueError:
                         self._enqueue(db, 'control-' + message_id, '任务不存在或已经结束。')
+                    else:
+                        self._enqueue(db, 'control-' + message_id, '任务 ' + target.strip() + ' 当前状态：' + control['status'])
                 elif text:
-                    db.execute('INSERT INTO tasks(id,input,required,status,created) VALUES(?,?,?,?,?)',
-                               (message_id, text, '["leader"]', 'pending', self.clock()))
+                    context = {}
+                    if text.startswith('/goal '):
+                        objective = text[len('/goal '):].strip()
+                        if not objective or len(objective) > 4000:
+                            self._enqueue(db, 'control-' + message_id, '目标不能为空且最多 4000 字。')
+                            continue
+                        context['goal'] = {'objective': objective, 'status': 'active'}
+                    elif text.startswith('/plan '):
+                        context['mode'] = 'plan'
+                    db.execute('INSERT INTO tasks(id,input,required,status,created,context) VALUES(?,?,?,?,?,?)',
+                               (message_id, text, '["leader"]', 'pending', self.clock(), json.dumps(context)))
                     self._enqueue(db, 'ack-' + message_id, '已收到并保存任务 ' + message_id[:8] + '。正在交给可用的 Leader。')
                 else:
                     # Retain media raw references privately; don't silently pretend understood.
@@ -181,19 +289,39 @@ class Store:
                 raise Conflict('node_not_live')
             caps = set(json.loads(n['capabilities']))
             leader = db.execute('SELECT * FROM leader').fetchone()
-            rows = db.execute("SELECT * FROM tasks WHERE status='pending' OR (status='running' AND deadline<=?) ORDER BY created", (now,)).fetchall()
+            rows = db.execute("SELECT * FROM tasks WHERE status='pending' OR (status IN ('running','waiting_backend','waiting_auth','continuing') AND deadline<=?) ORDER BY created", (now,)).fetchall()
             for row in rows:
                 required = set(json.loads(row['required']))
                 if not required <= caps or ('leader' in required and (leader['node'] != node or leader['deadline'] <= now)):
                     continue
+                if db.execute("SELECT 1 FROM tasks WHERE scope=? AND id<>? AND status='running' AND deadline>? LIMIT 1", (row['scope'], row['id'], now)).fetchone():
+                    continue  # one native thread has one active turn, across all nodes
                 # Native effects are not blindly replayed after losing a worker.
-                if row['status'] == 'running' and json.loads(row['checkpoint']).get('side_effect_started'):
-                    db.execute("UPDATE tasks SET status='needs_review',node=NULL WHERE id=?", (row['id'],))
+                if json.loads(row['checkpoint']).get('side_effect_started'):
+                    db.execute("UPDATE tasks SET status='needs_review',node=NULL,deadline=NULL WHERE id=?", (row['id'],))
                     self._enqueue(db, 'review-' + row['id'], '任务 ' + row['id'][:8] + ' 执行中断，可能已产生外部效果，等待核对后续接。')
                     continue
+                unsettled = db.execute("SELECT checkpoint FROM tasks WHERE scope=? AND id<>? AND status<>'completed'", (row['scope'], row['id']))
+                if any(json.loads(other['checkpoint']).get('side_effect_started') for other in unsettled):
+                    # A new task must not sidestep review by resuming the same
+                    # native conversation under a different task ID or node.
+                    continue
                 db.execute("UPDATE tasks SET status='running',node=?,epoch=epoch+1,deadline=?,attempts=attempts+1 WHERE id=?", (node, now + 90, row['id']))
+                checkpoint = json.loads(row['checkpoint'])
+                checkpoint['wait_children_requested'] = False
+                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(checkpoint), row['id']))
                 result = dict(db.execute('SELECT * FROM tasks WHERE id=?', (row['id'],)).fetchone())
                 result['checkpoint'] = json.loads(result['checkpoint'])
+                result['context'] = json.loads(result['context'])
+                result['sessions'] = {}
+                for session in db.execute('SELECT * FROM native_sessions WHERE scope=?', (row['scope'],)):
+                    native = dict(session)
+                    native['state'] = json.loads(native['state'])
+                    result['sessions'][native['harness']] = native
+                result['session'] = result['sessions'].get('codex') or result['sessions'].get('pi')
+                scope = result['context'].get('agent_id', 'owner')
+                result['memories'] = [dict(m) for m in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) ORDER BY updated DESC LIMIT 100', (scope, 'owner'))]
+                result['children'] = [dict(c) for c in db.execute('SELECT id,status,result FROM tasks WHERE parent_id=? ORDER BY created', (row['id'],))]
                 return result
         return None
 
@@ -206,16 +334,290 @@ class Store:
                     or row['deadline'] <= now or ('leader' in json.loads(row['required'])
                     and (leader['node'] != node or leader['deadline'] <= now))):
                 raise Conflict('stale_task_lease')
-            if status is not None and status not in ('completed', 'failed', 'waiting_auth', 'needs_review'):
+            if status is not None and status not in ('completed', 'failed', 'waiting_auth', 'waiting_backend', 'waiting_children', 'continuing', 'needs_review'):
                 raise ValueError('invalid_terminal_status')
             next_checkpoint = json.loads(row['checkpoint'])
             if checkpoint:
                 next_checkpoint.update(checkpoint)
+            delay = 300 if status == 'waiting_auth' else 60 if status == 'waiting_backend' else 30 if status == 'continuing' else 90
+            if status == 'waiting_children':
+                active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (task_id,)).fetchone()
+                if not active:
+                    status = 'pending'  # children may finish before the parent yields
+                next_checkpoint['side_effect_started'] = False  # all native work has settled
             db.execute('UPDATE tasks SET checkpoint=?,deadline=?,result=?,status=? WHERE id=?',
-                       (json.dumps(next_checkpoint), now + 90, result, status or 'running', task_id))
-            if status:
+                       (json.dumps(next_checkpoint), now + delay, result, status or 'running', task_id))
+            if status and not row['parent_id'] and status not in ('waiting_children', 'continuing', 'pending') and (status not in ('waiting_auth', 'waiting_backend') or not json.loads(row['checkpoint']).get('backend_wait_notified')):
                 self._enqueue(db, 'result-' + task_id + '-' + str(epoch), result or '任务结束：' + status)
+            if status in ('waiting_auth', 'waiting_backend'):
+                next_checkpoint['backend_wait_notified'] = True
+                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(next_checkpoint), task_id))
+            if row['parent_id'] and status in ('completed', 'failed', 'needs_review'):
+                active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (row['parent_id'],)).fetchone()
+                if not active:
+                    db.execute("UPDATE tasks SET status='pending',node=NULL,deadline=NULL WHERE id=? AND status='waiting_children'", (row['parent_id'],))
             return {'ok': True}
+
+    def agent_action(self, task_id, node, epoch, action_id, action, arguments):
+        """Model-selected coordination tools; mutation and fencing are ONE transaction.
+
+        These tools supplement native shell/MCP, not replace them with an allowlist.
+        Durable call IDs protect task creation and notifications from replay.
+        """
+        if not isinstance(arguments, dict) or not isinstance(action_id, str) or not action_id:
+            raise ValueError('invalid_agent_action')
+        fingerprint = hashlib.sha256(json.dumps([task_id, action, arguments], sort_keys=True).encode()).hexdigest()
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            leader = db.execute('SELECT * FROM leader').fetchone()
+            if (not row or row['status'] != 'running' or row['node'] != node or row['epoch'] != epoch
+                    or row['deadline'] <= self.clock() or ('leader' in json.loads(row['required'])
+                    and (leader['node'] != node or leader['deadline'] <= self.clock()))):
+                raise Conflict('stale_task_lease')
+            previous = db.execute('SELECT * FROM agent_actions WHERE id=?', (action_id,)).fetchone()
+            if previous:
+                if previous['fingerprint'] != fingerprint:
+                    raise Conflict('action_id_content_conflict')
+                return json.loads(previous['response'])
+            context = json.loads(row['context'])
+            scope = context.get('agent_id', 'owner')
+            if action == 'remember':
+                text = arguments['text']
+                if not isinstance(text, str) or not text.strip() or len(text.encode()) > 16000:
+                    raise ValueError('invalid_memory')
+                identity = hashlib.sha256((scope + '\0' + text).encode()).hexdigest()
+                db.execute('INSERT OR REPLACE INTO memories VALUES(?,?,?,?)', (identity, scope, text, self.clock()))
+                output = {'id': identity, 'saved': True}
+            elif action == 'recall':
+                query = arguments.get('query', '')
+                if not isinstance(query, str):
+                    raise ValueError('invalid_query')
+                output = {'memories': [dict(r) for r in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) AND instr(lower(text),lower(?))>0 ORDER BY updated DESC LIMIT 100', (scope, 'owner', query))]}
+            elif action == 'delegate':
+                text, required = arguments['input'], arguments.get('required') or ['agent']
+                if not isinstance(text, str) or not text.strip() or len(text.encode()) > 65536 or not isinstance(required, list) or not all(isinstance(c, str) for c in required):
+                    raise ValueError('invalid_child_task')
+                child = hashlib.sha256(('child-' + action_id).encode()).hexdigest()
+                child_context = dict(context)
+                child_context['role'] = arguments.get('role', 'specialist')
+                child_context['project_id'] = arguments.get('project_id', context.get('project_id', 'general'))
+                child_context['session_scope'] = 'project:' + str(child_context['project_id']) + ':' + str(arguments.get('agent_id', child_context['role']))
+                db.execute('INSERT INTO tasks(id,parent_id,input,required,status,created,context,scope) VALUES(?,?,?,?,?,?,?,?)', (child, task_id, text, json.dumps(required), 'pending', self.clock(), json.dumps(child_context), self.session_scope(child_context)))
+                output = {'id': child, 'parent_id': task_id, 'status': 'pending'}
+            elif action == 'children':
+                output = {'tasks': [dict(c) for c in db.execute('SELECT id,status,result FROM tasks WHERE parent_id=? ORDER BY created', (task_id,))],
+                          'wait_requested': bool(json.loads(row['checkpoint']).get('wait_children_requested'))}
+            elif action == 'wait_children':
+                checkpoint = json.loads(row['checkpoint'])
+                checkpoint['wait_children_requested'] = True
+                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(checkpoint), task_id))
+                output = {'continue_after_children': True, 'instruction': '结束本轮，父任务等待子任务后继续。'}
+            elif action == 'notify':
+                text = arguments['text']
+                if not isinstance(text, str) or not text or len(text.encode()) > 16000:
+                    raise ValueError('invalid_outbound_text')
+                output = {'id': self._enqueue(db, 'agent-' + action_id, text), 'status': 'queued', 'delivery_verified': False}
+            else:
+                raise ValueError('unknown_agent_action')
+            db.execute('INSERT INTO agent_actions VALUES(?,?,?)', (action_id, fingerprint, json.dumps(output)))
+            return output
+
+    def control_task(self, task_id, command):
+        with self.transaction() as db:
+            return self._control_task(db, task_id, command)
+
+    def _control_task(self, db, task_id, command):
+        """One control transition for owner chat and operator API.
+
+        Pausing fences ledger mutations immediately; the worker stops its native
+        process when it observes the fence. It is NOT an undo of existing effects.
+        """
+        row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if not row or command not in ('pause', 'resume') or row['status'] == 'completed':
+            raise ValueError('invalid_task_control')
+        checkpoint = json.loads(row['checkpoint'])
+        if command == 'pause':
+            if row['status'] != 'paused':
+                db.execute("UPDATE tasks SET paused_status=status,paused_deadline=deadline,status='paused',node=NULL,epoch=epoch+1,deadline=NULL WHERE id=?", (task_id,))
+            return {'id': task_id, 'status': 'paused'}
+        if (checkpoint.get('side_effect_started') or row['status'] == 'needs_review'
+                or row['paused_status'] == 'needs_review'):
+            raise Conflict('effectful_task_requires_review')
+        if row['status'] in ('running', 'pending', 'waiting_children', 'continuing'):
+            # Resume is idempotent, not permission to start a second native turn
+            # or skip an already active dependency/wake interval.
+            return {'id': task_id, 'status': row['status']}
+        status, deadline = 'pending', None
+        if row['status'] == 'paused' and row['paused_status'] == 'waiting_children':
+            active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (task_id,)).fetchone()
+            if active:
+                status = 'waiting_children'
+        elif row['status'] == 'paused' and row['paused_status'] == 'continuing':
+            if row['paused_deadline'] and row['paused_deadline'] > self.clock():
+                status, deadline = 'continuing', row['paused_deadline']
+        db.execute('UPDATE tasks SET status=?,node=NULL,epoch=epoch+1,deadline=?,paused_status=NULL,paused_deadline=NULL WHERE id=?', (status, deadline, task_id))
+        return {'id': task_id, 'status': status}
+
+    @staticmethod
+    def session_scope(context):
+        scope = context.get('session_scope') or 'leader:' + str(context.get('agent_id', 'owner'))
+        if not isinstance(scope, str) or not scope or len(scope) > 256:
+            raise ValueError('invalid_session_scope')
+        return scope
+
+    def session_action(self, task_id, node, epoch, action, payload):
+        """Fenced native session storage. Rollouts are private opaque artifacts;
+        no prompt rewriting or application-authored context compression.
+        """
+        if not isinstance(payload, dict):
+            raise ValueError('invalid_session_payload')
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            leader = db.execute('SELECT * FROM leader').fetchone()
+            if (not row or row['status'] != 'running' or row['node'] != node or row['epoch'] != epoch
+                    or row['deadline'] <= self.clock() or ('leader' in json.loads(row['required'])
+                    and (leader['node'] != node or leader['deadline'] <= self.clock()))):
+                raise Conflict('stale_task_lease')
+            harness = payload.get('harness', 'codex')
+            if harness not in ('codex', 'pi'):
+                raise ValueError('invalid_session_harness')
+            session = db.execute('SELECT * FROM native_sessions WHERE scope=? AND harness=?', (row['scope'], harness)).fetchone()
+            artifact_id = hashlib.sha256(json.dumps([task_id, epoch, harness], separators=(',', ':')).encode()).hexdigest()
+            if action == 'upload':
+                part = payload['part']
+                if not isinstance(part, int) or isinstance(part, bool) or part < 0:
+                    raise ValueError('invalid_artifact_part')
+                data = base64.b64decode(payload['data'], validate=True)
+                if len(data) > 65536:
+                    raise ValueError('artifact_part_too_large')
+                existing = db.execute('SELECT body FROM session_chunks WHERE id=? AND part=?', (artifact_id, part)).fetchone()
+                if existing and existing['body'] != data:
+                    raise Conflict('artifact_part_content_conflict')
+                db.execute('INSERT OR IGNORE INTO session_chunks VALUES(?,?,?)', (artifact_id, part, data))
+                return {'ok': True}
+            if action == 'commit':
+                state, harness, count = payload['state'], payload['harness'], payload.get('parts', 0)
+                if not isinstance(state, dict) or not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                    raise ValueError('invalid_session_state')
+                actual = db.execute('SELECT COUNT(*),MIN(part),MAX(part) FROM session_chunks WHERE id=?', (artifact_id,)).fetchone()
+                if count and (actual[0] != count or actual[1] != 0 or actual[2] != count - 1):
+                    raise Conflict('incomplete_session_artifact')
+                # Atomic promotion: an interrupted upload never replaces the last
+                # known complete native rollout. Retain former artifacts for now.
+                artifact = artifact_id if count else session['artifact'] if session else None
+                if session and not count:
+                    previous = json.loads(session['state'])
+                    if previous.get('thread_id') != state.get('thread_id'):
+                        # Never attach the former native conversation's rollout
+                        # to a newly created session just because no upload came.
+                        artifact = None
+                db.execute('INSERT OR REPLACE INTO native_sessions VALUES(?,?,?,?,?,?)',
+                    (row['scope'], node, harness, json.dumps(state), artifact, self.clock()))
+                return {'scope': row['scope'], 'saved': True, 'artifact_saved': bool(count)}
+            if action == 'download':
+                if not session or not session['artifact']:
+                    raise ValueError('native_session_artifact_unavailable')
+                part = payload['part']
+                if not isinstance(part, int) or isinstance(part, bool) or part < 0:
+                    raise ValueError('invalid_artifact_part')
+                data = db.execute('SELECT body FROM session_chunks WHERE id=? AND part=?', (session['artifact'], part)).fetchone()
+                return {'data': base64.b64encode(data['body']).decode() if data else None}
+            raise ValueError('unknown_session_action')
+
+    @staticmethod
+    def _validate_interaction_answer(row, answer):
+        if row['kind'] == 'approval':
+            if answer not in ({'decision': 'accept'}, {'decision': 'decline'}):
+                raise ValueError('invalid_approval_answer')
+        else:
+            expected = {q['id'] for q in json.loads(row['params']).get('questions', [])}
+            answers = answer.get('answers') if isinstance(answer, dict) else None
+            if (not isinstance(answers, dict) or set(answers) != expected or
+                    any(not isinstance(a, dict) or not isinstance(a.get('answers'), list)
+                        or not a['answers'] or not all(isinstance(s, str) for s in a['answers']) for a in answers.values())):
+                raise ValueError('invalid_question_answer')
+
+    def _interaction_is_live(self, db, task, interaction):
+        if (not interaction or not task or task['status'] != 'running'
+                or task['epoch'] != interaction['epoch'] or task['deadline'] <= self.clock()):
+            return False
+        if 'leader' in json.loads(task['required']):
+            leader = db.execute('SELECT * FROM leader').fetchone()
+            if leader['node'] != task['node'] or leader['deadline'] <= self.clock():
+                return False
+        return True
+
+    def interaction(self, task_id, node, epoch, identity, kind=None, params=None):
+        with self.transaction() as db:
+            task = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            leader = db.execute('SELECT * FROM leader').fetchone()
+            if (not task or task['node'] != node or task['epoch'] != epoch or task['status'] != 'running'
+                    or task['deadline'] <= self.clock() or ('leader' in json.loads(task['required'])
+                    and (leader['node'] != node or leader['deadline'] <= self.clock()))):
+                raise Conflict('stale_task_lease')
+            row = db.execute('SELECT * FROM interactions WHERE id=?', (identity,)).fetchone()
+            if kind:
+                if kind not in ('question', 'approval') or not isinstance(params, dict):
+                    raise ValueError('invalid_interaction')
+                # Questions flagged secret must never be requested via chat.
+                if any(q.get('isSecret') for q in params.get('questions', [])):
+                    raise ValueError('secret_input_requires_private_credential_flow')
+                if row:
+                    if row['task_id'] != task_id or row['epoch'] != epoch or json.loads(row['params']) != params:
+                        raise Conflict('interaction_id_conflict')
+                else:
+                    db.execute('INSERT INTO interactions VALUES(?,?,?,?,?,NULL,?)', (identity, task_id, epoch, kind, json.dumps(params), self.clock()))
+                    if kind == 'question':
+                        detail = '\n'.join(q['id'] + ': ' + q['question'] + '\n' + '\n'.join(o['label'] + ': ' + o['description'] for o in q.get('options') or []) for q in params.get('questions', []))
+                        hint = '/answer ' + identity + ' 你的回答'
+                    else:
+                        detail = json.dumps({k: params[k] for k in ('command', 'cwd', 'reason', 'itemId', 'grantRoot') if k in params}, ensure_ascii=False)
+                        hint = '/approve ' + identity + ' 或 /deny ' + identity
+                    self._enqueue(db, 'interaction-' + identity, ('Codex 需要本人回答：\n' if kind == 'question' else 'Codex 需要本人批准这一次操作：\n') + detail[:10000] + '\n回复 ' + hint)
+            row = db.execute('SELECT * FROM interactions WHERE id=?', (identity,)).fetchone()
+            if not row or row['task_id'] != task_id or row['epoch'] != epoch:
+                raise ValueError('interaction_not_found')
+            return {'id': identity, 'answer': json.loads(row['answer']) if row['answer'] else None}
+
+    def resolve_interaction(self, identity, answer):
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM interactions WHERE id=?', (identity,)).fetchone()
+            task = db.execute('SELECT * FROM tasks WHERE id=?', (row['task_id'],)).fetchone() if row else None
+            if not self._interaction_is_live(db, task, row):
+                raise Conflict('interaction_not_live')
+            self._validate_interaction_answer(row, answer)
+            if row['answer'] and json.loads(row['answer']) != answer:
+                raise Conflict('interaction_already_answered')
+            db.execute('UPDATE interactions SET answer=? WHERE id=?', (json.dumps(answer), identity))
+            return {'id': identity, 'answered': True}
+
+    def steer(self, task_id, text, identity):
+        if not isinstance(text, str) or not text.strip() or len(text.encode()) > 32768:
+            raise ValueError('invalid_steering')
+        with self.transaction() as db:
+            task = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if not task or task['status'] != 'running' or task['deadline'] <= self.clock():
+                raise Conflict('task_not_running')
+            previous = db.execute('SELECT * FROM steering WHERE id=?', (identity,)).fetchone()
+            if previous and (previous['task_id'] != task_id or previous['text'] != text or previous['epoch'] != task['epoch']):
+                raise Conflict('steer_id_conflict')
+            db.execute('INSERT OR IGNORE INTO steering(id,task_id,epoch,text) VALUES(?,?,?,?)', (identity, task_id, task['epoch'], text))
+            return {'id': identity, 'state': 'queued'}
+
+    def poll_steering(self, task_id, node, epoch, identity=None, state=None):
+        with self.transaction() as db:
+            task = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if not task or task['node'] != node or task['epoch'] != epoch or task['status'] != 'running' or task['deadline'] <= self.clock():
+                raise Conflict('stale_task_lease')
+            if identity:
+                if state not in ('submitted', 'unknown'):
+                    raise ValueError('invalid_steer_state')
+                db.execute('UPDATE steering SET state=? WHERE id=? AND task_id=? AND epoch=?', (state, identity, task_id, epoch))
+                return {'ok': True}
+            row = db.execute("SELECT * FROM steering WHERE task_id=? AND epoch=? AND state='pending' ORDER BY rowid LIMIT 1", (task_id, epoch)).fetchone()
+            if row:
+                db.execute("UPDATE steering SET state='submitting' WHERE id=?", (row['id'],))
+            return {'steering': dict(row) if row else None}
 
     def _enqueue(self, db, request_id, text):
         fingerprint = hashlib.sha256(text.encode()).hexdigest()
@@ -234,14 +636,27 @@ class Store:
         with self.transaction() as db:
             return self._enqueue(db, request_id, text)
 
+    def enqueue_media(self, request_id, items):
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict) or items[0].get('type') not in (2, 4, 5):
+            raise ValueError('invalid_media_items')
+        serialized = json.dumps(items, sort_keys=True, separators=(',', ':'))
+        if len(serialized.encode()) > 65536:
+            raise ValueError('media_reference_too_large')
+        with self.transaction() as db:
+            self._enqueue(db, request_id, serialized)
+            db.execute('UPDATE outbox SET media_items=? WHERE id=?', (serialized, request_id))
+        return request_id
+
     def next_send(self):
         with self.transaction() as db:
             context = self._meta(db, 'owner_context', {})
-            row = db.execute("SELECT * FROM outbox WHERE status='pending' OR (status='rejected' AND COALESCE(context_version,'')!=?) ORDER BY created LIMIT 1", (context.get('version', ''),)).fetchone()
+            row = db.execute("SELECT * FROM outbox WHERE status='pending' OR (status='rejected' AND retry_count<1 AND COALESCE(context_version,'')!=?) ORDER BY created LIMIT 1", (context.get('version', ''),)).fetchone()
             if not row:
                 return None
-            db.execute("UPDATE outbox SET status='submitting',context_version=? WHERE id=?", (context.get('version', ''), row['id']))
+            client_id = 'mesh-' + uuid.uuid4().hex if row['status'] == 'rejected' else row['client_id']
+            db.execute("UPDATE outbox SET status='submitting',client_id=?,context_version=?,retry_count=retry_count+? WHERE id=?", (client_id, context.get('version', ''), 1 if row['status'] == 'rejected' else 0, row['id']))
             result = dict(row)
+            result['client_id'] = client_id
             result['context_token'] = context.get('token')
             return result
 
@@ -315,7 +730,38 @@ class Store:
 
     def task_status(self, task_id):
         with self.transaction() as db:
-            row = db.execute('SELECT id,status,node,epoch,result FROM tasks WHERE id=?', (task_id,)).fetchone()
+            row = db.execute('SELECT id,status,node,epoch,result,checkpoint,scope FROM tasks WHERE id=?', (task_id,)).fetchone()
             if not row:
                 raise ValueError('task_not_found')
-            return dict(row)
+            value = dict(row)
+            checkpoint = json.loads(value.pop('checkpoint'))
+            value['native'] = {k: checkpoint.get(k) for k in ('thread_id', 'turn_id', 'harness', 'mode', 'goal', 'plan')}
+            value['interactions'] = [dict(q) for q in db.execute('SELECT id,kind,params FROM interactions WHERE task_id=? AND epoch=? AND answer IS NULL', (task_id, row['epoch']))]
+            for question in value['interactions']:
+                question['params'] = json.loads(question['params'])
+            return value
+
+    def claim_renewal(self, node):
+        """One native refresh per reply-context version, journaled BEFORE any effect."""
+        with self.transaction() as db:
+            row = db.execute("SELECT id FROM outbox WHERE status='rejected' AND retry_count<1 ORDER BY created LIMIT 1").fetchone()
+            if not row:
+                return None
+            version = self._meta(db, 'owner_context', {}).get('version', 'none')
+            identity = hashlib.sha256(version.encode()).hexdigest()
+            if db.execute('SELECT 1 FROM renewals WHERE id=?', (identity,)).fetchone():
+                return None
+            marker = 'ClawBot 自动刷新 mesh-' + identity[:24]
+            db.execute('INSERT INTO renewals VALUES(?,?,?,?,?)', (identity, node, marker, 'reserved', self.clock()))
+            return {'id': identity, 'marker': marker, 'request_id': 'mesh-renew-' + identity[:40]}
+
+    def retry_waiting(self):
+        """Explicit operator retry after fixing a backend, no effectful replays."""
+        with self.transaction() as db:
+            rows = db.execute("SELECT id,checkpoint FROM tasks WHERE status IN ('failed','waiting_backend','waiting_auth')").fetchall()
+            count = 0
+            for row in rows:
+                if not json.loads(row['checkpoint']).get('side_effect_started'):
+                    db.execute("UPDATE tasks SET status='pending',node=NULL,epoch=epoch+1,deadline=NULL WHERE id=?", (row['id'],))
+                    count += 1
+            return {'requeued': count}

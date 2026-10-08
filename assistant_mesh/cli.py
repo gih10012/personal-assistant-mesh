@@ -9,7 +9,7 @@ def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description='Durable personal-assistant mesh')
     parser.add_argument('--config', required=True)
-    parser.add_argument('command', choices=['serve', 'worker', 'status', 'submit', 'notify', 'doctor', 'probe-codex'])
+    parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
     args = parser.parse_args()
@@ -20,6 +20,9 @@ def main():
     if args.command == 'worker':
         from .worker import Worker
         return Worker(config).run()
+    if args.command == 'recovery':
+        from .recovery import run
+        return run(config)
     if args.command in ('status', 'submit', 'notify'):
         from .worker import Client
         client = Client(config)

@@ -34,6 +34,11 @@ class API:
             result = self.store.status()
             result['channel_error'] = self.store.get('channel_error')
             return result
+        if method == 'GET' and path.split('?', 1)[0] == '/v1/projects' and role in ('operator', 'viewer'):
+            from urllib.parse import parse_qs, urlsplit
+            from .observability import projects
+            query = parse_qs(urlsplit(path).query)
+            return projects(self.store, int(query.get('limit', ['50'])[0]), int(query.get('after', ['0'])[0]))
         if method == 'POST' and path == '/v1/heartbeat' and node:
             configured = peer.get('capabilities', [])
             offered = payload.get('capabilities', configured)
@@ -42,16 +47,36 @@ class API:
             return self.store.heartbeat(node, offered, peer.get('score', 0), payload.get('details'))
         if method == 'POST' and path == '/v1/claim' and node:
             return {'task': self.store.claim(node)}
+        if method == 'POST' and path == '/v1/recovery/claim' and node and 'native.wechat.refresh' in peer.get('capabilities', []):
+            return {'renewal': self.store.claim_renewal(node)}
         if method == 'POST' and path == '/v1/task/update' and node:
             return self.store.update_task(payload['id'], node, payload['epoch'], payload.get('checkpoint'), payload.get('result'), payload.get('status'))
         if method == 'POST' and path == '/v1/tasks' and role == 'operator':
-            return {'id': self.store.create_task(payload['input'], payload.get('required'), payload.get('parent_id'))}
+            return {'id': self.store.create_task(payload['input'], payload.get('required'), payload.get('parent_id'), payload.get('id'), payload.get('context'))}
+        if method == 'POST' and path == '/v1/task/control' and role == 'operator':
+            return self.store.control_task(payload['id'], payload['command'])
+        if method == 'POST' and path == '/v1/agent/action' and node:
+            return self.store.agent_action(payload['task_id'], node, payload['epoch'], payload['call_id'], payload['action'], payload.get('arguments', {}))
+        if method == 'POST' and path == '/v1/session' and node:
+            return self.store.session_action(payload['task_id'], node, payload['epoch'], payload['action'], payload.get('payload', {}))
+        if method == 'POST' and path == '/v1/interaction' and node:
+            return self.store.interaction(payload['task_id'], node, payload['epoch'], payload['id'], payload.get('kind'), payload.get('params'))
+        if method == 'POST' and path == '/v1/interaction/resolve' and role == 'operator':
+            return self.store.resolve_interaction(payload['id'], payload['answer'])
+        if method == 'POST' and path == '/v1/task/steer' and role == 'operator':
+            return self.store.steer(payload['id'], payload['text'], payload['request_id'])
+        if method == 'POST' and path == '/v1/steering' and node:
+            return self.store.poll_steering(payload['task_id'], node, payload['epoch'], payload.get('id'), payload.get('state'))
         if method == 'POST' and path == '/v1/notify' and role == 'operator':
             return {'id': self.store.enqueue(payload['request_id'], payload['text'])}
+        if method == 'POST' and path == '/v1/notify/media' and role == 'operator':
+            return {'id': self.store.enqueue_media(payload['request_id'], payload['items'])}
         if method == 'POST' and path == '/v1/notify/status' and role == 'operator':
             return self.store.send_status(payload['request_id'])
-        if method == 'POST' and path == '/v1/task/status' and role == 'operator':
+        if method == 'POST' and path == '/v1/task/status' and role in ('operator', 'viewer'):
             return self.store.task_status(payload['id'])
+        if method == 'POST' and path == '/v1/tasks/retry-waiting' and role == 'operator':
+            return self.store.retry_waiting()
         if method == 'POST' and path == '/v1/inbox' and role == 'operator':
             return self.store.inbox(payload.get('after', 0), payload.get('limit', 20))
         if method == 'POST' and path == '/v1/budget/reserve' and role == 'operator':
