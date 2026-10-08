@@ -16,6 +16,7 @@ import urllib.request
 from .codex import Codex, CodexError
 from .config import private_json, read_secret
 from .model_tools import TOOLS, result
+from .runtime_health import diagnose as diagnose_runtime
 from . import sessions
 
 
@@ -177,6 +178,19 @@ class Worker:
         return result(failure, False)
 
     def on_tool(self, call):
+        arguments = call.get('arguments', {})
+        if (call.get('tool') == 'mesh' and isinstance(arguments, dict)
+                and arguments.get('action') == 'runtime_diagnose'):
+            # This local observation neither executes a task nor changes its
+            # lease. It remains usable when Mesh heartbeat is unavailable.
+            if (set(arguments) - {'action', 'arguments'}
+                    or not isinstance(arguments.get('arguments', {}), dict)
+                    or arguments.get('arguments', {})):
+                return result({'error': 'invalid_runtime_diagnose_arguments'}, False)
+            try:
+                return result(diagnose_runtime(self.config))
+            except Exception:
+                return result({'error': 'runtime_diagnosis_unavailable'}, False)
         self.tick(force=True)
         name = call['tool']
         arguments = call.get('arguments', {})
@@ -243,6 +257,12 @@ class Worker:
                      'actions': ['discover', 'describe', 'graph', 'audit', 'advertise', 'renew', 'observe', 'link',
                                  'revoke', 'request_grant', 'authorize'],
                      'authority': 'actor 由 peer 固定；跨主体 grant 仅 owner operator 审批。声明/health 不是验证或执行。'}
+        reference['runtime_access'] = {
+            'local_read_tool': {'action': 'runtime_diagnose', 'arguments': {}},
+            'purpose': '可选的本节点运行包布局诊断，不读凭据、不联网或推理；不是原生工具前置门禁。'
+                       'complete 仅表示布局存在，不证明完整性、Shell、模型或网络可用。'
+                       '下列命令是推荐句柄，未自动执行；原生 Shell/网络和创建任意工具仍保留。',
+            'automatic_repair': False, 'task_replayed': False, 'session_replaced': False}
         # Only fixed host states enter the prompt, never exception messages or
         # private response bodies. This is advisory, not a native-tool gate.
         steering = (self.current or {}).get('checkpoint', {}).get('mesh_steering_status', {})
@@ -252,6 +272,20 @@ class Worker:
         reference['steering_status'] = {key: steering.get(key) if steering.get(key) in values else values[0]
                                         for key, values in states.items()}
         if self.config_path is not None:
+            reference['runtime_access']['cli'] = {
+                'cwd': str(Path(__file__).resolve().parent.parent),
+                'doctor': [sys.executable, '-m', 'scripts.runtime_doctor', '--config', self.config_path],
+                'install': [sys.executable, '-m', 'scripts.upgrade_runtime',
+                    '--artifact', '/PRIVATE/VERIFIED_COMPLETE_ARTIFACT.tar.gz',
+                    '--sha256', 'VERIFIED_WHOLE_ARTIFACT_SHA256', '--version', 'VERIFIED_VERSION',
+                    '--target', 'VERIFIED_TARGET', '--install-dir', '/PRIVATE/OWNED_RUNTIME'],
+                'switch': [sys.executable, '-m', 'scripts.runtime_admin', '--config', self.config_path,
+                    'set-cloud-runtime', '--package-dir', '/PRIVATE/VERIFIED_PACKAGE_DIR',
+                    '--sha256', 'VERIFIED_WHOLE_ARTIFACT_SHA256'],
+                'probe': [sys.executable, '-m', 'scripts.probe_native_shell', '--config', self.config_path],
+                'requirements': 'install/switch 是环境变更，需明确完整官方包来源、版本/target/SHA256与本次维护授权；'
+                                '配置切换不证明运行进程已采用新配置。probe 会进行原生推理和创建独立验收会话，'
+                                '只能显式验收时执行，不替代或重放原业务 thread。配置/token 不得读取输出或写入公仓。'}
             reference['cli'] = {'cwd': str(Path(__file__).resolve().parent.parent),
                 'argv': [sys.executable, '-m', 'assistant_mesh.cli', '--config', self.config_path, 'resources'],
                 'resource_usage': '把 arguments JSON 写入 git 仓库之外本人所有的 0600 私有文件；'

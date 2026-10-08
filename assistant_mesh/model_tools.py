@@ -13,6 +13,8 @@ TOOLS = [
     tool('mesh', '统一 mesh 内能力入口，不是本机原生工具门禁或网络代理；不拦截 Shell、文件、网络、MCP 或其他原生能力。'
          'action=discover/describe/graph/audit 查询开放能力目录；advertise/renew/observe/link/revoke/request_grant/authorize 等沿用 resource API，'
          '也可 action=resource, arguments={action:资源动作,arguments:{...}}。kind 与能力描述开放，不要求所有原生工具先登记。'
+         'action=runtime_diagnose, arguments={} 只读观察本worker配置绑定的本节点运行包布局，不接受任意path/config，'
+         '不读凭据、不联网推理、不安装/切换/重试；未知布局不是能力禁止，complete不证明原生Shell已验证。'
          'action=remote_delegate 将任务交给 mesh 内已授权 peer，arguments={peer,input,project_id,agent_id,role}；'
          'delegate/children/wait_children 管理原账本子任务，wait_children 后结束本轮以便自动续接；remember/recall/notify 沿用原合同。'
          '身份、task 与 task lease 来自当前认证运行环境，不接受伪造 actor/task_id/task epoch；资源 epoch 仍用于资源版本核对。'

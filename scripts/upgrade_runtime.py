@@ -70,6 +70,13 @@ def _package(payload, version=None, target=None):
     if target is not None and manifest['target'] != target:
         raise ValueError('runtime_package_target_mismatch')
     root = manifest_path.parent
+    # Native discovery resolves these canonical siblings from bin/codex. A
+    # manifest pointing at an arbitrary complete-looking tree is not a package
+    # that the official executable can discover by itself.
+    if (manifest.get('entrypoint') not in ('bin/codex', 'bin/codex.exe')
+            or manifest.get('resourcesDir') != 'codex-resources'
+            or manifest.get('pathDir') != 'codex-path'):
+        raise ValueError('runtime_package_canonical_layout_required')
     paths = {}
     for key in ('entrypoint', 'resourcesDir', 'pathDir'):
         if not isinstance(manifest.get(key), str) or str(_member_path(manifest[key])) == '.':
@@ -108,6 +115,8 @@ def verify_installation(package_dir, sha256, version=None, target=None):
             for path in payload.rglob('*'):
                 if path.is_symlink() or not (path.is_dir() or path.is_file()):
                     raise ValueError('runtime_package_tree_mismatch')
+                if path.is_dir() and path.stat().st_mode & 0o022:
+                    raise ValueError('runtime_package_tree_mismatch')
                 if path.is_file():
                     actual_files.add(path.relative_to(payload).as_posix())
             if actual_files != files:
@@ -115,7 +124,8 @@ def verify_installation(package_dir, sha256, version=None, target=None):
             for name, member in members.items():
                 path = payload / name
                 if member.isdir():
-                    if not path.is_dir():
+                    if (not path.is_dir()
+                            or stat.S_IMODE(path.stat().st_mode) != member.mode & 0o777):
                         raise ValueError('runtime_package_tree_mismatch')
                     continue
                 if path.stat().st_size != member.size or stat.S_IMODE(path.stat().st_mode) != member.mode & 0o777:
@@ -172,6 +182,11 @@ def install_package(artifact, sha256, version, target, install_dir):
                         with archive.extractfile(member) as source, path.open('xb') as output:
                             shutil.copyfileobj(source, output)
                         path.chmod(member.mode & 0o777)
+                # Apply archived directory modes only after writing children;
+                # preserve the release tree instead of silently normalizing it.
+                for name, member in sorted(members.items(), key=lambda item: len(PurePosixPath(item[0]).parts), reverse=True):
+                    if member.isdir():
+                        (payload / name).chmod(member.mode & 0o777)
         verify_installation(stage, sha256, version, target)
         # Exclusive reservation never overwrites a previous release. A partial
         # failed publication is unused until a later explicit admin verification.

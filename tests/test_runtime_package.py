@@ -91,6 +91,42 @@ class RuntimePackageTests(unittest.TestCase):
         self.assertEqual(str(Path(package['package_dir']) / 'payload' / prefix / 'bin/codex'), package['executable'])
         self.assertTrue(Path(package['executable']).with_name('codex-code-mode-host').is_file())
 
+    def test_archived_directory_mode_is_preserved_and_verified(self):
+        member = tarfile.TarInfo('codex-resources')
+        member.type, member.mode = tarfile.DIRTYPE, 0o700
+        digest = self.archive(extra=member)
+        package = self.install(digest)
+        directory = Path(package['package_dir']) / 'payload/codex-resources'
+        self.assertEqual(0o700, directory.stat().st_mode & 0o777)
+        directory.chmod(0o755)
+        with self.assertRaisesRegex(ValueError, 'package_tree_mismatch'):
+            verify_installation(package['package_dir'], digest)
+
+    def test_implicit_directory_cannot_become_group_writable(self):
+        digest = self.archive()
+        package = self.install(digest)
+        directory = Path(package['package_dir']) / 'payload/bin'
+        directory.chmod(0o775)
+        with self.assertRaisesRegex(ValueError, 'package_tree_mismatch'):
+            verify_installation(package['package_dir'], digest)
+
+    def test_complete_looking_noncanonical_manifest_is_not_published(self):
+        for key, old, new in (('entrypoint', 'bin/codex', 'elsewhere/codex'),
+                              ('resourcesDir', 'codex-resources', 'elsewhere-resources'),
+                              ('pathDir', 'codex-path', 'elsewhere-path')):
+            with self.subTest(key=key):
+                manifest = dict(self.manifest, **{key: new})
+                files = {}
+                for name, body in self.files.items():
+                    renamed = new + name[len(old):] if name == old or name.startswith(old + '/') else name
+                    if key == 'entrypoint' and name == 'bin/codex-code-mode-host':
+                        renamed = 'elsewhere/codex-code-mode-host'
+                    files[renamed] = body
+                files['codex-package.json'] = (json.dumps(manifest).encode(), 0o644)
+                with self.assertRaisesRegex(ValueError, 'canonical_layout_required'):
+                    self.install(self.archive(files))
+                self.assertEqual([], list(self.install_dir.iterdir()))
+
     def test_standalone_that_can_print_version_is_not_complete_package(self):
         standalone = self.root / 'standalone-codex'
         standalone.write_bytes(self.files['bin/codex'][0])

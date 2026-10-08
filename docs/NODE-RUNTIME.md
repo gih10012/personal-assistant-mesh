@@ -140,6 +140,19 @@ python3 -m scripts.probe_native_shell --config /private/worker.json
 模型选择，也不是“不许 agent 安装别的工具”。probe 使用未知文件的哈希
 挑战与原生工具输出核验执行，不能仅凭模型说“执行成功”算通过。
 
+`mesh(action="runtime_diagnose", arguments={})` 是 Worker 绑定的本节点只读
+布局观察，不接受调用者选择其它 config/path，且不依赖 Mesh heartbeat。
+旧线程未注入新 dynamicTools 时，可用
+`python3 -m scripts.runtime_doctor --config /private/worker.json`。它只读取
+canonical package manifest 和组件元数据，不读 auth/token/历史、不联网、
+不推理或修改文件；wrapper/Pi/不可发现布局标 unknown，不判为禁止使用。
+`layout=complete` **不是**来源/完整性、活跃进程、模型、Shell 或网络验证。
+agent 参考数据同时提供 install/switch/probe 的推荐句柄，未自动执行。
+
+官方 [0.159.2 install-context](https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/install-context/src/lib.rs)
+从 canonical `bin/codex` 发现 sibling resources/PATH；维护安装器据此校验
+布局，并保留/复核归档目录权限。不会为模型另造资源路径或限制其原生 PATH。
+
 已有授权推理 profile 可在 turn **开始前**通过原生
 `account/rateLimits/read` 查询；明确耗尽才跳到下一已有 profile，未知或旧
 协议不构成禁止推理。它不购买 credits、消耗 resets 或更换 Chat/Live 主账号。
