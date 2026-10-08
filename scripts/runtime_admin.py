@@ -1,13 +1,13 @@
 """Private deployment maintenance; never emit token/config/message contents."""
 import argparse
 import datetime
-import hashlib
 import json
 import shutil
 import sqlite3
 from pathlib import Path
 
 from assistant_mesh.config import private_json
+from scripts.upgrade_runtime import verify_installation
 
 
 def main():
@@ -16,6 +16,9 @@ def main():
     parser.add_argument('command', choices=['audit-effects', 'set-cloud-runtime', 'set-account-pool'])
     parser.add_argument('--executable')
     parser.add_argument('--sha256')
+    parser.add_argument('--package-dir', help='complete package installed by scripts.upgrade_runtime')
+    parser.add_argument('--version')
+    parser.add_argument('--target')
     parser.add_argument('--auth-home', action='append')
     args = parser.parse_args()
     path = Path(args.config)
@@ -45,17 +48,12 @@ def main():
         print(json.dumps({'account_pool_configured': True, 'authorized_profiles': len(homes), 'backup_created': True,
                           'communication_account_changed': False, 'effectful_turns_auto_replayed': False}))
         return
-    if not args.executable or not args.sha256:
-        parser.error('runtime update requires executable and verified sha256')
-    executable = Path(args.executable)
-    if executable.is_symlink() or not executable.is_file():
-        raise ValueError('runtime_must_be_regular_file')
-    digest = hashlib.sha256()
-    with executable.open('rb') as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
-            digest.update(chunk)
-    if digest.hexdigest() != args.sha256:
-        raise ValueError('runtime_integrity_mismatch')
+    if not args.package_dir or not args.sha256:
+        parser.error('runtime update requires complete package-dir and whole-artifact sha256')
+    package = verify_installation(args.package_dir, args.sha256, args.version, args.target)
+    executable = Path(package['executable'])
+    if args.executable is not None and Path(args.executable) != executable:
+        raise ValueError('runtime_executable_not_from_verified_package')
     suffix = datetime.datetime.utcnow().strftime('.before-runtime-%Y%m%dT%H%M%S')
     backup = str(path) + suffix
     shutil.copy2(str(path), backup)
@@ -66,7 +64,8 @@ def main():
     with path.open('w', encoding='utf8') as handle:
         json.dump(value, handle, ensure_ascii=False, indent=2)
     path.chmod(0o600)
-    print(json.dumps({'configuration_updated': True, 'backup_created': True, 'integrity_verified': True}))
+    print(json.dumps({'configuration_updated': True, 'backup_created': True, 'integrity_verified': True,
+                      'complete_package_verified': True, 'version': package['version'], 'target': package['target']}))
 
 
 if __name__ == '__main__':
