@@ -149,6 +149,16 @@ canonical package manifest 和组件元数据，不读 auth/token/历史、不�
 `layout=complete` **不是**来源/完整性、活跃进程、模型、Shell 或网络验证。
 agent 参考数据同时提供 install/switch/probe 的推荐句柄，未自动执行。
 
+Node 每 30 秒作一次同样的可选布局观察，包括由独立 systemd unit 管理
+Worker 的 companion。只发现可信 canonical 布局明确缺件时，登记一个
+`@local-runtime` 内部故障 episode，并按 `auto_maintenance` 配置安排本节点
+独立维护任务；wrapper/Pi/未知布局不判坏。观测或其可选记账失败不会停止
+原生 Worker，错误正文不外泄，状态明确标记是否持久化；内部标识不与
+合法 peer 名冲突。可选故障查询失败标 unknown/需要关注，不是假健康。布局恢复或
+heartbeat 都不能清除这个执行故障提示；目前尚无自动执行验收/故障关闭
+闭环，不能把维护任务完成或 `runtime_execution_verified=false` 改报为
+Shell 已恢复。观测不自动切包、联网、消耗模型额度或重放业务任务。
+
 常驻 Worker 的真实执行验收使用已有 authority，不创建独立 Codex：
 
 ```sh
@@ -210,6 +220,24 @@ python3 -m scripts.fetch_artifact --url PUBLIC_HTTPS_RELEASE_URL \
 已授权代理时可显式加 `--proxy-url http://127.0.0.1:PORT`；只作用本次下载，
 无凭据、query、fragment 或 SOCKS 支持，不读环境 proxy/bypass 或改全局
 网络配置。其它原生下载工具和代理路线不受这些额外接口限制。
+
+当下载完成但另一节点的直连下载不可用，可在本人选定的原生传输之外
+使用纯本地分段工具。它不执行 SSH、不选择网络路线、不接触认证：
+
+```sh
+python3 -m scripts.artifact_parts split --source /private/package.tar.gz \
+  --parts-directory /private/new-upload-parts --size VERIFIED_SIZE \
+  --sha256 VERIFIED_WHOLE_ARTIFACT_SHA256 --workers 8
+# 用本人已授权的原生方式传递全部 part-000 … part-007，保持 0600/0700。
+python3 -m scripts.artifact_parts join --parts-directory /private/upload-parts \
+  --output /private/new-package.tar.gz --size VERIFIED_SIZE \
+  --sha256 VERIFIED_WHOLE_ARTIFACT_SHA256 --workers 8
+```
+
+分段数量/长度必须相符，join 再验证同一个完整官方 SHA256、传输前后
+文件身份和内容；缺段、部分数据、额外文件、变化或错误 digest 都不发布。
+既有文件不覆盖。并行只是可选传输方式，不保证物理带宽会增加；随后仍须
+调用完整包安装器，不能拿每段校验代替整体来源与实际执行验收。
 
 模型 runtime 的服务模板不额外设置 `NoNewPrivileges` 或 `PrivateTmp`，不会把 Mesh API 策略变成原生工具的进程权限/临时目录隔离。它仍以本人账户运行并受该账户既有 OS 权限约束，不新增 sudo 授权。只运行控制面或 SSH transport 的服务与模型 worker 分离。
 

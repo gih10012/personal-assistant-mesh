@@ -240,6 +240,13 @@ def _already_present(parent_descriptor, name, size, sha256):
             digest.update(body)
         if digest.hexdigest() != sha256:
             raise ArtifactFetchError('artifact_existing_output_mismatch')
+        try:
+            current = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if (_fingerprint(metadata) != _fingerprint(os.fstat(artifact.fileno()))
+                    or _fingerprint(metadata) != _fingerprint(current)):
+                raise ArtifactFetchError('artifact_existing_output_changed')
+        except OSError:
+            raise ArtifactFetchError('artifact_existing_output_changed') from None
     return True
 
 
@@ -434,6 +441,8 @@ def fetch_artifact(url, size, sha256, output, workers=4, timeout=30, deadline=60
                 os.fsync(parent_descriptor)
             except FileExistsError:
                 already_present = _already_present(parent_descriptor, output.name, size, sha256)
+                if not already_present:
+                    raise ArtifactFetchError('artifact_output_changed')
             return {'output': str(output), 'size': size, 'sha256': sha256,
                     'sha256_verified': True, 'already_present': already_present, 'workers': count,
                     'resumed_bytes': sum(prefixes), 'network_parts': len(futures)}

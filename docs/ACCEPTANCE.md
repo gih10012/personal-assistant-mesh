@@ -159,3 +159,26 @@ Worker 探针 15 项通过，使用离线 backend fixture 与真实鉴权 HTTP�
 这些 fixture 当作常驻模型执行已经通过。相同源码在云端 Python 3.6.8 完整
 479 项亦通过。真实完整包和部署者核对的 worker
 进程内挑战结果继续另记。
+
+## 2026-10-08：laptop 常驻 Worker 的原生 Shell 挑战
+
+laptop 本节点的既有 authority/Worker 已实际完成独立固定 scope 的未知
+文件哈希挑战。探针核对原任务账本、选中授权 inference profile、同一
+native thread/turn、原生挑战命令及匹配 call_id 的哈希/文件名输出，
+最终回复亦匹配；不是独立临时 Codex 或模型自报成功。复查相同 state
+不重新提交。Chat/Live 主账号、Global Leader scope 与其它会话未改。
+
+部署者同时观察到 owned Node systemd MainPID 及其 npm Node launcher
+child，但没在 turn 结束前捕获其 native grandchild `/proc/exe`。因此
+探针的 `systemd_unit_verified` / `runtime_process_executable_verified`
+仍为 false；上述真实执行通过不能扩写为该项进程身份验收已通过。
+
+官方 0.159.2 musl 完整包已在 laptop 下载成功并核对整个官方 SHA256；
+完整保留布局的本地安装/文件复核已通过。云端 transfer、配置切换与
+切换后常驻 Worker 的实际执行尚须各自核对，不能用此处本机结果代替。
+
+加入 Node 可选运行包观测和本地分段 split/join 后，本机完整 501 项测试
+通过。测试覆盖独立 Worker companion、缺件故障防重复、peer 命名隔离、
+观测/可选账本读写失败不关闭健康 Worker、未知布局不阻断、布局和
+heartbeat 不充当执行恢复，以及分段不完整/变化/整包 SHA256/发布竞态。
+云端同版本全套测试和这一观测的实际部署仍待单独核对。

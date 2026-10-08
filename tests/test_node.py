@@ -1,5 +1,6 @@
 """Real loopback RPC tests; no external hosts, credentials, models, or spend."""
 import hashlib
+import contextlib
 import io
 import json
 import socket
@@ -14,7 +15,7 @@ from unittest.mock import patch
 
 from assistant_mesh.codex import CodexError
 from assistant_mesh.networking import PROTOCOL, native_scope
-from assistant_mesh.node import Node, run
+from assistant_mesh.node import LOCAL_RUNTIME, Node, run
 from assistant_mesh.remote import Remote
 from assistant_mesh.server import serve
 from assistant_mesh.store import Store
@@ -143,7 +144,8 @@ class NodeTests(unittest.TestCase):
 
     def incidents(self, node, peer):
         with node.store.transaction() as db:
-            return dict(db.execute('SELECT * FROM node_incidents WHERE peer=?', (peer,)).fetchone())
+            row = db.execute('SELECT * FROM node_incidents WHERE peer=?', (peer,)).fetchone()
+            return dict(row) if row is not None else None
 
     def checkpoint(self, node, task_id):
         with node.store.transaction() as db:
@@ -579,6 +581,175 @@ class NodeTests(unittest.TestCase):
         self.assertNotIn('completed', task['status'])
         self.assertIsNone(node.store.status()['leader']['node'])
         self.assertEqual('not_verified_by_transport', node.step()['model_availability'])
+
+    def canonical_runtime(self, config):
+        package = self.directory / 'diagnostic-package'
+        package.mkdir(mode=0o700)
+        for name in ('bin', 'codex-resources', 'codex-path'):
+            (package / name).mkdir(mode=0o700)
+        executable, helper = package / 'bin/codex', package / 'bin/codex-code-mode-host'
+        for path in (executable, helper):
+            path.write_bytes(b'fixture metadata only, must not execute')
+            path.chmod(0o755)
+        (package / 'codex-package.json').write_text(json.dumps({
+            'layoutVersion': 1, 'variant': 'codex', 'version': '0.159.2',
+            'target': 'x86_64-unknown-linux-musl', 'entrypoint': 'bin/codex',
+            'resourcesDir': 'codex-resources', 'pathDir': 'codex-path'}))
+        (package / 'codex-package.json').chmod(0o644)
+        worker = json.loads(Path(config['local_worker_config']).read_text())
+        worker['codex']['executable'] = str(executable)
+        self.rewrite(config['local_worker_config'], codex=worker['codex'])
+        return package, helper
+
+    def test_external_companion_observes_missing_helper_and_unique_maintenance_episode(self):
+        config = self.config('alice', central=True, start_worker=False)
+        package, helper = self.canonical_runtime(config)
+        helper.unlink()
+        node = self.node(config)
+        with patch('subprocess.Popen', side_effect=AssertionError('no native/model execution')):
+            node._observe_runtime(force=True)
+            node._observe_runtime(force=True)
+        incident = self.incidents(node, LOCAL_RUNTIME)
+        self.assertEqual(1, incident['episode'])
+        self.assertEqual(1, incident['active'])
+        self.assertEqual(1, node.store.status()['tasks']['pending'])
+        self.assertEqual('missing', node.status()['runtime_observation']['runtimes'][0]['layout'])
+        self.assertTrue(node.status()['runtime_attention_required'])
+        self.assertFalse(node.status()['runtime_execution_verified'])
+        self.assertEqual('external_or_not_started', node.status()['worker_management'])
+        with node.store.transaction() as db:
+            task = db.execute('SELECT input,context,required FROM tasks WHERE id=?', (incident['task_id'],)).fetchone()
+        self.assertIn('坏 Shell', task['input'])
+        self.assertIn('真实执行验收', task['input'])
+        self.assertNotEqual('leader:owner', json.loads(task['context'])['session_scope'])
+        self.assertEqual(['agent', 'mesh.node:alice'], json.loads(task['required']))
+
+    def test_layout_repair_or_owned_heartbeat_is_not_execution_incident_recovery(self):
+        config = self.config('alice', central=True)
+        package, helper = self.canonical_runtime(config)
+        helper.unlink()
+        node = self.node(config)
+        node._observe_runtime(force=True)
+        helper.write_bytes(b'restored fixture, not an execution proof')
+        helper.chmod(0o755)
+        node.store.heartbeat('alice', ['agent', 'mesh.node:alice', 'leader'])
+        node._observe_runtime(force=True)
+        self.assertEqual('complete', node.status()['runtime_observation']['runtimes'][0]['layout'])
+        self.assertTrue(node.status()['runtime_attention_required'])
+        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME)['active'])
+        self.assertFalse(node.status()['runtime_execution_verified'])
+
+    def test_unknown_layout_never_creates_runtime_incident_or_blocks_worker(self):
+        node = self.node(self.config('alice', central=True))
+        node._observe_runtime(force=True)
+        self.assertEqual('unknown', node.status()['runtime_observation']['runtimes'][0]['layout'])
+        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME))
+        self.assertTrue(node.status()['local_work_allowed'])
+
+    def test_disabled_maintenance_still_records_runtime_attention_without_model_task(self):
+        config = self.config('alice', central=True)
+        config['auto_maintenance'] = False
+        package, helper = self.canonical_runtime(config)
+        helper.unlink()
+        node = self.node(config)
+        node._observe_runtime(force=True)
+        self.assertTrue(node.status()['runtime_attention_required'])
+        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME)['task_id'])
+        self.assertEqual(0, node.store.status()['tasks'].get('pending', 0))
+
+    def test_config_binding_drift_and_private_errors_are_unknown_not_applied(self):
+        config = self.config('alice', central=True)
+        node = self.node(config)
+        self.rewrite(config['local_worker_config'], node_id='other-node',
+                     secret_payload='NEVER_OUTPUT_PRIVATE_CONFIG')
+        node._observe_runtime(force=True)
+        report = node.status()['runtime_observation']
+        self.assertEqual('runtime_observation_unavailable', report['error'])
+        self.assertNotIn('NEVER_OUTPUT', json.dumps(report))
+        self.assertEqual('alice', node.worker_config['node_id'])
+        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME))
+
+    def test_optional_observer_failure_and_interval_do_not_change_native_worker(self):
+        node = self.node(self.config('alice', central=True))
+        with patch('assistant_mesh.node.diagnose_runtime', side_effect=RuntimeError('PRIVATE_PROVIDER_BODY')) as observer:
+            node._observe_runtime(force=True)
+            node._observe_runtime()
+        self.assertEqual(1, observer.call_count)
+        self.assertNotIn('PRIVATE_PROVIDER_BODY', json.dumps(node.status()))
+        self.assertFalse(node.status()['runtime_attention_required'])
+        self.assertTrue(node.status()['local_work_allowed'])
+
+    def test_optional_observation_write_failure_is_redacted_and_does_not_stop_worker_start(self):
+        config = self.config('alice', central=True, start_worker=True)
+        node = self.node(config, worker_factory=UnavailableBackend)
+        original_set = node.store.set
+        def fail_observation(key, value):
+            if key == 'node_runtime_observation':
+                raise OSError('PRIVATE_DATABASE_PATH_AND_BODY')
+            return original_set(key, value)
+        with patch.object(node.store, 'set', side_effect=fail_observation):
+            node.start()
+            node.step()
+        self.assertEqual(1, node.store.get('node_worker_failure')['failures'])
+        status = node.status()
+        self.assertFalse(status['runtime_observation_persisted'])
+        self.assertEqual('runtime_observation_record_failed', status['runtime_observation']['persistence_error'])
+        self.assertNotIn('PRIVATE_DATABASE', json.dumps(status))
+        self.assertTrue(status['local_work_allowed'])
+
+    def test_optional_runtime_incident_write_failure_keeps_in_memory_attention(self):
+        config = self.config('alice', central=True)
+        package, helper = self.canonical_runtime(config)
+        helper.unlink()
+        node = self.node(config)
+        with patch.object(node, '_incident', side_effect=OSError('PRIVATE_INCIDENT_ERROR')):
+            node._observe_runtime(force=True)
+        status = node.status()
+        self.assertTrue(status['runtime_attention_required'])
+        self.assertFalse(status['runtime_observation_persisted'])
+        self.assertFalse(status['runtime_execution_verified'])
+        self.assertNotIn('PRIVATE_INCIDENT', json.dumps(status))
+
+    def test_valid_peer_local_runtime_cannot_clear_internal_runtime_incident(self):
+        config = self.config('alice', central=True)
+        config['peers'] = [{'node': 'local-runtime', 'client_config': config['local_worker_config']}]
+        package, helper = self.canonical_runtime(config)
+        helper.unlink()
+        node = self.node(config)
+        node._observe_runtime(force=True)
+        node._incident('local-runtime', 'connection_unavailable')
+        node._connected('local-runtime')
+        self.assertEqual(0, self.incidents(node, 'local-runtime')['active'])
+        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME)['active'])
+        self.assertTrue(node.status()['runtime_attention_required'])
+
+    def test_optional_incident_select_failure_does_not_stop_healthy_native_child(self):
+        class HealthyWorker:
+            def __init__(worker, *args, **kwargs):
+                worker.stop = threading.Event()
+            def run(worker):
+                worker.stop.wait(5)
+        node = self.node(self.config('alice', central=True, start_worker=True), worker_factory=HealthyWorker)
+        node.start()
+        transaction = node.store.transaction
+        class AdvisoryFailure:
+            def __init__(proxy, db):
+                proxy.db = db
+            def execute(proxy, statement, *args):
+                if statement.startswith('SELECT active FROM node_incidents'):
+                    raise OSError('PRIVATE_INCIDENT_READ_BODY')
+                return proxy.db.execute(statement, *args)
+        @contextlib.contextmanager
+        def failed_optional_read():
+            with transaction() as db:
+                yield AdvisoryFailure(db)
+        with patch.object(node.store, 'transaction', side_effect=failed_optional_read):
+            snapshot = node.step()
+        self.assertTrue(node.worker_thread.is_alive())
+        self.assertFalse(node.worker.stop.is_set())
+        self.assertEqual('unknown', snapshot['runtime_incident_status'])
+        self.assertTrue(snapshot['runtime_attention_required'])
+        self.assertNotIn('PRIVATE_INCIDENT_READ', json.dumps(snapshot))
 
     def test_worker_constructor_failure_and_unexpected_exit_have_durable_backoff(self):
         calls = []

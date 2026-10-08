@@ -20,9 +20,15 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from .config import private_json, read_secret
 from .networking import PROTOCOL, Network, canonical, digest, identifier, native_scope
+from .runtime_health import diagnose as diagnose_runtime
 from .server import serve
 from .store import Conflict, Store
 from .worker import Client, Worker
+
+
+# '@' is outside the A2A node identifier alphabet, so a peer reconnect cannot
+# overwrite or clear this internal execution-attention namespace.
+LOCAL_RUNTIME = '@local-runtime'
 
 
 class PeerContractError(ValueError):
@@ -149,6 +155,8 @@ class Node:
         self.server_error, self.runtime_config_path = None, None
         self.lock_file = None
         self.worker_started_at, self.worker_started_clock, self.worker_health_recorded = None, None, False
+        self.runtime_observation, self.runtime_next_observation = None, 0
+        self.runtime_observation_persisted = False
         self.verified = set()
         self.started = False
 
@@ -171,7 +179,13 @@ class Node:
                            'memory_scope': 'node-runtime:' + digest(self.node_id),
                            'authority': 'local:' + self.node_id,
                            'origin': {'kind': 'node-maintenance', 'peer': peer, 'episode': episode}}
-                text = ('诊断本节点与已授权 peer ' + peer + ' 的连接故障（' + code + '），检查本节点服务、'
+                subject = ('诊断本节点原生运行包组件缺失（' + code + '）。'
+                           '先使用本节点 runtime_diagnose/运行包维护 CLI 核对实际布局与可用执行器；'
+                           '坏 Shell 不能冒称执行了修复。有其它本人已授权的可用节点/原生路径时可请求其协助，'
+                           '没有可用执行路径则保留故障证据并联系本人。修复布局不等于执行恢复，须真实执行验收。'
+                           if peer == LOCAL_RUNTIME else
+                           '诊断本节点与已授权 peer ' + peer + ' 的连接故障（' + code + '），')
+                text = (subject + '检查本节点服务、'
                         '私有配置引用、日志、已配置模型及已授权连接；有可用模型时自主分析并验证修复。'
                         'Mesh 是额外的受管能力入口，不拦截任何原生 Shell、网络或其他功能；'
                         '可自主使用原生能力排障，并尝试本人已授权范围内的不同联网路径重新连接已授权 peer。'
@@ -185,7 +199,8 @@ class Node:
                             self.store.clock(), canonical(context), context['session_scope']))
             if first or previous['code'] != code:
                 db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
-                           (peer, 'link_degraded', code, canonical({'episode': episode, 'maintenance_task': task_id}), self.store.clock()))
+                       (peer, 'runtime_layout_degraded' if peer == LOCAL_RUNTIME else 'link_degraded',
+                        code, canonical({'episode': episode, 'maintenance_task': task_id}), self.store.clock()))
             db.execute('INSERT OR REPLACE INTO node_incidents VALUES(?,?,?,?,?,?)',
                        (peer, episode, 1, code, task_id, self.store.clock()))
 
@@ -400,6 +415,48 @@ class Node:
         except Exception as exc:
             self._worker_failed(exc)
 
+    def _observe_runtime(self, force=False):
+        """Advisory host observation, including externally managed Workers.
+
+        No native operation, quota/model request, runtime switch or task replay.
+        Heartbeats/layout repairs cannot clear an execution incident. Unknown
+        wrappers are not treated as broken and do not block the Worker.
+        """
+        if not force and time.monotonic() < self.runtime_next_observation:
+            return
+        self.runtime_next_observation = time.monotonic() + 30
+        try:
+            path = self.runtime_config_path or self.config['local_worker_config']
+            configured = private_json(path)
+            if (not isinstance(configured, dict) or configured.get('node_id') != self.node_id
+                    or configured.get('token_file') != self.worker_config.get('token_file')
+                    or configured.get('control_url') != self.worker_config.get('control_url')
+                    or not isinstance(configured.get('capabilities'), list)
+                    or not all(isinstance(cap, str) for cap in configured['capabilities'])
+                    or not set(configured['capabilities']) <= set(self.worker_config['capabilities'])):
+                raise ValueError('runtime_configuration_binding_changed')
+            report = diagnose_runtime(configured)
+        except Exception:
+            report = {'schema': 'runtime-health/1', 'read_only': True,
+                      'observation': 'configured_layout_only', 'active_process_verified': False,
+                      'native_tools_intercepted': False, 'execution_verified': False,
+                      'error': 'runtime_observation_unavailable'}
+        self.runtime_observation = report
+        self.runtime_observation_persisted = False
+        missing = (isinstance(report, dict) and any(
+            isinstance(runtime, dict) and runtime.get('layout') == 'missing'
+            for runtime in report.get('runtimes', [])))
+        try:
+            self.store.set('node_runtime_observation', {'node': self.node_id, 'report': report,
+                                                       'observed': self.store.clock()})
+            if missing:
+                self._incident(LOCAL_RUNTIME, 'native_runtime_components_missing')
+            self.runtime_observation_persisted = True
+        except Exception:
+            # Optional telemetry must not stop a healthy native Worker. Do not
+            # expose database exception bodies, or claim durable bookkeeping.
+            self.runtime_observation = dict(report, persistence_error='runtime_observation_record_failed')
+
     def _worker_failed(self, exc):
         if self.stop_event.is_set():
             return
@@ -478,6 +535,7 @@ class Node:
             if not self.server_ready.wait(5) or self.server_error is not None:
                 self.stop()
                 raise ValueError('local_node_server_start_failed')
+        self._observe_runtime()
         self._ensure_worker()
 
     def step(self):
@@ -487,6 +545,7 @@ class Node:
                 or self.server_thread is None or not self.server_thread.is_alive()):
             self._event(None, 'server_failed', 'local_authority_runtime_failed')
             raise ValueError('local_node_server_stopped')
+        self._observe_runtime()
         self._ensure_worker()
         for peer in self.peers:
             if self.stop_event.is_set():
@@ -512,11 +571,29 @@ class Node:
 
     def status(self):
         links = self.network.links()
+        incident, incident_unknown = None, False
+        try:
+            with self.store.transaction() as db:
+                incident = db.execute('SELECT active FROM node_incidents WHERE peer=?', (LOCAL_RUNTIME,)).fetchone()
+        except Exception:
+            # This optional telemetry read must not stop the owned native
+            # child. Core authority/lease errors elsewhere remain failures.
+            incident_unknown = True
         return {'node': self.node_id, 'mode': links['mode'], 'links': links['links'],
                 'local_work_allowed': True, 'global_takeover_allowed': False,
                 'local_server_owned': self.server is not None,
                 'local_server_alive': bool(self.server_thread and self.server_thread.is_alive()),
                 'local_worker_alive': bool(self.worker_thread and self.worker_thread.is_alive()),
+                'worker_management': 'embedded' if self.start_worker else 'external_or_not_started',
+                'runtime_observation': self.runtime_observation,
+                'runtime_observation_persisted': self.runtime_observation_persisted,
+                'runtime_incident_status': 'unknown' if incident_unknown else (
+                    'active' if incident and incident['active'] else 'clear'),
+                'runtime_attention_required': bool(incident_unknown or (incident and incident['active']) or any(
+                    runtime.get('layout') == 'missing'
+                    for runtime in (self.runtime_observation or {}).get('runtimes', [])
+                    if isinstance(runtime, dict))),
+                'runtime_execution_verified': False,
                 'model_availability': 'not_verified_by_transport', 'observed': self.store.clock()}
 
     def run_forever(self):

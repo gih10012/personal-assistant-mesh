@@ -487,6 +487,41 @@ class ArtifactFetchTests(unittest.TestCase):
         self.assertEqual([], self.requests)
         self.assertEqual(self.body, self.output.read_bytes())
 
+    def raced_existing_output(self, action):
+        self.output.write_bytes(self.body)
+        self.output.chmod(0o600)
+        original_sha256 = hashlib.sha256
+        class Digest:
+            def __init__(digest):
+                digest.real = original_sha256()
+            def update(digest, body):
+                digest.real.update(body)
+            def hexdigest(digest):
+                result = digest.real.hexdigest()
+                action()
+                return result
+        with patch('scripts.fetch_artifact.hashlib.sha256', side_effect=Digest):
+            with self.assertRaisesRegex(ArtifactFetchError, 'artifact_existing_output_changed'):
+                self.fetch()
+        self.assertEqual([], self.requests)
+
+    def test_existing_output_changed_after_hash_is_not_trusted(self):
+        self.raced_existing_output(lambda: self.output.write_bytes(b'x' * len(self.body)))
+        self.assertEqual(b'x' * len(self.body), self.output.read_bytes())
+
+    def test_existing_output_replaced_after_hash_is_not_trusted(self):
+        def replace():
+            replacement = self.root / 'replacement'
+            replacement.write_bytes(self.body)
+            replacement.chmod(0o600)
+            os.replace(str(replacement), str(self.output))
+        self.raced_existing_output(replace)
+        self.assertEqual(self.body, self.output.read_bytes())
+
+    def test_existing_output_disappearing_after_hash_is_not_trusted(self):
+        self.raced_existing_output(self.output.unlink)
+        self.assertFalse(self.output.exists())
+
     def test_existing_incorrect_output_is_never_overwritten(self):
         self.output.write_bytes(b'user-owned-existing')
         self.output.chmod(0o600)
@@ -540,6 +575,12 @@ class ArtifactFetchTests(unittest.TestCase):
                 self.assertEqual(raced_body, self.output.read_bytes())
                 self.assertEqual([self.output], list(self.root.iterdir()))
                 self.output.unlink()
+
+    def test_publish_conflict_then_missing_output_never_reports_success(self):
+        with patch('scripts.fetch_artifact.os.link', side_effect=FileExistsError('simulated disappearing winner')):
+            with self.assertRaisesRegex(ArtifactFetchError, 'artifact_output_changed'):
+                self.fetch()
+        self.assert_clean()
 
     def test_small_artifact_reduces_worker_count(self):
         self.body = b'x'
