@@ -26,8 +26,8 @@ from .store import Conflict, Store
 from .worker import Client, Worker
 
 
-# '@' is outside the A2A node identifier alphabet, so a peer reconnect cannot
-# overwrite or clear this internal execution-attention namespace.
+# The component label is stored in a separate table. Mesh identifiers accept
+# any non-control text, so no printable prefix can reserve a safe namespace.
 LOCAL_RUNTIME = '@local-runtime'
 
 
@@ -150,6 +150,8 @@ class Node:
                     PRIMARY KEY(peer,report_id))''',
             ):
                 db.execute(statement)
+        self.runtime_legacy_unknown = False
+        self._initialize_runtime_observer()
         self.stop_event, self.server_ready = threading.Event(), threading.Event()
         self.server, self.server_thread, self.worker, self.worker_thread = None, None, None, None
         self.server_error, self.runtime_config_path = None, None
@@ -160,30 +162,67 @@ class Node:
         self.verified = set()
         self.started = False
 
+    def _initialize_runtime_observer(self):
+        """Preserve legacy attention without replaying or retyping peer work.
+
+        Old printable component keys could alias legitimate peers. Only a
+        fixed-code component event preserves its historical task reference;
+        ambiguous data is unknown, never silent recovery. No tasks are made.
+        This optional schema/migration must not stop the native Worker either.
+        """
+        self.runtime_legacy_unknown = True
+        try:
+            with self.store.transaction() as db:
+                db.execute('''CREATE TABLE IF NOT EXISTS node_runtime_incidents(
+                    peer TEXT PRIMARY KEY, episode INTEGER NOT NULL, active INTEGER NOT NULL,
+                    code TEXT NOT NULL, task_id TEXT, updated REAL NOT NULL)''')
+                current = db.execute('SELECT * FROM node_runtime_incidents WHERE peer=?', (LOCAL_RUNTIME,)).fetchone()
+                if current is None:
+                    event = db.execute('''SELECT detail,created FROM node_events WHERE peer=?
+                        AND operation=? AND code=? ORDER BY sequence DESC LIMIT 1''',
+                        (LOCAL_RUNTIME, 'runtime_layout_degraded', 'native_runtime_components_missing')).fetchone()
+                    if event:
+                        detail = json.loads(event['detail'])
+                        episode, task = detail.get('episode'), detail.get('maintenance_task')
+                        if (not isinstance(episode, int) or isinstance(episode, bool) or episode < 1
+                                or (task is not None and task != 'maintenance-' + digest([self.node_id, LOCAL_RUNTIME, episode]))):
+                            raise ValueError('runtime_legacy_evidence_ambiguous')
+                        db.execute('INSERT INTO node_runtime_incidents VALUES(?,?,?,?,?,?)',
+                                   (LOCAL_RUNTIME, episode, 1, 'native_runtime_components_missing', task, event['created']))
+                    elif db.execute('SELECT 1 FROM node_incidents WHERE peer=? AND code=?',
+                                    (LOCAL_RUNTIME, 'native_runtime_components_missing')).fetchone():
+                        raise ValueError('runtime_legacy_evidence_ambiguous')
+            self.runtime_legacy_unknown = False
+        except Exception:
+            pass  # fixed unknown flag only; never private exception bodies
+
     def _event(self, peer, operation, code, detail=None):
         with self.store.transaction() as db:
             db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
                        (peer, operation, code, canonical(detail or {}), self.store.clock()))
 
-    def _incident(self, peer, code):
+    def _incident(self, peer, code, runtime=False):
         """One local maintenance task per failure episode, not each retry."""
+        table = 'node_runtime_incidents' if runtime else 'node_incidents'
         with self.store.transaction() as db:
-            previous = db.execute('SELECT * FROM node_incidents WHERE peer=?', (peer,)).fetchone()
+            previous = db.execute('SELECT * FROM ' + table + ' WHERE peer=?', (peer,)).fetchone()
             first = previous is None or not previous['active']
             episode = (previous['episode'] if previous else 0) + (1 if first else 0)
             task_id = previous['task_id'] if previous and not first else None
             if first and self.config.get('auto_maintenance', True):
-                task_id = 'maintenance-' + digest([self.node_id, peer, episode])
+                task_id = 'maintenance-' + digest(
+                    ['native-runtime', self.node_id, peer, episode] if runtime else [self.node_id, peer, episode])
                 context = {'project_id': 'node-runtime', 'agent_id': 'self-maintenance',
                            'session_scope': native_scope(self.node_id, 'node-runtime', 'self-maintenance'),
                            'memory_scope': 'node-runtime:' + digest(self.node_id),
                            'authority': 'local:' + self.node_id,
-                           'origin': {'kind': 'node-maintenance', 'peer': peer, 'episode': episode}}
+                           'origin': dict({'kind': 'node-maintenance', 'episode': episode},
+                                          **({'component': peer} if runtime else {'peer': peer}))}
                 subject = ('诊断本节点原生运行包组件缺失（' + code + '）。'
                            '先使用本节点 runtime_diagnose/运行包维护 CLI 核对实际布局与可用执行器；'
                            '坏 Shell 不能冒称执行了修复。有其它本人已授权的可用节点/原生路径时可请求其协助，'
                            '没有可用执行路径则保留故障证据并联系本人。修复布局不等于执行恢复，须真实执行验收。'
-                           if peer == LOCAL_RUNTIME else
+                           if runtime else
                            '诊断本节点与已授权 peer ' + peer + ' 的连接故障（' + code + '），')
                 text = (subject + '检查本节点服务、'
                         '私有配置引用、日志、已配置模型及已授权连接；有可用模型时自主分析并验证修复。'
@@ -199,9 +238,10 @@ class Node:
                             self.store.clock(), canonical(context), context['session_scope']))
             if first or previous['code'] != code:
                 db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
-                       (peer, 'runtime_layout_degraded' if peer == LOCAL_RUNTIME else 'link_degraded',
-                        code, canonical({'episode': episode, 'maintenance_task': task_id}), self.store.clock()))
-            db.execute('INSERT OR REPLACE INTO node_incidents VALUES(?,?,?,?,?,?)',
+                       (None if runtime else peer, 'runtime_layout_degraded' if runtime else 'link_degraded',
+                        code, canonical(dict({'episode': episode, 'maintenance_task': task_id},
+                                             **({'component': peer} if runtime else {}))), self.store.clock()))
+            db.execute('INSERT OR REPLACE INTO ' + table + ' VALUES(?,?,?,?,?,?)',
                        (peer, episode, 1, code, task_id, self.store.clock()))
 
     def _connected(self, peer):
@@ -425,6 +465,8 @@ class Node:
         if not force and time.monotonic() < self.runtime_next_observation:
             return
         self.runtime_next_observation = time.monotonic() + 30
+        if self.runtime_legacy_unknown:
+            self._initialize_runtime_observer()
         try:
             path = self.runtime_config_path or self.config['local_worker_config']
             configured = private_json(path)
@@ -450,7 +492,7 @@ class Node:
             self.store.set('node_runtime_observation', {'node': self.node_id, 'report': report,
                                                        'observed': self.store.clock()})
             if missing:
-                self._incident(LOCAL_RUNTIME, 'native_runtime_components_missing')
+                self._incident(LOCAL_RUNTIME, 'native_runtime_components_missing', runtime=True)
             self.runtime_observation_persisted = True
         except Exception:
             # Optional telemetry must not stop a healthy native Worker. Do not
@@ -571,15 +613,17 @@ class Node:
 
     def status(self):
         links = self.network.links()
-        incident, incident_unknown = None, False
+        incident, incident_unknown = None, self.runtime_legacy_unknown
         try:
             with self.store.transaction() as db:
-                incident = db.execute('SELECT active FROM node_incidents WHERE peer=?', (LOCAL_RUNTIME,)).fetchone()
+                incident = db.execute('SELECT active FROM node_runtime_incidents WHERE peer=?', (LOCAL_RUNTIME,)).fetchone()
         except Exception:
             # This optional telemetry read must not stop the owned native
             # child. Core authority/lease errors elsewhere remain failures.
             incident_unknown = True
         return {'node': self.node_id, 'mode': links['mode'], 'links': links['links'],
+                'a2a_reachable': any(link['kind'] == 'a2a' and link['reachable'] for link in links['links']),
+                'leader_reachable': any(link['leader_available'] for link in links['links']),
                 'local_work_allowed': True, 'global_takeover_allowed': False,
                 'local_server_owned': self.server is not None,
                 'local_server_alive': bool(self.server_thread and self.server_thread.is_alive()),

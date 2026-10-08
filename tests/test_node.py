@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from assistant_mesh.codex import CodexError
-from assistant_mesh.networking import PROTOCOL, native_scope
+from assistant_mesh.networking import PROTOCOL, digest, native_scope
 from assistant_mesh.node import LOCAL_RUNTIME, Node, run
 from assistant_mesh.remote import Remote
 from assistant_mesh.server import serve
@@ -142,9 +142,10 @@ class NodeTests(unittest.TestCase):
         return {'protocol': PROTOCOL, 'id': identity, 'to': to, 'input': text,
                 'project': 'test-project', 'agent': 'persistent-specialist'}
 
-    def incidents(self, node, peer):
+    def incidents(self, node, peer, runtime=False):
         with node.store.transaction() as db:
-            row = db.execute('SELECT * FROM node_incidents WHERE peer=?', (peer,)).fetchone()
+            table = 'node_runtime_incidents' if runtime else 'node_incidents'
+            row = db.execute('SELECT * FROM ' + table + ' WHERE peer=?', (peer,)).fetchone()
             return dict(row) if row is not None else None
 
     def checkpoint(self, node, task_id):
@@ -609,7 +610,7 @@ class NodeTests(unittest.TestCase):
         with patch('subprocess.Popen', side_effect=AssertionError('no native/model execution')):
             node._observe_runtime(force=True)
             node._observe_runtime(force=True)
-        incident = self.incidents(node, LOCAL_RUNTIME)
+        incident = self.incidents(node, LOCAL_RUNTIME, runtime=True)
         self.assertEqual(1, incident['episode'])
         self.assertEqual(1, incident['active'])
         self.assertEqual(1, node.store.status()['tasks']['pending'])
@@ -636,14 +637,14 @@ class NodeTests(unittest.TestCase):
         node._observe_runtime(force=True)
         self.assertEqual('complete', node.status()['runtime_observation']['runtimes'][0]['layout'])
         self.assertTrue(node.status()['runtime_attention_required'])
-        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME)['active'])
+        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME, runtime=True)['active'])
         self.assertFalse(node.status()['runtime_execution_verified'])
 
     def test_unknown_layout_never_creates_runtime_incident_or_blocks_worker(self):
         node = self.node(self.config('alice', central=True))
         node._observe_runtime(force=True)
         self.assertEqual('unknown', node.status()['runtime_observation']['runtimes'][0]['layout'])
-        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME))
+        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME, runtime=True))
         self.assertTrue(node.status()['local_work_allowed'])
 
     def test_disabled_maintenance_still_records_runtime_attention_without_model_task(self):
@@ -654,7 +655,7 @@ class NodeTests(unittest.TestCase):
         node = self.node(config)
         node._observe_runtime(force=True)
         self.assertTrue(node.status()['runtime_attention_required'])
-        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME)['task_id'])
+        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME, runtime=True)['task_id'])
         self.assertEqual(0, node.store.status()['tasks'].get('pending', 0))
 
     def test_config_binding_drift_and_private_errors_are_unknown_not_applied(self):
@@ -667,7 +668,7 @@ class NodeTests(unittest.TestCase):
         self.assertEqual('runtime_observation_unavailable', report['error'])
         self.assertNotIn('NEVER_OUTPUT', json.dumps(report))
         self.assertEqual('alice', node.worker_config['node_id'])
-        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME))
+        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME, runtime=True))
 
     def test_optional_observer_failure_and_interval_do_not_change_native_worker(self):
         node = self.node(self.config('alice', central=True))
@@ -712,15 +713,27 @@ class NodeTests(unittest.TestCase):
 
     def test_valid_peer_local_runtime_cannot_clear_internal_runtime_incident(self):
         config = self.config('alice', central=True)
-        config['peers'] = [{'node': 'local-runtime', 'client_config': config['local_worker_config']}]
+        config['peers'] = [{'node': LOCAL_RUNTIME, 'client_config': config['local_worker_config']}]
         package, helper = self.canonical_runtime(config)
         helper.unlink()
         node = self.node(config)
         node._observe_runtime(force=True)
-        node._incident('local-runtime', 'connection_unavailable')
-        node._connected('local-runtime')
-        self.assertEqual(0, self.incidents(node, 'local-runtime')['active'])
-        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME)['active'])
+        node._incident(LOCAL_RUNTIME, 'connection_unavailable')
+        native = self.incidents(node, LOCAL_RUNTIME, runtime=True)
+        remote = self.incidents(node, LOCAL_RUNTIME)
+        self.assertNotEqual(native['task_id'], remote['task_id'])
+        with node.store.transaction() as db:
+            tasks = [dict(row) for row in db.execute('SELECT input,context FROM tasks')]
+            events = [dict(row) for row in db.execute('SELECT peer,operation,detail FROM node_events')]
+        self.assertEqual(2, len(tasks))
+        self.assertEqual(1, sum('坏 Shell' in task['input'] for task in tasks))
+        self.assertTrue(any(json.loads(task['context'])['origin'].get('component') == LOCAL_RUNTIME for task in tasks))
+        self.assertTrue(any(json.loads(task['context'])['origin'].get('peer') == LOCAL_RUNTIME for task in tasks))
+        self.assertTrue(any(event['peer'] is None and event['operation'] == 'runtime_layout_degraded'
+                            and json.loads(event['detail']).get('component') == LOCAL_RUNTIME for event in events))
+        node._connected(LOCAL_RUNTIME)
+        self.assertEqual(0, self.incidents(node, LOCAL_RUNTIME)['active'])
+        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME, runtime=True)['active'])
         self.assertTrue(node.status()['runtime_attention_required'])
 
     def test_optional_incident_select_failure_does_not_stop_healthy_native_child(self):
@@ -736,7 +749,7 @@ class NodeTests(unittest.TestCase):
             def __init__(proxy, db):
                 proxy.db = db
             def execute(proxy, statement, *args):
-                if statement.startswith('SELECT active FROM node_incidents'):
+                if statement.startswith('SELECT active FROM node_runtime_incidents'):
                     raise OSError('PRIVATE_INCIDENT_READ_BODY')
                 return proxy.db.execute(statement, *args)
         @contextlib.contextmanager
@@ -750,6 +763,100 @@ class NodeTests(unittest.TestCase):
         self.assertEqual('unknown', snapshot['runtime_incident_status'])
         self.assertTrue(snapshot['runtime_attention_required'])
         self.assertNotIn('PRIVATE_INCIDENT_READ', json.dumps(snapshot))
+
+    def test_legacy_runtime_fault_survives_layout_repair_upgrade_without_task_replay(self):
+        config = self.config('alice', central=True)
+        self.canonical_runtime(config)
+        old = self.node(config)
+        task = 'maintenance-' + digest(['alice', LOCAL_RUNTIME, 3])
+        with old.store.transaction() as db:
+            db.execute('INSERT INTO node_incidents VALUES(?,?,?,?,?,?)',
+                       (LOCAL_RUNTIME, 3, 0, 'native_runtime_components_missing', task, self.now))
+            db.execute('INSERT INTO node_events(peer,operation,code,detail,created) VALUES(?,?,?,?,?)',
+                       (LOCAL_RUNTIME, 'runtime_layout_degraded', 'native_runtime_components_missing',
+                        json.dumps({'episode': 3, 'maintenance_task': task}), self.now))
+        old.stop()
+        with patch('subprocess.Popen', side_effect=AssertionError('migration must not execute')):
+            node = self.node(config)
+            node._observe_runtime(force=True)
+        incident = self.incidents(node, LOCAL_RUNTIME, runtime=True)
+        self.assertEqual(1, incident['active'])
+        self.assertEqual(task, incident['task_id'])
+        self.assertEqual(0, self.incidents(node, LOCAL_RUNTIME)['active'])
+        self.assertEqual('complete', node.status()['runtime_observation']['runtimes'][0]['layout'])
+        self.assertTrue(node.status()['runtime_attention_required'])
+        self.assertFalse(node.status()['runtime_execution_verified'])
+        self.assertEqual(0, node.store.status()['tasks'].get('pending', 0))
+
+    def test_legacy_fault_without_component_evidence_is_unknown_not_silent_recovery(self):
+        config = self.config('alice', central=True)
+        self.canonical_runtime(config)
+        old = self.node(config)
+        with old.store.transaction() as db:
+            db.execute('INSERT INTO node_incidents VALUES(?,?,?,?,?,?)',
+                       (LOCAL_RUNTIME, 1, 1, 'native_runtime_components_missing', None, self.now))
+        node = self.node(config)
+        node._observe_runtime(force=True)
+        self.assertEqual('unknown', node.status()['runtime_incident_status'])
+        self.assertTrue(node.status()['runtime_attention_required'])
+        self.assertEqual(0, node.store.status()['tasks'].get('pending', 0))
+
+    def test_legacy_printable_peer_name_is_not_reinterpreted_as_runtime_fault(self):
+        config = self.config('alice', central=True)
+        self.canonical_runtime(config)
+        old = self.node(config)
+        old._incident(LOCAL_RUNTIME, 'connection_unavailable')
+        with old.store.transaction() as db:
+            db.execute('UPDATE node_events SET operation=? WHERE peer=?', ('runtime_layout_degraded', LOCAL_RUNTIME))
+        node = self.node(config)
+        node._observe_runtime(force=True)
+        self.assertIsNone(self.incidents(node, LOCAL_RUNTIME, runtime=True))
+        self.assertEqual(1, self.incidents(node, LOCAL_RUNTIME)['active'])
+        self.assertFalse(node.status()['runtime_attention_required'])
+        self.assertEqual(1, node.store.status()['tasks']['pending'])
+
+    def test_optional_schema_creation_failure_does_not_prevent_native_worker_start(self):
+        class HealthyWorker:
+            def __init__(worker, *args, **kwargs):
+                worker.stop = threading.Event()
+            def run(worker):
+                worker.stop.wait(5)
+        transaction = Store.transaction
+        class AdvisoryFailure:
+            def __init__(proxy, db):
+                proxy.db = db
+            def __getattr__(proxy, key):
+                return getattr(proxy.db, key)
+            def execute(proxy, statement, *args):
+                if statement.startswith('CREATE TABLE IF NOT EXISTS node_runtime_incidents'):
+                    raise OSError('PRIVATE_SCHEMA_ERROR_BODY')
+                return proxy.db.execute(statement, *args)
+        @contextlib.contextmanager
+        def restricted_create(store):
+            with transaction(store) as db:
+                yield AdvisoryFailure(db)
+        with patch.object(Store, 'transaction', restricted_create):
+            node = self.node(self.config('alice', central=True, start_worker=True), worker_factory=HealthyWorker)
+            node.start()
+            snapshot = node.step()
+        self.assertTrue(node.worker_thread.is_alive())
+        self.assertFalse(node.worker.stop.is_set())
+        self.assertEqual('unknown', snapshot['runtime_incident_status'])
+        self.assertTrue(snapshot['runtime_attention_required'])
+        self.assertNotIn('PRIVATE_SCHEMA_ERROR', json.dumps(snapshot))
+
+    def test_reachable_peer_without_global_leader_is_not_a_transport_outage(self):
+        alice, bob = self.pair()
+        alice.step()
+        bob.step()
+        local, central = alice.status(), bob.status()
+        self.assertTrue(local['a2a_reachable'])
+        self.assertTrue(local['leader_reachable'])
+        self.assertEqual('connected', local['mode'])
+        self.assertTrue(central['a2a_reachable'])
+        self.assertFalse(central['leader_reachable'])
+        self.assertEqual('autonomous', central['mode'])
+        self.assertTrue(central['local_work_allowed'])
 
     def test_worker_constructor_failure_and_unexpected_exit_have_durable_backoff(self):
         calls = []

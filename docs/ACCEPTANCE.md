@@ -182,3 +182,51 @@ child，但没在 turn 结束前捕获其 native grandchild `/proc/exe`。因此
 观测/可选账本读写失败不关闭健康 Worker、未知布局不阻断、布局和
 heartbeat 不充当执行恢复，以及分段不完整/变化/整包 SHA256/发布竞态。
 云端同版本全套测试和这一观测的实际部署仍待单独核对。
+
+## 2026-10-08：云端完整运行包与常驻 Shell 修复已验收
+
+- 官方 0.159.2 `x86_64-unknown-linux-musl` 完整 artifact 已传到云端。
+  两个断开的分段保留原数据，先核对源/目标前缀 SHA256，再用原生 SFTP
+  续传；八段拼合后核对整包大小 159961162 和官方完整 SHA256
+  `9e2d29a713b94478b240dec2f10e11324cd05fad76dc43e7c639bdf8a1337a6b`。
+  安装器已完整保留主程序、配套 helper、resources/PATH，并对归档与
+  提取文件逐项复核通过；没有拼装不同来源或覆盖旧版。
+- 云端 Worker 空闲时切换到该完整包，私有配置产生 0600 时间戳备份，
+  旧源码和原运行包保留。只重启 owned Worker 和 companion，唯一云端
+  iLink authority/receiver 的 MainPID 未变。实际 Worker unit 的
+  `NoNewPrivileges=no` / `PrivateTmp=no` 已核对；既有 OS 权限仍适用。
+- 切换后在该节点仅提交一次固定 ID 的独立只读未知哈希挑战，常驻
+  Worker 实际 completed。原生会话、授权 profile、原任务 checkpoint、
+  挑战命令、匹配 call_id 的未知文件哈希输出及最终回复全部核验通过；
+  随后相同 state 只读复查仍通过，没有新建 ID 或使用 Global Leader
+  scope。它与上节 laptop 的独立真实验收共同证明两端原生 Shell 可用。
+- 本次验收期间，部署者额外观察到 owned Worker MainPID 的直接 native
+  `codex` child，`/proc/exe` 指向完整包的实际入口。这与探针自身的
+  `configured_runtime_identity_only` 是两种证据。完整 cgroup/unit 身份及
+  `/proc/exe` 内容 hash 未在 child 退出前捕获，不能扩写成自动进程认证
+  全部通过，探针的两个自动 process/systemd 核验字段仍是 false。
+- 两端被动运行包观察已实际持久化：laptop 的间接布局为 unknown，未被
+  阻止；云端 canonical 布局为 complete。被动观察的
+  `runtime_execution_verified=false` 仅表示该观察不执行验收，不否定
+  上面的独立 Shell 证据。运行包 complete 亦不证明 Native Live/语音
+  或 native memories 后台提取已正常工作。
+- 实际云端→laptop A2A link 的认证状态 connected/reachable、失败数 0，
+  laptop→cloud 亦可达。云端 `mode=autonomous` 是远端 laptop 没有
+  Global Leader 租约，而非传输断线；未选举或接管其它机器的 Leader。
+- 同版功能源码的 501 项全套测试在本机 Python 3.14 与云端 Python
+  3.6.8 都通过，GitHub CI 亦通过。云端首次一项 metadata 早期拒绝夹具
+  遇到快速同长度写入的时间戳合并；改为显式可辨的 fixture mtime 后
+  完整测试通过，生产规则未放宽，原测试的整包哈希拒绝发布始终有效。
+- 修复通知经既有远端 ClawBot 通道、同一 request ID 查询达到 accepted。
+  仅表示服务端受理，手机独立收件未确认；未重发、切号或新开接收器。
+
+随后将 canonical 组件 incident 改为独立表、类型化事件及维护任务 ID，
+并补入旧故障的保守迁移与 A2A/Leader 可达状态分离。最终节点功能源码
+在本机和云端均完整通过 506 项测试；同名合法 peer 不清除组件故障，
+布局恢复后升级不假报执行恢复，模糊旧证据/可选 schema 错误为 unknown，
+不重放旧任务，也不阻止健康原生 Worker。A2A peer 可达但没有远端
+Global Leader 的真实 HTTP fixture 单独验证了上述 mode 边界。
+
+仍需另行迁移旧 `local-worker` 启动故障的 incident 命名空间；目前部署
+只以 cloud/laptop 为 peer，不受此名字碰撞影响。本节的独立组件表隔离
+不能泛化为旧 Worker 启动故障的同名 peer 问题已一并完成。

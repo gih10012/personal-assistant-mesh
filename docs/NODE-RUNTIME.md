@@ -153,11 +153,15 @@ Node 每 30 秒作一次同样的可选布局观察，包括由独立 systemd un
 Worker 的 companion。只发现可信 canonical 布局明确缺件时，登记一个
 `@local-runtime` 内部故障 episode，并按 `auto_maintenance` 配置安排本节点
 独立维护任务；wrapper/Pi/未知布局不判坏。观测或其可选记账失败不会停止
-原生 Worker，错误正文不外泄，状态明确标记是否持久化；内部标识不与
-合法 peer 名冲突。可选故障查询失败标 unknown/需要关注，不是假健康。布局恢复或
+原生 Worker，错误正文不外泄，状态明确标记是否持久化；canonical 包组件故障
+使用独立表、类型化事件和独立维护任务 ID，不限制合法 peer 命名，
+也不与同名 peer 重连混淆。可选故障查询失败标 unknown/需要关注，不是假健康。布局恢复或
 heartbeat 都不能清除这个执行故障提示；目前尚无自动执行验收/故障关闭
 闭环，不能把维护任务完成或 `runtime_execution_verified=false` 改报为
 Shell 已恢复。观测不自动切包、联网、消耗模型额度或重放业务任务。
+从旧版升级时，仅核对固定组件故障事件及旧任务身份来保留 attention；
+证据含糊则标 unknown，不将合法同名 peer 改作内部组件、不删历史或
+重放任务。可选 schema/migration 失败也不停止原生 Worker。
 
 常驻 Worker 的真实执行验收使用已有 authority，不创建独立 Codex：
 
@@ -252,6 +256,17 @@ python3 -m scripts.artifact_parts join --parts-directory /private/upload-parts \
 - Worker 构造失败/异常或意外正常退出也持久退避；稳定运行至少 30 秒且权威账本看到本机 heartbeat 后才清掉 runtime failure。owned authority 死亡会使监督器失败并由 systemd 重新拉起，不假报在线。
 
 `node_runtime.model_availability=not_verified_by_transport` 是刻意保留的边界。没有可用 backend 时，实际 Worker 将任务保持 `waiting_backend`/`waiting_auth`，而不是返回虚构结果；本地记账、诊断任务准备、确定性连接检查仍可进行。有预配置且可用的离线模型，才可能继续模型推理。安装离线模型、收费 provider、自动选最佳调度和技能发布回滚仍需各自实现/实测。
+
+`mode` 表示有无可达的远端 Global Leader 租约，不是物理断网判断。
+`a2a_reachable` 和 `leader_reachable` 单独表达近期认证连接与 Leader
+可用性；本节点可与无 Global Leader 的 peer 正常通信，同时保持
+`mode=autonomous`。是否断链要看具体 link 的可达/期限/错误证据，不能
+据这个 mode 禁用原生网络或 Shell。
+
+已知待迁移边界：旧 `local-worker` 启动故障仍复用旧 peer incident
+命名空间，尚未套用上述 canonical 包组件的独立表迁移。现部署 peer 为
+cloud/laptop，不受该名字碰撞影响；该旧路径的任意 peer 名隔离仍需
+单独实现与回归验收，不能声称已统一解决。
 
 ## 服务与验收
 
