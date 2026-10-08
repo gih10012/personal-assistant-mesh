@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import socket
 import socketserver
 import tempfile
 import threading
@@ -13,6 +14,7 @@ import time
 import unittest
 import urllib.request
 import urllib.parse
+import urllib.error
 from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -426,6 +428,114 @@ class ArtifactFetchTests(unittest.TestCase):
         self.assertEqual(b'old-user-owned-output', self.output.read_bytes())
         self.assertEqual([], self.requests)
         self.assertEqual(before, self.checkpoint_snapshot(directory))
+
+    def controlled_transport_fault(self, directory, phase, error, fault_time, socket_timeout=2):
+        """Advance only the fetch clock at a precise network failure boundary."""
+        clock, open_timeouts, body_reads, closed = [100.0], [], [], []
+        headers = HTTPMessage()
+        headers.add_header('Content-Range', 'bytes 17-{}/{}'.format(len(self.body) - 1, len(self.body)))
+        headers.add_header('Content-Length', str(len(self.body) - 17))
+        owner = self
+
+        class Response:
+            def __enter__(response):
+                return response
+
+            def __exit__(response, *args):
+                closed.append(True)
+
+            def getcode(response):
+                return 206
+
+            def geturl(response):
+                return owner.base + '/valid'
+
+            def read1(response, size):
+                body_reads.append(size)
+                if len(body_reads) == 1:
+                    return owner.body[17:18]
+                clock[0] = fault_time
+                raise error
+
+        response = Response()
+        response.headers = headers
+
+        def open_response(request, timeout):
+            open_timeouts.append(timeout)
+            if phase == 'open':
+                clock[0] = fault_time
+                raise error
+            return response
+
+        fetch_clock = SimpleNamespace(monotonic=lambda: clock[0])
+        opener = SimpleNamespace(open=open_response)
+        with patch('scripts.fetch_artifact.time', fetch_clock):
+            with patch('scripts.fetch_artifact.urllib.request.build_opener', return_value=opener):
+                with self.assertRaises(ArtifactFetchError) as failed:
+                    self.fetch(workers=1, timeout=socket_timeout, deadline=1,
+                               resume_parts_directory=directory)
+        self.assertEqual([min(socket_timeout, 1.0)], open_timeouts)
+        self.assertEqual([] if phase == 'open' else [True], closed)
+        self.assertEqual(0 if phase == 'open' else 2, len(body_reads))
+        self.assertNotIn('DO_NOT_PRINT', str(failed.exception))
+        return str(failed.exception)
+
+    def test_deadline_clipped_open_timeout_preserves_resume_checkpoint(self):
+        directory = self.checkpoint([17], workers=1)
+        before = self.checkpoint_snapshot(directory)
+        for error in (socket.timeout('DO_NOT_PRINT'),
+                      urllib.error.URLError(socket.timeout('DO_NOT_PRINT'))):
+            with self.subTest(wrapped=isinstance(error, urllib.error.URLError)):
+                self.assertEqual('artifact_fetch_deadline',
+                    self.controlled_transport_fault(directory, 'open', error, 101.0))
+                self.assert_checkpoint_preserved(directory, before)
+        self.assertEqual([], self.requests)
+
+    def test_deadline_read_timeout_after_partial_staging_preserves_resume_checkpoint(self):
+        directory = self.checkpoint([17], workers=1)
+        before = self.checkpoint_snapshot(directory)
+        for error in (socket.timeout('DO_NOT_PRINT'),
+                      urllib.error.URLError(socket.timeout('DO_NOT_PRINT'))):
+            with self.subTest(wrapped=isinstance(error, urllib.error.URLError)):
+                self.assertEqual('artifact_fetch_deadline',
+                    self.controlled_transport_fault(directory, 'read', error, 101.1))
+                self.assert_checkpoint_preserved(directory, before)
+        self.assertEqual([], self.requests)
+
+    def test_socket_timeout_before_overall_deadline_is_still_transport_failure(self):
+        directory = self.checkpoint([17], workers=1)
+        before = self.checkpoint_snapshot(directory)
+        for phase in ('open', 'read'):
+            for error in (socket.timeout('DO_NOT_PRINT'),
+                          urllib.error.URLError(socket.timeout('DO_NOT_PRINT'))):
+                with self.subTest(phase=phase, wrapped=isinstance(error, urllib.error.URLError)):
+                    self.assertEqual('artifact_transport_failed',
+                        self.controlled_transport_fault(directory, phase, error, 100.25,
+                                                        socket_timeout=0.25))
+                    self.assert_checkpoint_preserved(directory, before)
+        self.assertEqual([], self.requests)
+
+    def test_unrelated_transport_failures_at_deadline_are_not_reclassified(self):
+        directory = self.checkpoint([17], workers=1)
+        before = self.checkpoint_snapshot(directory)
+        for phase in ('open', 'read'):
+            for error in (ConnectionResetError('DO_NOT_PRINT'), OSError('timed out DO_NOT_PRINT'),
+                          urllib.error.URLError(ConnectionResetError('DO_NOT_PRINT')),
+                          urllib.error.URLError('timed out DO_NOT_PRINT')):
+                with self.subTest(phase=phase, kind=type(error).__name__):
+                    self.assertEqual('artifact_transport_failed',
+                        self.controlled_transport_fault(directory, phase, error, 101.1))
+                    self.assert_checkpoint_preserved(directory, before)
+        self.assertEqual([], self.requests)
+
+    def test_http_failure_at_deadline_keeps_http_error_classification(self):
+        directory = self.checkpoint([17], workers=1)
+        before = self.checkpoint_snapshot(directory)
+        error = urllib.error.HTTPError(self.base + '/DO_NOT_PRINT', 503, 'DO_NOT_PRINT', {}, None)
+        self.assertEqual('artifact_http_failed',
+            self.controlled_transport_fault(directory, 'open', error, 101.1))
+        self.assert_checkpoint_preserved(directory, before)
+        self.assertEqual([], self.requests)
 
     def test_cli_explicit_resume_handle_is_passed_without_new_identity_or_secrets(self):
         directory = self.checkpoint([0] * 4)

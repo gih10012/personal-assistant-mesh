@@ -330,3 +330,34 @@ MCP、联网与文件功能不受新增 callback journal 限制。
 
 修复后的本机 Python 3.14.7 完整回归为 659 项通过；云端兼容性和
 这一后续版本的正式部署须分别核验，不从本机测试结果推断。
+
+### `92016d7` 的后续部署、重启和 CI 核验
+
+同一冻结归档在云端 Python 3.6.8 也实际通过 659 项。空闲边界升级
+云端三项 user service 后，authority、worker 和 companion 都 active，
+各自 `NRestarts=0`；Store/Network/provider 文件哈希与本机发布版一致。
+保留一致 SQLite 备份和完整旧源码；只读比较备份中的原任务 ID、
+input、epoch、status、result，未发现缺失或改写。此时云端累计
+15 completed / 5 failed、33 accepted；新增任务/消息不是历史丢失。
+真实认证 CLI 可读取空容量目录，不把它误报为已有能力执行。
+
+笔记本随后已由系统重启，node/worker/private reverse tunnel 三项
+user service 自动恢复，均无额外重启；启动在本次源码落盘之后，
+core 文件哈希一致，启动日志无 SQLite 初始化错误。cloud 经原私有
+Unix reverse socket 的认证 `mesh-hello` 实际返回 laptop / laptop
+与自有 `mesh-a2a/1`，证明这一连接恢复，不证明新增标准 A2A 支持。
+没有为此再次运行模型挑战或主动重启隧道。
+
+系统重启清掉本机 `/tmp` 的派生验收报告，但选定原生会话日志仍为
+104,231 bytes，哈希与接管时完全一致；原生连续记忆没有随临时目录
+一起丢失。云端同一 state、闭合账本/一致快照、原 report 和验收源码
+仍在，已复制到两端私有持久档案；本机选定原生日志也另存私有副本。
+不重提原任务，不把丢失的派生 report 伪称为仍保留；后续新 probe
+使用私有 `/var/tmp` 工作目录并另作持久备份，认证值不在这些档案中。
+
+公开 [CI run](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37814749586)
+并非全绿：Python 3.12 的既有 artifact deadline 测试实际失败。
+socket 超时抢先于整体截止检查，误报为 transport failure；两台宿主
+通过不能替代这个检查。后续修复只在真实 timeout 且整体 deadline
+已过时改报 deadline，其他网络/HTTP 错误保留原分类，并补确定性测试；
+修复的整套回归和新 CI 还须单独验收。

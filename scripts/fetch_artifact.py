@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import socket
 import stat
 import tempfile
 import threading
@@ -200,7 +201,17 @@ def _part(url, start, end, size, destination, timeout, deadline, stopped, allow_
         if error.fp is not None:
             error.close()
         raise ArtifactFetchError('artifact_http_failed') from None
-    except Exception:
+    except Exception as error:
+        # The socket bound is clipped to the overall remaining time. A
+        # timeout can therefore win the race against the check after read1
+        # (or occur before open returns). urllib wraps connection timeouts in
+        # URLError; only an actual timeout at the expired overall deadline is
+        # a deadline failure. Unrelated failures and earlier socket timeouts
+        # remain distinct transport failures, even if their messages say
+        # "timed out". Never expose those potentially signed URL messages.
+        cause = error.reason if isinstance(error, urllib.error.URLError) else error
+        if isinstance(cause, (socket.timeout, TimeoutError)) and time.monotonic() >= deadline:
+            raise ArtifactFetchError('artifact_fetch_deadline') from None
         # HTTP/socket exceptions can embed signed URLs: never expose their text.
         raise ArtifactFetchError('artifact_transport_failed') from None
 
