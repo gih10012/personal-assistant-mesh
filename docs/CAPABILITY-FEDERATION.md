@@ -2,7 +2,9 @@
 
 对应 PAM-003a/003b/003c，代码核对日期：2026-10-09。
 当前已实现可选导出、只读投影、认证拉取、Node 接线及模型/CLI 查询。
-**尚未正式部署此功能，也未验收真实两端断连与重联。** 目录联邦不是
+**尚未正式部署此功能；隔离 VPS↔laptop 的临时 SSH forward 断连/冷恢复/
+重联已实际验收。** 该项不证明 Node 正式同步循环、实际 Wi-Fi 切换或
+全网自主恢复，详见 [实测记录](ACCEPTANCE.md)。目录联邦不是
 全局 HA、跨 authority 共识或自主最佳调度；研究依据见
 [FRONTIER-MESH-RESEARCH](FRONTIER-MESH-RESEARCH.md)。
 
@@ -211,7 +213,8 @@ mesh(action="federated_capabilities",
 source/projection 的临时 SQLite 测试覆盖同 epoch 更新、tombstone、
 有界页、并发源 snapshot、重开、原子游标、重复不续租、issuer 隔离与
 冲突拒绝。实现与夹具证据不能代替正式部署或真实双端故障证据。
-Root 继续负责同步/API/Node 接线验收、发布与 PLAN/TASKS 更新。
+Root 已完成隔离两端目录链路验收和公开发布；正式 Node 部署与运行
+观察仍由 Root 按 PLAN/TASKS 的下一项推进。
 
 下一条真实链路需记录断连前后的来源/游标、局部任务连续性、重联回读
 原 ID、撤销不被旧页覆盖及 unknown 无第二次执行。尚不包括完整历史

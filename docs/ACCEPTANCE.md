@@ -606,3 +606,49 @@ Python 3.8/3.12/3.14 均 success。该次代码尚不含后续 federation 模块
 VPS 三项 user service PID 均仍为原 PID，NRestarts=0，验收端口已关闭。
 结果、闭合 journal、冻结源码与独立 owner 参考另外保留在私有持久
 目录（0700/0600）；owner 参考仍只在 laptop，未复制 auth 或公开日志。
+
+### `7e569cf`：来源能力同步、真实断连与冷恢复重汇合
+
+可选 source export / issuer-isolated projection / 独立 Node 同步循环
+和模型/CLI 只读入口已公开发布为
+`7e569cf7af0152b2d9681fbf41b4263a7858c16c`。冻结树为
+`a4cfe8da32c485e5040cd474cf9d60c8c0381c96`，同一归档 SHA-256
+`928f543e06b5eec826c09f175286110ac984c5121bcced62c7f04a0c9928804c`。
+laptop Python 3.14.7 完整通过 **1002 项**（129.047 秒），VPS Python
+3.6.8 完整通过 **1002 项**（127.468 秒）。公开
+[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37892421063)
+另按其真实状态核对，不以提交或排队声称 success。
+
+并行独立审查实际复现了规范页 JSON 与 HTTP 带空格 wire 大小不一致：
+一个合规接近 8MiB 的导出页会被客户端拒绝，游标无法推进。修正为
+compact HTTP JSON，保留原上限；真实 HTTP 的 300 个大公告分页回归
+验证首部分页可读、续页总数正确。source/projection/resources 共 67
+项通过；独立新接线 16 项、相关回归 77 项通过，Root 的 Node/CLI
+组合回归 85 项通过。测试和实际部署证据不混同。
+
+真实跨宿主验收仍使用隔离、无模型 Worker/微信的 VPS authority 和私有
+SSH forward，不操作正式节点配置。源 VPS 的实际只读网络采样生成一项
+`network.egress` 元数据候选，owner 明确登记到测试 Registry；未安装
+出口执行器、未验证互联网或性能、未自动注册正式资源。laptop 保存
+同名的本地 Wi-Fi 能力、一个 pending 本地任务和一条**合成 unknown
+意图**（未执行 SSH 效果），随后用已授权目录 credential 实际拉取源页。
+
+精确终止该临时 forward 后，实际同步失败、projection 连接标记
+disconnected、查询隐藏远端候选；原 issuer/cursor/退避保留。VPS 源端
+在断连时撤销原能力，**执行 epoch 仍是 1，mutation revision 从 1
+增至 2**。重新建立同一路径，laptop 新进程从同一私有 ledger 冷恢复，
+读取原游标和退避；下一页得到 tombstone。旧原始页再次 apply 被拒绝，
+撤销未复活。本地 Registry、原 task 和合成 unknown 行逐字段均未改写。
+没有为“恢复成功”清 cursor、改 issuer、复制 grant/pool 或换 operation ID。
+
+这是**实际 SSH 路径跨主机目录同步与冷恢复重汇合**，不是所有网络
+分区/真实 Wi-Fi 自动重连、已安装正式 Node 循环、模型离线推理、真实
+外部 unknown 效果的执行、全局共识或自主最佳调度的验收。投影保留
+declared_estimate，未补偿未知传输延迟，亦不证明真实资源租约仍有效；
+资源 owner 仍负责每次真实准入、授权和结算。
+
+验收结束只停止对应测试 authority/forward，正式 VPS 三项 user service
+及 laptop node/worker/原 reverse tunnel 均保留原 PID、active/NRestarts=0。
+测试 loopback 端口关闭。源/目标 ledger、一致快照、报告与冻结代码另存
+两端私有持久档案（0700/0600），没有将测试令牌、原生 auth、个人网络
+地址或聊天发布到 GitHub。未请求新 API key、支付资源或微信发送。
