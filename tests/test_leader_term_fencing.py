@@ -3,6 +3,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from assistant_mesh.networking import Network
@@ -128,7 +129,7 @@ class LeaderTermFencingTests(unittest.TestCase):
 
     def test_old_schema_migration_keeps_history_and_unknown_leader_binding(self):
         path = Path(self.temporary.name) / 'old.sqlite'
-        with sqlite3.connect(str(path)) as db:
+        with closing(sqlite3.connect(str(path))) as db, db:
             db.execute('''CREATE TABLE tasks(id TEXT PRIMARY KEY,parent_id TEXT,input TEXT NOT NULL,
                 required TEXT NOT NULL,status TEXT NOT NULL,node TEXT,epoch INTEGER NOT NULL DEFAULT 0,
                 deadline REAL,checkpoint TEXT NOT NULL DEFAULT '{}',result TEXT,created REAL NOT NULL,

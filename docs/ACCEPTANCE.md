@@ -405,3 +405,40 @@ personal-assistant-mesh goal。闭合账本、一致 authority snapshot、
 probe 的独立进程和 forward，正式 authority/worker/node 与既有
 reverse tunnel 不受影响。测试入口 17683 已关闭；正式云端三项
 service active 且 NRestarts=0。没有新公开端口、付费资源或 API key。
+
+### `d2770b8` 可选独立运行器与正式源码升级
+
+可选 owner manifest 运行器、独立 CLI、service example 和 43 项新增
+测试已冻结在 `d2770b8`。同一归档在本机 Python 3.14.7 与 VPS Python
+3.6.8 分别实际通过 744 项完整测试；公开
+[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37865484701)
+的 Python 3.8、3.12、3.14 也均为 success。Python 3.6 的验证是源码
+运行兼容性证据，不修改 package 声明的 Python >= 3.8 安装要求。
+
+回归包括私有完整绑定/UTF-8 源码快照、同源码更换入口或位置不得
+冒充旧 epoch、顶层代码仅在 admission 后执行、未知不重放、旧结果
+在升级或移除模块后同 ID 补结算，以及 stop 期间只完成当前 callback
+而不启动下一项。交叉审查实测并修复了旧未接收 epoch 的请求阻断新
+请求及晚结算的问题；只隔离特定合同版本不匹配，畸形响应仍报错。
+
+VPS 对正式 authority 的额外 smoke 使用新私有 journal、空 adapters
+和现有本人 credential-bound Client，实际运行 describe 与两轮 finite
+serve，exit 0、diagnostics 空、execution rows 为 0。这核对 CLI 启动、
+认证轮询及持久 namespace，不冒称已执行工具、启用常驻 service 或
+模型自主部署。没有打开 native auth、请求 API key 或启动模型。
+
+确认无活跃任务/待提交消息后才更新正式 VPS 源码，保留一致 SQLite
+备份和完整旧源码；authority、worker、companion 三项都 active，
+NRestarts=0，healthz 实际 ok。对备份所有原 task 的 ID/input/epoch/
+status/result 只读比较，缺失或改写数为 0；此时累计 17 completed /
+5 failed、37 accepted，后续正常新任务不能误算作旧记录被改写。
+provider、runtime、CLI 文件 SHA 与冻结版一致。正式升级包括一次
+受控的唯一接收器重启，不能把隔离 probe 的“不重启”延伸到本阶段。
+新 provider service 仍只是可选 example，不默认启用。
+
+本机全套曾有一条 unclosed SQLite ResourceWarning。带 allocation
+traceback 的同版本 744 项复查通过，定位是旧 schema migration 的
+测试 fixture：sqlite3 connection 的 with 只管理事务，并不关闭连接，
+不是生产 Store/provider/runtime 分配泄漏。后续 fixture 用 closing
+并保留内层事务 commit/rollback 语义；不以测试通过宣称所有生产
+依赖或资源生命周期已获得独立审计。
