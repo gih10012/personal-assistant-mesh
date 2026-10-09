@@ -588,3 +588,21 @@ CLI 接入后相关网络/tool/provider/resource CLI 合计 54 项通过。新�
 原文和原 thread，9 项新增请求 fixture 与既有协议/权限/memory 共
 22 项通过。这是请求组成证据，**不是生产 Worker 已加载、模型自主
 选型已运行或 3–5 天 ChatGPT schedule 已创建**。
+
+#### `b1a10fa` 公开发布
+
+随后集成了网络 inventory/CLI 和持续工作指令。冻结树为
+`a5837499404beb2b9421fc69fd90e75a6233c338`，归档 SHA-256 为
+`20ea16ba310bdf41e99f585a3f839d0c216ecc4256b0d2a59345e333e79d7c04`。
+同一归档在 laptop Python 3.14.7 完整通过 **941 项**（118.682 秒），
+VPS Python 3.6.8 完整通过 **941 项**（108.984 秒）。已公开发布为
+`b1a10fa453e334c175a8203d35326770ba9757a8`，
+[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37891035551)
+Python 3.8/3.12/3.14 均 success。该次代码尚不含后续 federation 模块。
+
+工具验收结束时，owner 按原 operation ID 再次认证核对三个 completed
+效果、容量未持有，只暂停最后一个隔离合成父任务的过期 bookkeeping，
+不假报其 completed。仅精确停止验收 authority 和临时 forward；正式
+VPS 三项 user service PID 均仍为原 PID，NRestarts=0，验收端口已关闭。
+结果、闭合 journal、冻结源码与独立 owner 参考另外保留在私有持久
+目录（0700/0600）；owner 参考仍只在 laptop，未复制 auth 或公开日志。

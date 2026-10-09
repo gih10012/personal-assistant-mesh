@@ -134,6 +134,8 @@ class Node:
             authority = identifier(peer.get('authority', name))
             if not isinstance(peer.get('report_results', False), bool):
                 raise ValueError('invalid_peer_report_flag')
+            if not isinstance(peer.get('sync_capabilities', False), bool):
+                raise ValueError('invalid_peer_catalog_flag')
             client_config = private_json(peer['client_config']) if peer.get('client_config') else {
                 key: peer[key] for key in ('control_url', 'token_file')}
             # Validate URL and owned token now, without issuing network traffic.
@@ -147,6 +149,21 @@ class Node:
         self.notification_relay, self.notification_thread = None, None
         self.notification_observation = {'status': 'disabled', 'delivery_verified': False}
         self.network = Network(self.store, self.node_id)
+        self.federation_syncs, self.federation_thread = {}, None
+        self.federation_observation = {'status': 'disabled', 'peers': {},
+                                       'managed_invocation_authorized': False}
+        selected = [name for name, peer in self.peers.items() if peer.get('sync_capabilities')]
+        if selected:
+            from .federation_sync import FederationSync
+            if self.server_config.get('federation', {}).get('projection_enabled') is not True:
+                raise ValueError('catalog_sync_requires_local_projection_enabled')
+            options = config.get('federation_sync', {})
+            if not isinstance(options, dict) or set(options) - {'interval_seconds', 'page_limit', 'freshness_seconds'}:
+                raise ValueError('invalid_federation_sync_config')
+            for name in selected:
+                peer = self.peers[name]
+                self.federation_syncs[name] = FederationSync(self.store, name, peer['authority'],
+                    _FreshNotificationClient(self.client_factory, peer['client']), **options)
         with self.store.transaction() as db:
             for statement in (
                 '''CREATE TABLE IF NOT EXISTS node_events(
@@ -680,6 +697,7 @@ class Node:
         self._observe_runtime()
         self._ensure_worker()
         self._start_notification_relay()
+        self._start_federation_sync()
 
     def step(self):
         if not self.started or self.stop_event.is_set():
@@ -743,6 +761,28 @@ class Node:
         self.notification_thread.daemon = True
         self.notification_thread.start()
 
+    def _start_federation_sync(self):
+        if not self.federation_syncs:
+            return
+
+        def pull_catalogues():
+            reports = {}
+            while not self.stop_event.is_set():
+                for name, synchronizer in self.federation_syncs.items():
+                    if self.stop_event.is_set():
+                        break
+                    try:
+                        reports[name] = synchronizer.step(stop=self.stop_event)
+                    except Exception:
+                        reports[name] = {'state': 'degraded', 'diagnostics': ['catalog_runtime_failed'],
+                                         'managed_invocation_authorized': False}
+                self.federation_observation = {'status': 'running', 'peers': dict(reports),
+                                               'managed_invocation_authorized': False}
+                self.stop_event.wait(min(self.interval, 1))
+        self.federation_thread = threading.Thread(target=pull_catalogues)
+        self.federation_thread.daemon = True
+        self.federation_thread.start()
+
     def status(self):
         links = self.network.links()
         incident, incident_unknown = None, self.runtime_legacy_unknown
@@ -764,6 +804,7 @@ class Node:
             worker_unknown = True  # a failed optional write is not recovery
         return {'node': self.node_id, 'mode': links['mode'], 'links': links['links'],
                 'owner_notifications': dict(self.notification_observation),
+                'federated_capabilities': dict(self.federation_observation),
                 'a2a_reachable': any(link['kind'] == 'a2a' and link['reachable'] for link in links['links']),
                 'leader_reachable': any(link['leader_available'] for link in links['links']),
                 'local_work_allowed': True, 'global_takeover_allowed': False,
@@ -797,6 +838,8 @@ class Node:
 
     def stop(self):
         self.stop_event.set()
+        if self.federation_thread and self.federation_thread is not threading.current_thread():
+            self.federation_thread.join(timeout=5)
         if self.notification_thread and self.notification_thread is not threading.current_thread():
             # Pending RPC timeout/crash remains in its durable intent. This
             # bounded join does not assert remote delivery or quiescence.

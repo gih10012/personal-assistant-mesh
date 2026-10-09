@@ -47,7 +47,7 @@ def _tool_command(args):
     # starts/restarts services, runs tests/modules, or resets execution journals.
     actions = ('stage', 'publish', 'activate', 'inspect', 'prepare-rollback')
     foreign = ('text', 'request_id', 'payload_file', 'kind', 'principal', 'limit',
-               'after', 'id', 'task_id', 'call_id', 'max_cycles')
+               'after', 'id', 'task_id', 'call_id', 'max_cycles', 'issuer')
     valid = (args.action in actions and args.owner_config and args.state_dir and args.operation_id
              and not args.include_unavailable
              and not any(getattr(args, name) is not None for name in foreign))
@@ -111,7 +111,7 @@ def _network_command(args):
     foreign = ('config', 'text', 'request_id', 'action', 'payload_file', 'kind',
                'principal', 'limit', 'after', 'id', 'task_id', 'epoch', 'call_id',
                'owner_config', 'max_cycles', 'state_dir', 'operation_id',
-               'candidate_config', 'publication_config', 'retained_operation_id')
+               'candidate_config', 'publication_config', 'retained_operation_id', 'issuer')
     if (not args.node_id or args.include_unavailable
             or any(getattr(args, name) is not None for name in foreign)):
         _network_error('network_arguments_invalid')
@@ -285,7 +285,7 @@ def main():
     parser.add_argument('--config', help='Required private configuration except for local network-inventory')
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
                                           'resources', 'resource', 'allocation', 'capability-events', 'resource-graph', 'node',
-                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'provider', 'tool-release', 'network-inventory'])
+                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export', 'provider', 'tool-release', 'network-inventory'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
     parser.add_argument('--action', help='Resource API method, not a native terminal restriction')
@@ -308,6 +308,7 @@ def main():
     parser.add_argument('--retained-operation-id', help='Retained release identity; prepare-rollback only')
     parser.add_argument('--node-id', help='Local inventory label only, never an authenticated actor override')
     parser.add_argument('--freshness-seconds', type=float, help='Local inventory observation TTL; default 30, maximum 300')
+    parser.add_argument('--issuer', help='Read-only foreign capability issuer filter, never an actor override')
     args = parser.parse_args()
     if args.command == 'network-inventory':
         return _network_command(args)
@@ -315,6 +316,8 @@ def main():
         parser.error('network_options_require_network_inventory_command')
     if not args.config:
         parser.error('the following arguments are required: --config')
+    if args.issuer is not None and args.command != 'mesh-capabilities':
+        parser.error('issuer_option_requires_mesh_capabilities_command')
     if args.command == 'tool-release':
         return _tool_command(args)
     if any(getattr(args, name) is not None for name in ('state_dir', 'operation_id', 'candidate_config',
@@ -338,11 +341,18 @@ def main():
         from .recovery import run
         return run(config)
     if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'allocation', 'capability-events', 'resource-graph',
-                        'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate'):
+                        'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export'):
         from .worker import Client
         client = Client(config)
         if args.command in ('mesh-hello', 'mesh-links'):
             value = client.request('/v1/mesh/' + args.command[5:])
+        elif args.command in ('mesh-capabilities', 'mesh-capability-export'):
+            fields = ('issuer', 'kind', 'limit') if args.command == 'mesh-capabilities' else ('after', 'limit')
+            query = {key: getattr(args, key) for key in fields if getattr(args, key) is not None}
+            if args.command == 'mesh-capabilities' and args.include_unavailable:
+                query['include_unavailable'] = '1'
+            route = 'capability-projection' if args.command == 'mesh-capabilities' else 'capability-export'
+            value = client.request('/v1/mesh/' + route + ('?' + urlencode(query) if query else ''))
         elif args.command == 'mesh-task':
             if not args.id:
                 parser.error('mesh-task requires --id')

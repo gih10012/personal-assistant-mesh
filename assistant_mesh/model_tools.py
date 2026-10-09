@@ -22,6 +22,8 @@ TOOLS = [
          'delegate/children/wait_children 管理原账本子任务，wait_children 后结束本轮以便自动续接；remember/recall/notify 沿用原合同。'
          '身份、task 与 task lease 来自当前认证运行环境，不接受伪造 actor/task_id/task epoch；资源 epoch 仍用于资源版本核对。'
          '目录、authorize.allowed 或 queued 不等于实际执行完成；'
+         'action=federated_capabilities,arguments={issuer,kind,include_unavailable,limit} 查询可选远端能力投影，'
+         '是带issuer/revision的声明证据，不导入授权或容量；远端执行仍通过remote_delegate由owner authority核对。'
          '没有执行适配器的能力不会通过此入口自动执行。mesh 路线失败不限制 agent 自行使用其他已授权的原生通信路线。',
          {'action': STRING, 'arguments': {'type': 'object', 'additionalProperties': True}}, ['action']),
     tool('mesh_remember', '保存本人偏好或经过验证的工作事实到跨设备持久记忆；不要保存凭据。', {'text': STRING}, ['text']),

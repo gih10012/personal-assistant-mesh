@@ -30,6 +30,19 @@ class API:
                                   trusted_verifiers=resource_config.get('trusted_verifiers', ()))
         self.allocations = Allocations(self.store, self.resources)
         self.network = Network(self.store, config['node_id']) if config.get('node_id') else None
+        federation = config.get('federation', {})
+        if (not isinstance(federation, dict) or set(federation) - {'export_enabled', 'projection_enabled'}
+                or any(type(value) is not bool for value in federation.values())):
+            raise ValueError('invalid_federation_server_config')
+        self.federation_source, self.federation_projection = None, None
+        if federation.get('export_enabled'):
+            if not self.network:
+                raise ValueError('federation_requires_authority_identity')
+            from .federation_source import FederationSource
+            self.federation_source = FederationSource(self.resources, config['node_id'])
+        if federation.get('projection_enabled'):
+            from .federation_projection import Projection
+            self.federation_projection = Projection(self.store)
         self.ilink = None
         account_binding = None
         if config.get('ilink_account') and self.store.notification_policy.get('mode', 'channel') == 'channel':
@@ -163,6 +176,25 @@ class API:
             return self.network.hello()
         if method == 'GET' and member and path == '/v1/mesh/links':
             return self.network.links()
+        if path == '/v1/mesh/capability-export':
+            permitted = (role in ('operator', 'viewer') or
+                         (role in ('worker', 'agent_peer') and node and
+                          isinstance(grants, list) and 'capability.catalog' in grants))
+            if method != 'GET' or not permitted or self.federation_source is None:
+                raise PermissionError('capability_export_not_authorized')
+            if payload or set(query) - {'after', 'limit'} or any(len(v) != 1 for v in query.values()):
+                raise ValueError('invalid_capability_export_query')
+            return self.federation_source.export(int(query.get('after', ['0'])[0]),
+                                                  int(query.get('limit', ['100'])[0]))
+        if path == '/v1/mesh/capability-projection':
+            if method != 'GET' or not member or self.federation_projection is None:
+                raise PermissionError('capability_projection_not_authorized')
+            if (payload or set(query) - {'issuer', 'kind', 'include_unavailable', 'limit'}
+                    or any(len(v) != 1 for v in query.values())):
+                raise ValueError('invalid_capability_projection_query')
+            return self.federation_projection.discover(query.get('issuer', [None])[0],
+                query.get('kind', [None])[0], self._query_flag(query, 'include_unavailable'),
+                int(query.get('limit', ['100'])[0]))
         if method == 'GET' and role in ('worker', 'agent_peer') and node and path == '/v1/mesh/task':
             if len(query.get('id', [])) != 1:
                 raise ValueError('message_id_required')
@@ -314,7 +346,9 @@ def serve(config, ready=None):
             pass  # no tokens, message bodies or personal identifiers in journal
 
         def send_json(self, status, value):
-            data = json.dumps(value, ensure_ascii=False).encode()
+            # Match bounded catalogue budgets; adding default JSON whitespace
+            # can make an otherwise valid 8 MiB page impossible to consume.
+            data = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
             self.send_response(status)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(data)))

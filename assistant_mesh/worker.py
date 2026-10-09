@@ -202,6 +202,20 @@ class Worker:
                     or not isinstance(arguments.get('arguments', {}), dict)):
                 return result({'error': 'invalid_mesh_gateway_arguments'}, False)
             action, nested = arguments['action'], arguments.get('arguments', {})
+            if action == 'federated_capabilities':
+                if set(nested) - {'issuer', 'kind', 'include_unavailable', 'limit'}:
+                    return result({'error': 'invalid_federated_capabilities_arguments'}, False)
+                query = dict(nested)
+                if 'include_unavailable' in query:
+                    if type(query['include_unavailable']) is not bool:
+                        return result({'error': 'invalid_federated_capabilities_arguments'}, False)
+                    query['include_unavailable'] = '1' if query['include_unavailable'] else '0'
+                try:
+                    output = self.client.request('/v1/mesh/capability-projection' +
+                                                 ('?' + urllib.parse.urlencode(query) if query else ''))
+                except (OSError, ValueError) as exc:
+                    return self._mesh_tool_failure(exc, 'catalog_authority', False)
+                return result(output)
             if action == 'allocation':
                 # Only the extra Mesh contract uses this admission journal;
                 # native tools never pass through it. Reserve is bound here to
@@ -284,6 +298,13 @@ class Worker:
                        'complete 仅表示布局存在，不证明完整性、Shell、模型或网络可用。'
                        '下列命令是推荐句柄，未自动执行；原生 Shell/网络和创建任意工具仍保留。',
             'automatic_repair': False, 'task_replayed': False, 'session_replaced': False}
+        reference['federation'] = {
+            'tool': 'mesh(action="federated_capabilities",arguments={issuer,kind,include_unavailable,limit})',
+            'cli_command': 'mesh-capabilities',
+            'purpose': '可选已 enrollment peer 的只读能力投影；issuer/revision/时效为来源声明，不是本地授权或容量。'
+                       '模型自主选择证据/节点；远端执行仍用 remote_delegate 在资源 owner authority 准入与结算。'
+                       '不同 issuer 的同名能力不合并，重联不重放 unknown；连接在线不证明推理/互联网/性能。',
+            'managed_invocation_authorized': False}
         # Only fixed host states enter the prompt, never exception messages or
         # private response bodies. This is advisory, not a native-tool gate.
         steering = (self.current or {}).get('checkpoint', {}).get('mesh_steering_status', {})
