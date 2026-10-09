@@ -22,6 +22,75 @@ _PROVIDER_ERRORS = frozenset((
     'provider_journal_failed', 'provider_poll_already_active', 'provider_dispatch_failed',
     'provider_reconciliation_failed', 'invalid_provider_cycle_limit'))
 
+_TOOL_ERRORS = frozenset((
+    'tool_lifecycle_failed', 'lifecycle_private_directory_required', 'tool_publication_invalid',
+    'lifecycle_provider_journal_collision', 'lifecycle_control_path_collision',
+    'lifecycle_client_required', 'lifecycle_journal_invalid', 'lifecycle_journal_identity_mismatch',
+    'lifecycle_lock_invalid', 'lifecycle_busy', 'owner_identity_changed',
+    'lifecycle_operation_invalid', 'lifecycle_operation_not_found', 'retained_release_invalid',
+    'lifecycle_operation_conflict', 'candidate_identity_invalid', 'candidate_integrity_failed',
+    'publication_authority_mismatch', 'publication_query_failed', 'publication_response_invalid',
+    'publication_directory_incomplete', 'publication_not_confirmed',
+    'publication_predecessor_mismatch', 'activation_requires_publication',
+    'activation_publication_changed', 'activation_manifest_invalid', 'activation_owner_changed',
+    'activation_backup_conflict', 'activation_not_confirmed', 'rollback_requires_new_epoch'))
+
+
+def _tool_error(category):
+    print(json.dumps({'status': 'error', 'diagnostics': [category],
+        'native_tools_intercepted': False, 'automatic_invocation_replay': False,
+        'retry_with_new_id': False, 'execution_verified': False}), flush=True)
+
+
+def _tool_command(args):
+    # A local native-Shell entry point, not an HTTP source installer. It never
+    # starts/restarts services, runs tests/modules, or resets execution journals.
+    actions = ('stage', 'publish', 'activate', 'inspect', 'prepare-rollback')
+    foreign = ('text', 'request_id', 'payload_file', 'kind', 'principal', 'limit',
+               'after', 'id', 'task_id', 'call_id', 'max_cycles')
+    valid = (args.action in actions and args.owner_config and args.state_dir and args.operation_id
+             and not args.include_unavailable
+             and not any(getattr(args, name) is not None for name in foreign))
+    if args.action == 'stage':
+        valid = valid and args.candidate_config and args.publication_config and args.retained_operation_id is None and args.epoch is None
+    elif args.action == 'prepare-rollback':
+        valid = valid and args.retained_operation_id and type(args.epoch) is int and args.epoch > 0 and args.candidate_config is None and args.publication_config is None
+    else:
+        valid = valid and all(getattr(args, name) is None for name in
+                             ('candidate_config', 'publication_config', 'retained_operation_id', 'epoch'))
+    if not valid:
+        _tool_error('tool_arguments_invalid')
+        raise SystemExit(2)
+    try:
+        from .worker import Client
+        config = private_json(args.config)
+        if not isinstance(config, dict):
+            raise ValueError('invalid_client_config')
+        client = Client(config)
+    except Exception:
+        _tool_error('tool_client_config_invalid')
+        raise SystemExit(2) from None
+    from .tool_lifecycle import ToolLifecycle, ToolLifecycleError
+    try:
+        controller = ToolLifecycle(client, args.owner_config, args.state_dir)
+        if args.action == 'stage':
+            value = controller.stage(args.operation_id, args.candidate_config, args.publication_config)
+        elif args.action == 'prepare-rollback':
+            value = controller.prepare_rollback(args.operation_id, args.retained_operation_id, args.epoch)
+        else:
+            value = getattr(controller, args.action)(args.operation_id)
+        print(json.dumps(value, sort_keys=True), flush=True)
+        if value.get('state') == 'unknown':
+            raise SystemExit(2)
+    except ToolLifecycleError as error:
+        code = str(error)
+        _tool_error(code if code in _TOOL_ERRORS else 'tool_lifecycle_failed')
+        raise SystemExit(2) from None
+    except Exception:
+        _tool_error('tool_lifecycle_failed')
+        raise SystemExit(2) from None
+    return 0
+
 
 def _provider_error(category):
     print(json.dumps({'status': 'error', 'diagnostics': [category], 'recoverable': False,
@@ -30,13 +99,50 @@ def _provider_error(category):
         'native_tools_intercepted': False}), flush=True)
 
 
+def _network_error(category):
+    print(json.dumps({'status': 'error', 'diagnostics': [category],
+        'network_configuration_changed': False, 'native_features_restricted': False,
+        'capabilities_advertised': False, 'allocation_authorized': False}), flush=True)
+
+
+def _network_command(args):
+    # Local metadata needs no Mesh credential. This command does not enroll a
+    # candidate, send a request, probe the Internet, or control native recovery.
+    foreign = ('config', 'text', 'request_id', 'action', 'payload_file', 'kind',
+               'principal', 'limit', 'after', 'id', 'task_id', 'epoch', 'call_id',
+               'owner_config', 'max_cycles', 'state_dir', 'operation_id',
+               'candidate_config', 'publication_config', 'retained_operation_id')
+    if (not args.node_id or args.include_unavailable
+            or any(getattr(args, name) is not None for name in foreign)):
+        _network_error('network_arguments_invalid')
+        raise SystemExit(2)
+    from .network_inventory import inspect_network, NetworkInventoryError
+    try:
+        report = inspect_network(args.node_id, freshness_seconds=
+                                 30 if args.freshness_seconds is None else args.freshness_seconds)
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2), flush=True)
+    except NetworkInventoryError:
+        _network_error('network_inventory_invalid')
+        raise SystemExit(2) from None
+    except Exception:
+        _network_error('network_inventory_failed')
+        raise SystemExit(2) from None
+    return 0
+
+
 class _CLIParser(argparse.ArgumentParser):
     def error(self, message):
         # This is only error-output redaction, never command selection. A text
         # value equal to "provider" can also select this safer error renderer;
         # it cannot activate a runtime for worker/node or any other command.
+        if 'tool-release' in sys.argv[1:]:
+            _tool_error('tool_arguments_invalid')
+            self.exit(2)
         if 'provider' in sys.argv[1:]:
             _provider_error('provider_arguments_invalid')
+            self.exit(2)
+        if 'network-inventory' in sys.argv[1:]:
+            _network_error('network_arguments_invalid')
             self.exit(2)
         argparse.ArgumentParser.error(self, message)
 
@@ -176,10 +282,10 @@ def resource_payload(path, action=None):
 def main():
     os.umask(0o077)
     parser = _CLIParser(description='Durable personal-assistant mesh')
-    parser.add_argument('--config', required=True)
+    parser.add_argument('--config', help='Required private configuration except for local network-inventory')
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
                                           'resources', 'resource', 'allocation', 'capability-events', 'resource-graph', 'node',
-                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'provider'])
+                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'provider', 'tool-release', 'network-inventory'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
     parser.add_argument('--action', help='Resource API method, not a native terminal restriction')
@@ -195,7 +301,25 @@ def main():
     parser.add_argument('--call-id')
     parser.add_argument('--owner-config', help='Explicit owned private provider manifest; never model source/payload')
     parser.add_argument('--max-cycles', help='Optional positive finite serve count; provider serve only')
+    parser.add_argument('--state-dir', help='Existing owned 0700 local tool-release state directory')
+    parser.add_argument('--operation-id', help='Stable deployment identity; unknown outcomes are query-only')
+    parser.add_argument('--candidate-config', help='Private single-adapter candidate manifest; stage only')
+    parser.add_argument('--publication-config', help='Private metadata and actual self-test reference; stage only')
+    parser.add_argument('--retained-operation-id', help='Retained release identity; prepare-rollback only')
+    parser.add_argument('--node-id', help='Local inventory label only, never an authenticated actor override')
+    parser.add_argument('--freshness-seconds', type=float, help='Local inventory observation TTL; default 30, maximum 300')
     args = parser.parse_args()
+    if args.command == 'network-inventory':
+        return _network_command(args)
+    if args.node_id is not None or args.freshness_seconds is not None:
+        parser.error('network_options_require_network_inventory_command')
+    if not args.config:
+        parser.error('the following arguments are required: --config')
+    if args.command == 'tool-release':
+        return _tool_command(args)
+    if any(getattr(args, name) is not None for name in ('state_dir', 'operation_id', 'candidate_config',
+                                                     'publication_config', 'retained_operation_id')):
+        parser.error('tool_options_require_tool_release_command')
     if args.command == 'provider':
         return _provider_command(args)
     if args.owner_config is not None or args.max_cycles is not None:

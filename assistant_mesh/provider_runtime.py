@@ -159,6 +159,32 @@ def _manifest(path):
         raise ProviderRuntimeError('owner_config_invalid') from None
 
 
+def installed_binding(entry):
+    """Validate a manifest entry's private bytes without executing/importing it.
+
+    Callers first validate the complete manifest with ``_manifest``. This pure
+    installation check is shared by the optional local lifecycle controller;
+    it neither initializes a journal nor contacts an authority.
+    """
+    source = _owner_bytes(entry['module'], 1024 * 1024, 'owner_module_unavailable')
+    if hashlib.sha256(source).hexdigest() != entry['sha256']:
+        raise ProviderRuntimeError('owner_module_integrity_failed')
+    try:
+        tree = ast.parse(source.decode('utf8'), filename=entry['module'])
+        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name == entry['function']]
+        if len(functions) != 1:
+            raise ValueError('owner_entry_function_required')
+        compiled = compile(tree, entry['module'], 'exec')
+    except Exception:
+        raise ProviderRuntimeError('owner_module_compile_failed') from None
+    descriptor = {key: entry[key] for key in ('handle', 'version', 'sha256', 'function', 'action', 'new_spend_minor')}
+    descriptor['module_path_sha256'] = hashlib.sha256(entry['module'].encode('utf8')).hexdigest()
+    provenance = hashlib.sha256(_json(descriptor, 'owner_binding').encode('utf8')).hexdigest()
+    handle = entry['handle'] + '@' + entry['version'] + '#binding-sha256:' + provenance
+    return compiled, descriptor, handle
+
+
 class ProviderRuntime:
     """Programmatic poll/serve API; no service, listener or tool auto-install."""
     def __init__(self, client, owner_config_path):
@@ -168,29 +194,7 @@ class ProviderRuntime:
         self._poll_lock = threading.Lock()
         bindings, descriptions = {}, []
         for entry in self.config['adapters']:
-            source = _owner_bytes(entry['module'], 1024 * 1024, 'owner_module_unavailable')
-            if hashlib.sha256(source).hexdigest() != entry['sha256']:
-                raise ProviderRuntimeError('owner_module_integrity_failed')
-            try:
-                # Do not let a module's coding cookie select an interpreter-
-                # registered codec (whose decoder could execute during install
-                # validation). Owner modules use explicit UTF-8; only admitted
-                # invocation executes their Python code/imports.
-                tree = ast.parse(source.decode('utf8'), filename=entry['module'])
-                functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
-                             and node.name == entry['function']]
-                if len(functions) != 1:
-                    raise ValueError('owner_entry_function_required')
-                compiled = compile(tree, entry['module'], 'exec')
-            except Exception:
-                raise ProviderRuntimeError('owner_module_compile_failed') from None
-            descriptor = {key: entry[key] for key in ('handle', 'version', 'sha256', 'function', 'action', 'new_spend_minor')}
-            # Pin entrypoint and location too: identical source bytes with a
-            # different function or __file__ must not silently become the old
-            # advertised tool. Publish only a location hash, never its path.
-            descriptor['module_path_sha256'] = hashlib.sha256(entry['module'].encode('utf8')).hexdigest()
-            provenance = hashlib.sha256(_json(descriptor, 'owner_binding').encode('utf8')).hexdigest()
-            handle = entry['handle'] + '@' + entry['version'] + '#binding-sha256:' + provenance
+            compiled, descriptor, handle = installed_binding(entry)
             bindings[entry['capability_id']] = Adapter(handle, entry['capability_epoch'], entry['action'],
                 self._callback(dict(entry), descriptor, compiled))
             descriptions.append({'capability_id': entry['capability_id'], 'capability_epoch': entry['capability_epoch'],

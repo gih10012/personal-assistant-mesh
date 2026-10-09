@@ -531,3 +531,60 @@ accepted 变为 50。历史 8 条本机 pending 仍保留，没有批量补发�
 本机 relay 使用独立持久状态，底层 outbox 行不借用微信 sender 的
 状态更新；应通过 notify/status 查看其 accepted 回执，不能把原始
 outbox 的 pending 合计当作未送达证明。idle 也不表示云端通道健康。
+
+### 2026-10-09：原生模型创建工具、功能升级与新 epoch 回退
+
+模型由既有 laptop Worker 在原生 Codex 项目 thread 中实际编写并测试
+一个有界、只读的文件/内容分块统计工具 v1；后续任务继续**同一 thread**，
+生成 standalone v2，增加逐文件重复/跨文件复用与贡献统计。v1/v2 是
+真实功能变化，不是 owner 手写 callback 后仅让模型修改版本标签。
+实际 author tests v1 18 项、v2 27 项在 laptop 与 VPS Python 3.6.8
+均通过。源码 SHA-256 分别为：
+
+- v1：`fdb83593c29fea75dfa7bcb992e1cc2f137827a03d935f9bca89ea3177ab82d5`。
+- v2：`440eab2def6ec6749209b25cda5b6e220b28843cf307db49316b723e40c0faf6`。
+
+新生命周期/observer 功能的冻结代码在本机 Python 3.14.7 与 VPS
+Python 3.6.8 各通过 **905 项**完整测试。该次归档没有随后新增的网络
+inventory 和持续工作指令；不可把 905 外推成它们的测试证据。
+
+Owner 在模型源码冻结后生成新的合成随机文件和独立参考答案；参考
+答案/计算代码只保留在 laptop，未复制到执行宿主。隔离 VPS authority
+上实际完成 capability epoch **1 → 2 → 3**：v1 发布/激活/执行，v2
+发布/激活/执行，旧 v1 **保留相同字节但使用新 epoch、新安装位置**回退
+并再次执行。三个原 operation ID 分别结算 completed，真实结果文件
+与 owner 独立参考一致，持久 provider journal settled、容量释放。
+v1 终态再次轮询没有第二次 dispatch，账本/输出 SHA 不变。
+
+最终只读 observer 从三个闭合 journal、实际认证 API 与结果文件核对
+全部声明的结果和结算。v1/v2 当前目录 binding 已被 epoch 3 取代，
+不能把历史 activation 冒充当前安装或独立历史目录证明。执行器和
+authority 的 admission task/Leader epochs 来自真实 claim，不填造任期。
+
+这证明**实际模型创作 + owner 编排版本生命周期 + 跨宿主执行与独立
+结果核对**，不证明模型已自主决定授权/预留/部署整个链路。测试由
+owner 显式配置 pool/grant/观测和安装 manifest；单 slot 是逻辑准入，
+不是 CPU 强制配额。核心 verification 仍为 provider_reported，独立
+性能、物理宿主认证、quiescence、native 模型来源 attestation 都未证明。
+单模块版本管理也不是所有插件依赖/安装委托的完整生命周期。
+
+本次使用独立私有 SSH forward 和无微信/模型 Worker 的测试 authority。
+正式 VPS/laptop 服务及原 reverse tunnel 未重启；无新公开端口、API
+key 或付费资源，未改变 native Shell/MCP/网络权限。原生 rollout、
+原 task/thread/turn 标识、配置、令牌及 owner 参考留在私有记录中，不
+进入本公开仓库；本次不复制 auth 到 VPS，也不发送新的微信通知。
+
+### 2026-10-09：网络元数据盘点与连续工作合同（新增集成）
+
+只读 collector 在实际 laptop 与 VPS 均得到 Linux 元数据：笔记本的
+已连接 Wi-Fi、VPS 的已连接虚拟以太接口各承载主表 IPv4 默认路由；
+未发现主表 IPv6 默认路由。两端诊断类别为空。笔记本有六个代理变量
+名称，VPS 无相应变量；不读/返回代理值，不证明程序已使用代理。
+实际采样已完成，不自动登记 candidate、改变联网或主动测试互联网。
+
+网络模块 21 项新增测试，与 networking/resources 合计 70 项通过；
+CLI 接入后相关网络/tool/provider/resource CLI 合计 54 项通过。新增
+持续工作 developerInstructions 在原生 start/resume 请求中保留 custom
+原文和原 thread，9 项新增请求 fixture 与既有协议/权限/memory 共
+22 项通过。这是请求组成证据，**不是生产 Worker 已加载、模型自主
+选型已运行或 3–5 天 ChatGPT schedule 已创建**。
