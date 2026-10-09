@@ -1,10 +1,154 @@
 import argparse
 import json
 import os
+import signal
+import sys
+import threading
 from pathlib import Path
 from urllib.parse import urlencode
 
 from .config import discover_codex_auth, private_json
+
+
+_PROVIDER_DIAGNOSTICS = frozenset((
+    'authority_unavailable', 'authority_rejected', 'authority_response_invalid',
+    'owner_advertisement_mismatch', 'owner_entry_invalid', 'local_outcome_unresolved',
+    'adapter_outcome_unknown', 'owner_adapter_missing', 'owner_adapter_contract_mismatch',
+    'recorded_settlement_pending'))
+_PROVIDER_ERRORS = frozenset((
+    'provider_client_required', 'owner_config_unavailable', 'owner_config_invalid',
+    'owner_module_unavailable', 'owner_module_integrity_failed', 'owner_module_compile_failed',
+    'provider_journal_invalid', 'owner_advertisement_mismatch', 'owner_entry_invalid',
+    'provider_journal_failed', 'provider_poll_already_active', 'provider_dispatch_failed',
+    'provider_reconciliation_failed', 'invalid_provider_cycle_limit'))
+
+
+def _provider_error(category):
+    print(json.dumps({'status': 'error', 'diagnostics': [category], 'recoverable': False,
+        'dispatch_count': None, 'reconciled_count': None, 'local_unsettled': None, 'cycles': None,
+        'automatic_invocation_replay': False, 'retry_with_new_id': False,
+        'native_tools_intercepted': False}), flush=True)
+
+
+class _CLIParser(argparse.ArgumentParser):
+    def error(self, message):
+        # This is only error-output redaction, never command selection. A text
+        # value equal to "provider" can also select this safer error renderer;
+        # it cannot activate a runtime for worker/node or any other command.
+        if 'provider' in sys.argv[1:]:
+            _provider_error('provider_arguments_invalid')
+            self.exit(2)
+        argparse.ArgumentParser.error(self, message)
+
+
+def _provider_summary(report, cycles=None):
+    if not isinstance(report, dict) or report.get('status') not in ('ok', 'degraded'):
+        raise ValueError('invalid_provider_report')
+    if not isinstance(report.get('diagnostics'), list) or type(report.get('recoverable')) is not bool:
+        raise ValueError('invalid_provider_report')
+    diagnostics = sorted({value if isinstance(value, str) and value in _PROVIDER_DIAGNOSTICS
+                          else 'provider_diagnostic_unknown' for value in report['diagnostics']})
+    dispatch, reconciled = report.get('dispatch'), report.get('reconciled')
+    unsettled = report.get('local_unsettled')
+    if (not isinstance(dispatch, list) or not isinstance(reconciled, list)
+            or type(unsettled) is not int or unsettled < 0):
+        raise ValueError('invalid_provider_report')
+    result = {'status': report['status'], 'diagnostics': diagnostics, 'recoverable': report['recoverable'],
+        'dispatch_count': len(dispatch), 'reconciled_count': len(reconciled), 'local_unsettled': unsettled,
+        'automatic_invocation_replay': False, 'retry_with_new_id': False,
+        'native_tools_intercepted': False}
+    if cycles is not None:
+        if type(cycles) is not int or cycles < 0:
+            raise ValueError('invalid_provider_report')
+        result['cycles'] = cycles
+    return result
+
+
+def _provider_command(args):
+    # An explicit command/action/owner config is the only installation entry;
+    # no model payload, startup scan, Node/Worker default or service is changed.
+    foreign = ('text', 'request_id', 'payload_file', 'kind', 'principal', 'limit', 'after',
+               'id', 'task_id', 'epoch', 'call_id')
+    if (args.action not in ('describe', 'poll', 'serve') or not args.owner_config
+            or args.include_unavailable or any(getattr(args, name) is not None for name in foreign)
+            or (args.max_cycles is not None and args.action != 'serve')):
+        _provider_error('provider_arguments_invalid')
+        raise SystemExit(2)
+    cycles = None
+    if args.max_cycles is not None:
+        try:
+            cycles = int(args.max_cycles)
+            if str(cycles) != args.max_cycles or not 1 <= cycles <= 1000000:
+                raise ValueError('invalid_cycle_limit')
+        except (ValueError, TypeError):
+            _provider_error('provider_arguments_invalid')
+            raise SystemExit(2)
+    try:
+        from .worker import Client
+        config = private_json(args.config)
+        if not isinstance(config, dict):
+            raise ValueError('invalid_client_config')
+        client = Client(config)
+    except Exception:
+        _provider_error('provider_client_config_invalid')
+        raise SystemExit(2) from None
+    from .provider_runtime import ProviderRuntime, ProviderRuntimeError
+    stop, handlers = threading.Event(), {}
+    previous_summary = [None]
+
+    def emit(summary):
+        encoded = json.dumps(summary, sort_keys=True)
+        if encoded != previous_summary[0]:
+            print(encoded, flush=True)
+            previous_summary[0] = encoded
+
+    outcome, failure = 0, None
+    try:
+        if args.action == 'serve' and threading.current_thread() is threading.main_thread():
+            for number in (signal.SIGTERM, signal.SIGINT):
+                handlers[number] = signal.signal(number, lambda signum, frame: stop.set())
+        runtime = ProviderRuntime(client, args.owner_config)
+        if args.action == 'describe':
+            bindings = runtime.describe_bindings()
+            emit({'status': 'ok', 'diagnostics': [], 'recoverable': True, 'bindings': bindings,
+                'binding_count': len(bindings), 'journal_initialized': True, 'module_execution_started': False,
+                'advertised': False, 'automatic_invocation_replay': False, 'retry_with_new_id': False,
+                'native_tools_intercepted': False})
+        elif args.action == 'poll':
+            summary = _provider_summary(runtime.poll_once(), cycles=1)
+            emit(summary)
+            outcome = 2 if summary['status'] == 'degraded' or not summary['recoverable'] else 0
+        else:
+            value = runtime.serve(stop=stop, on_report=lambda report: emit(_provider_summary(report)), max_cycles=cycles)
+            last = value['last_report']
+            if last is None and stop.is_set() and value['cycles'] == 0:
+                summary = {'status': 'stopped', 'diagnostics': [], 'recoverable': True,
+                    'dispatch_count': 0, 'reconciled_count': 0, 'local_unsettled': None, 'cycles': 0,
+                    'automatic_invocation_replay': False, 'retry_with_new_id': False, 'native_tools_intercepted': False}
+            else:
+                summary = _provider_summary(last, cycles=value['cycles'])
+            if stop.is_set():
+                summary['stop_requested'] = True
+            emit(summary)
+            outcome = 0 if stop.is_set() else (2 if summary['status'] == 'degraded' or not summary['recoverable'] else 0)
+    except ProviderRuntimeError as error:
+        code = str(error)
+        failure = code if code in _PROVIDER_ERRORS else 'provider_runtime_failed'
+    except BaseException:
+        # Trusted modules can raise SystemExit/KeyboardInterrupt too. A durable
+        # intent without a result is not success or permission to replay it.
+        failure = 'provider_runtime_failed'
+    finally:
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
+    if failure is not None:
+        _provider_error(failure)
+        raise SystemExit(2) from None
+    if outcome:
+        # __main__ deliberately ignores main's return value today: a real
+        # process exit is required for service failure/degraded semantics.
+        raise SystemExit(outcome)
+    return 0
 
 
 def resource_payload(path, action=None):
@@ -31,11 +175,11 @@ def resource_payload(path, action=None):
 
 def main():
     os.umask(0o077)
-    parser = argparse.ArgumentParser(description='Durable personal-assistant mesh')
+    parser = _CLIParser(description='Durable personal-assistant mesh')
     parser.add_argument('--config', required=True)
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
                                           'resources', 'resource', 'allocation', 'capability-events', 'resource-graph', 'node',
-                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate'])
+                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'provider'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
     parser.add_argument('--action', help='Resource API method, not a native terminal restriction')
@@ -49,7 +193,13 @@ def main():
     parser.add_argument('--task-id')
     parser.add_argument('--epoch', type=int)
     parser.add_argument('--call-id')
+    parser.add_argument('--owner-config', help='Explicit owned private provider manifest; never model source/payload')
+    parser.add_argument('--max-cycles', help='Optional positive finite serve count; provider serve only')
     args = parser.parse_args()
+    if args.command == 'provider':
+        return _provider_command(args)
+    if args.owner_config is not None or args.max_cycles is not None:
+        parser.error('provider_options_require_provider_command')
     config = private_json(args.config)
     if args.command == 'serve':
         from .server import serve

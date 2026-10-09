@@ -58,6 +58,89 @@ callback 必须自行实现有界执行，并返回实际 result_reference 与 r
 重试；身份/schema 仍先验证，BEGIN、业务写入和 callback 都不重试。
 这项可用性处理不把未知效果改为“没有执行”。
 
+## 可选独立常驻运行器
+
+`assistant_mesh.provider_runtime.ProviderRuntime` 从宿主私有 owner manifest
+加载已安装工具。它不是 Node 主循环的一部分，不启动模型、通道接收器、
+监听端口或自动广告；使用与 authority 凭据绑定的独立 `Client`。
+CLI 与仅供选择安装的 user service 模板见
+[`assistant-mesh-provider.service.example`](../deploy/assistant-mesh-provider.service.example)。
+
+```bash
+python3 -m assistant_mesh --config /PRIVATE/provider-client.json provider --owner-config /PRIVATE/provider-owner.json --action describe
+python3 -m assistant_mesh --config /PRIVATE/provider-client.json provider --owner-config /PRIVATE/provider-owner.json --action poll
+python3 -m assistant_mesh --config /PRIVATE/provider-client.json provider --owner-config /PRIVATE/provider-owner.json --action serve
+```
+
+标准 client 配置只有受保护的 control URL/token 文件入口；owner manifest
+独立保存 provider/authority 身份、持久 journal 路径和安装绑定。例如下面
+是**合同形状**，占位 SHA 不是已安装的有效工具：
+
+```json
+{
+  "schema": 1,
+  "provider": "node:owned-node",
+  "authority_id": "stable-owned-authority",
+  "journal": "/PRIVATE/provider.sqlite",
+  "poll_interval_seconds": 2,
+  "dispatch_limit": 100,
+  "reconcile_limit": 100,
+  "adapters": [{
+    "capability_id": "installed-tool",
+    "handle": "owned.tool",
+    "version": "1",
+    "module": "/PRIVATE/owned_tool.py",
+    "sha256": "<ACTUAL_64_LOWERCASE_HEX_SHA256>",
+    "function": "invoke",
+    "capability_epoch": 1,
+    "action": "owner-defined-action",
+    "new_spend_minor": 0
+  }]
+}
+```
+
+配置、模块和 journal 须本人所有、普通单链接 0600 文件，直接父目录
+0700；部署配置应放在 Git 外。模块使用 UTF-8。完整 manifest、每个
+源码 SHA/entrypoint 和 journal namespace 在任何模块顶层代码执行前
+验证；构造器和 `describe` 可初始化 journal，**并非纯只读命令**。
+启动仅 compile 已验证快照，模块顶层代码/import 与函数调用都延迟到
+新的 authenticated admission 之后。每次调用用该快照的独立 namespace；
+需要跨调用状态的工具应自己用文件、数据库或独立 daemon 持久化。
+Leader 的原生 thread/记忆不受此工具 namespace 生命周期影响。
+
+`describe` 给出可由宿主显式 advertise 的 `managed_adapter` 描述；须
+原样放在 capability 的 `spec.managed_adapter`。每次首次回调前再读取
+认证 registry，校验 provider、available、实际 epoch 和完整 descriptor。
+源码、版本、入口函数、位置（只发布位置哈希）或 action 改变都需要
+真正的 capability epoch 升级和新 runtime；不会把新代码冒充旧工具。
+这与 agent 用原生 Shell 自主写代码、测试、部署、创建新能力完全兼容：
+“owner-installed” 指宿主的受信任安装边界，**不是**要求每段代码都
+由人手工创建，也不是 native Shell/MCP/联网的准入白名单。远端 plan
+只选择已广告合同，不将 prompt 字符串直接作为安装源码执行。
+
+轮询只给新 admission 执行一次。已记录实际结果的
+result_ready/settlement_intent/settlement_unknown 可在联网恢复后按原 ID
+补结算；active/unknown/intent 而无实际结果的记录不会重放、清库或
+虚报容量释放。旧版尚未接收的请求遇到不同安装 epoch/action 时单独
+报告 degraded，不挡住本批次新合法请求和旧结果补结算，也不自动
+decline/cancel 旧请求。超过 dispatch_limit 的大量旧项仍可能造成
+head-of-line 排队；owner 可对确认未接收的原 dispatch 显式 decline，
+或等待正常未接收过期，不能对 accepted/unknown 套用此处理。
+
+如新模块损坏/丢失导致构造失败，旧结果仍不能伪称丢失：可用同一
+provider/authority/journal 的独立 **`adapters: []` manifest** 补结算，
+不加载缺失模块或重做旧工具。manifest 坏 schema/身份、journal 损坏
+和认证拒绝均不是健康状态；暂时网络不可用则保留状态继续轮询。
+SIGTERM/SIGINT 只在调用之间停止新工作；已进入的回调仍须真实结束、
+记录结果。强制终止、异常或退出进程都不是静止证据。
+
+Python 模块是 owner trust，**不是封闭供应链、CPU/费用沙盒或进程隔离**。
+依赖未全部 hash 固定，同 UID 原生程序仍有自己的 OS 权限，registry
+检查与回调也不是分布式原子事务。回调可阻塞甚至退出整个 provider
+进程，所以采用独立进程而不嵌入 Node 的心跳/重连生命线；有界执行与
+真实 quiescence 必须由具体工具实现。service 模板未自动安装，普通
+Node/Worker 启动不启用该运行器。
+
 ## 隔离实际执行验收
 
 `scripts.probe_provider_execution` 是 owner 显式分阶段运行的验收器，
@@ -80,6 +163,6 @@ CPU/GPU 强制配额或全网最佳调度。单 slot pool 是 owner 的逻辑 ad
 
 ## 必须继续实现和验收
 
-这是一项宿主库，还未默认接入 Node 常驻自动执行，也没有自动创建原账本子任务或执行未批准的模型命令。下一段必须接通各节点实际安装/版本升级、真正能力执行和独立结果验证、进程/产出核对，以及组合路径的逐跳失败恢复。请求超时不证明未执行，不能换 operation ID 重做。
+可选运行器未默认接入 Node，也没有自动创建原账本子任务或执行未批准的远端模型源码。跨宿主 SHA callback 已真实验收，运行器的实际常驻部署和模型自主安装/组合调度仍须另验收。下一段须继续各节点实际工具版本升级、独立性能验证、进程/产出核对和组合路径逐跳失败恢复。请求超时不证明未执行，不能换 operation ID 重做。
 
 尚未宣称：分布式多权威容量一致性、真正最佳调度、实时 CPU/GPU 强制配额、迁移未决外部效果、独立验证 provider 的结果。真实计量和资源适配器也不能仅凭 unit fixtures 或 HTTP 回执标为完成。

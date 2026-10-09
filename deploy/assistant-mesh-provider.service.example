@@ -1,0 +1,28 @@
+[Unit]
+Description=Optional owner-installed managed Mesh provider
+After=network.target
+# No Requires/PartOf/BindsTo global Leader, Node, authority or tunnel: a late
+# recorded outcome must survive their restart, loss or Leader-term change.
+# This example is NOT installed/enabled by any default command.
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Github/personal-assistant-mesh
+ExecStart=/usr/bin/python3 -m assistant_mesh --config %h/.local/state/personal-assistant-provider/client.json provider --owner-config %h/.local/state/personal-assistant-provider/owner.json --action serve
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=10
+UMask=0077
+TimeoutStopSec=60
+KillMode=control-group
+# Configure actual callback bounds and adjust stop grace for this owner's tools.
+# SIGTERM requests drain; callbacks already started may finish/save/settle.
+# Forced process/child death remains UNKNOWN, never quiescence or replay proof.
+# Preserve the private journal and old recorded outcomes across upgrades.
+# Bad/new modules: a separate owner manifest with adapters=[] can reconcile
+# genuine recorded results without loading executable modules.
+# Do not add a native-tool allowlist, PrivateTmp, IP/network deny rules,
+# NoNewPrivileges or new privileges. Owned native OS functionality is unchanged.
+
+[Install]
+WantedBy=default.target

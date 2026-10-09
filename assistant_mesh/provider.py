@@ -31,6 +31,15 @@ from pathlib import Path
 from .resources import _epoch, _json, _name, _safe_metadata
 
 
+class AdapterContractMismatch(PermissionError):
+    """A structurally valid selection needs a different installed binding.
+
+    It is still unaccepted: this exception neither authorizes a callback nor
+    declines/cancels the original authority dispatch. Callers may isolate this
+    specific mismatch without hiding malformed responses or journal faults.
+    """
+
+
 class Adapter:
     """Owner-created binding. No imports, commands or handles are plan-resolved."""
     def __init__(self, handle, capability_epoch, action, invoke, new_spend_minor=0):
@@ -329,10 +338,12 @@ class ManagedProvider:
                     'execution_verified': False, 'automatic_replay': False,
                     'retry_with_new_id': False, 'native_tools_intercepted': False}
         selection = pending.get('selection')
-        if (not isinstance(selection, dict) or selection.get('capability_id') != capability
-                or _epoch(selection.get('epoch')) != adapter.capability_epoch
-                or selection.get('action') != adapter.action):
+        if not isinstance(selection, dict) or selection.get('capability_id') != capability:
             raise PermissionError('owner_adapter_contract_mismatch')
+        selected_epoch = _epoch(selection.get('epoch'))
+        selected_action = _name(selection.get('action'), 'action')
+        if selected_epoch != adapter.capability_epoch or selected_action != adapter.action:
+            raise AdapterContractMismatch('owner_adapter_contract_mismatch')
         context = {'operation_id': operation, 'capability_id': capability, 'provider': self.provider,
                    'receipt_id': 'provider-' + hashlib.sha256(_json([self.authority_id, self.provider, operation, capability], 'receipt').encode('utf8')).hexdigest(),
                    'adapter_handle': adapter.handle, 'capability_epoch': adapter.capability_epoch,
@@ -462,12 +473,19 @@ class ManagedProvider:
                                    authority_epoch=unknown['epoch'], error='adapter_outcome_not_proved')
         return dict(self._view(row), reconciliation='inspected_no_replay')
 
-    def run_pending(self, limit=100):
-        """Process provider-owned pending rows; no automatic unknown replay."""
+    def run_pending(self, limit=100, stop=None):
+        """Process pending rows; stop only between calls, never interrupt one."""
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
             raise ValueError('invalid_dispatch_limit')
+        if stop is not None and stop.is_set():
+            return {'dispatch': [], 'execution_verified': False, 'native_tools_intercepted': False}
         value = self._rpc('pending', {'limit': limit})
         if not isinstance(value, dict) or not isinstance(value.get('dispatch'), list) or len(value['dispatch']) > limit:
             raise ValueError('provider_pending_response_invalid')
-        return {'dispatch': [self.run(item) for item in value['dispatch']],
+        dispatch = []
+        for item in value['dispatch']:
+            if stop is not None and stop.is_set():
+                break
+            dispatch.append(self.run(item))
+        return {'dispatch': dispatch,
                 'execution_verified': False, 'native_tools_intercepted': False}

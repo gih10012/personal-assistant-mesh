@@ -368,3 +368,40 @@ socket 超时抢先于整体截止检查，误报为 transport failure；两台�
 在 Python 3.8、3.12、3.14 三个 job 均实际 success。新增 5 项确定性
 回归覆盖 open/read 的真实 timeout、URLError 包装、截止前超时、
 连接重置/普通 OSError 和 HTTP503；checkpoint 与既有输出保护未放宽。
+
+### `c9a084e` 与跨宿主受管能力真实执行
+
+同一冻结源码在笔记本 Python 3.14.7 与 VPS Python 3.6.8 分别通过
+701 项完整测试；公开
+[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37863301228)
+的 Python 3.8、3.12、3.14 三项也实际 success。新增并发 provider WAL
+开库回归及显式隔离验收器，不重试 BEGIN、业务写入或 callback。
+
+随后使用这份源码，在现有两台自有宿主实际走通：独立 authority 的
+认证能力登记/观测与 exact grant → 唯一父任务的真实 claim/epoch →
+共享逻辑 slot 预留 → VPS callback 实际读取 64-byte 随机文件并计算
+SHA → 本地 journal 先落盘 → 原 receipt 结算 → 容量释放。这里不是
+内存 API 或 loopback fixtures；笔记本通过独立私有 SSH forward 调用
+VPS 上无 iLink、无模型 Worker 的测试 authority。
+
+输入的 owner reference 只在笔记本保留，没有复制到执行宿主。
+笔记本用闭合 VPS provider journal 和实际 API 核对实际结果：独立
+保留的参考一致、authority 状态 completed、本地 settled、容量已
+释放。再次运行同一 execute 仅查询终态：账本前后 SHA 完全一致，
+只有一个 execution row，没有 callback 重放或新 operation ID。
+task/Leader admission epochs 均来自真实 claim，不填造更高任期。
+
+这只独立核对文件输入/结果，**不证明** CPU/GPU 性能、真实机级
+强制配额、全网最佳调度或模型自主创建/安装/选择该工具。core 的
+execution_verification 仍为 provider_reported，independent performance、
+physical-host attestation 与独立 quiescence 字段仍为 false。
+单 slot pool 是 owner 的逻辑 admission 合同，不是 CPU 使用率限制。
+
+验收在能力结算后结束；父任务租约随后到期，owner 只暂停了这一个
+隔离 fixture 父任务，没有假报父任务 completed，也没有暂停当前
+personal-assistant-mesh goal。闭合账本、一致 authority snapshot、
+报告和冻结源码已另存两端 0600 的私有持久档案；档案不含 Mesh token
+或 native auth，owner reference 仍只在 owner 端档案中。只终止该
+probe 的独立进程和 forward，正式 authority/worker/node 与既有
+reverse tunnel 不受影响。测试入口 17683 已关闭；正式云端三项
+service active 且 NRestarts=0。没有新公开端口、付费资源或 API key。
