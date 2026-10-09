@@ -442,3 +442,21 @@ traceback 的同版本 744 项复查通过，定位是旧 schema migration 的
 不是生产 Store/provider/runtime 分配泄漏。后续 fixture 用 closing
 并保留内层事务 commit/rollback 语义；不以测试通过宣称所有生产
 依赖或资源生命周期已获得独立审计。
+
+笔记本 node/worker 随后也在无执行中任务、无 submitting 出站记录的
+边界重启，三项服务（含原 reverse tunnel）active 且 NRestarts=0；
+reverse tunnel 仍是原进程。对一致备份的原 task 与 outbox 逐项比较，
+缺失或改写数均为 0。直接 loopback healthz 为 ok；cloud 经原私有
+Unix socket 的认证 hello 实际返回 laptop/laptop、mesh-a2a/1。
+一次普通 curl 受调用端环境代理影响返回 502，定向 bypass loopback
+后核对成功；Mesh Client 本已显式禁用该类环境代理，未改全局网络
+设置，也没有因此再次重启服务。
+
+另发现实际 **8 条本地 pending 通知（7 result、1 review）未尝试发送**，
+不是手机收件，也不是已被消费的审计记录。无第二 iLink 接收器的
+本地 authority 不启动 outbox send consumer；Node 的 A2A task report
+与此队列分离，已有 accepted A2A report 不等于微信通知送达。这是
+通知 relay 缺口，不把静止 pending 误判为 in-flight，也不清空它们。
+后续须显式区分私有工作/audit 与本人通知、按凭据权限选择投递路径，
+保留 source-node/原 outbox ID/内容指纹并查询云端状态；历史 8 条不能
+自动批量重投或另开接收器。原生通信工具仍不受这个 Mesh 缺口限制。
