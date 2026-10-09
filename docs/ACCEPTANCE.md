@@ -617,7 +617,8 @@ VPS 三项 user service PID 均仍为原 PID，NRestarts=0，验收端口已关�
 laptop Python 3.14.7 完整通过 **1002 项**（129.047 秒），VPS Python
 3.6.8 完整通过 **1002 项**（127.468 秒）。公开
 [CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37892421063)
-另按其真实状态核对，不以提交或排队声称 success。
+已按真实状态核对：Python 3.8/3.12/3.14 均 success，不以提交或排队
+替代该项证据。
 
 并行独立审查实际复现了规范页 JSON 与 HTTP 带空格 wire 大小不一致：
 一个合规接近 8MiB 的导出页会被客户端拒绝，游标无法推进。修正为
