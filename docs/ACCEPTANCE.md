@@ -653,3 +653,54 @@ declared_estimate，未补偿未知传输延迟，亦不证明真实资源租约
 测试 loopback 端口关闭。源/目标 ledger、一致快照、报告与冻结代码另存
 两端私有持久档案（0700/0600），没有将测试令牌、原生 auth、个人网络
 地址或聊天发布到 GitHub。未请求新 API key、支付资源或微信发送。
+
+### `06474df` 正式加载与原 Leader 的真实 A2A 盘点交接
+
+2026-10-09 06:31–06:42 UTC，Root 按空闲边界执行 PAM-003d。
+先核对实际 user units、配置身份、任务/消息/执行状态；当时两端无
+pending/running 任务或 submitting 消息，没有活跃原生子进程。各自
+停止监督器/worker 后，保留 server/node/worker 配置、SQLite CLI 一致
+backup（含 WAL 状态）和旧代码。VPS 安装公开 `06474df` 归档，SHA-256
+`880d0233bf1064f5bd25a5d3779596709fb28fbea1420a19a3a0731e3e19e494`；
+其功能源码与已在两端通过 1002 项测试的 `7e569cf` 相同，没有因为部署
+重复跑完整性循环。laptop 同版本已有源码，受控重启以加载新模块。
+
+私有配置只对双方**既有 agent_peer** 添加 `capability.catalog`，开启
+两端 export/projection 与对应 Node peer sync。原 A2A/通知执行权不变；
+cloud companion 仍不启动 server/worker，VPS 仍为唯一微信 receiver，
+电脑仍为 private 自动结果。原反向隧道不重启、不换密钥或连接方式。
+依次加载 authority、本机 Node 与外部 worker，五项正式服务 active、
+NRestarts=0。立即读 laptop 端口曾在启动未就绪时 connection refused；
+后续实际 readiness 与目录读取成功，不把 systemd active 当就绪。
+
+正式双向同步表多轮 `code=ok/failures=0`，本地 Node 持久观察为 running，
+runtime/worker attention 均 false。实际 GET export/projection 成功；两端
+Registry 为零项、游标为零，所以这只证明正式认证空目录同步，不是
+真实出口已登记、有内容目录重联或自主最佳路由。原生工作未被限制。
+
+在新工作提交**之前**，两端任务、native_sessions、outbox、通知 relay、
+remote delegation、delivery、execution、managed dispatch、grant、pool
+及 Registry 的完整行指纹与部署前一致。原消息、连续 thread 与未知
+效果未被代码切换重放；未恢复旧数据库。旧版回退应只换代码/配置，
+保留当前账本与游标，不把已发生回执丢回旧快照。
+
+随后创建一个有稳定 ID 的真实网络盘点交接，不替换长期 goal。VPS
+原 Leader 实际 resume 原 thread，用 A2A 建立 laptop 同类 specialist，
+父 task `waiting_children` 后在原 ID/原 thread 以第二轮自动继续；远端
+本地 child、父端 child 和父 task 最终都 completed，side_effect_started
+已 false。这是运行期原生推理与持久委派，不是脚本替模型写回复或用
+SSH 在对端代执行。两端原生采样回执与父汇总均实际读取核对。
+
+cloud 在 14:37:43、laptop 在 14:39:04（北京时间）得到 IPv4 默认出口
+候选：VPS ethernet、电脑 Wi-Fi，观测 TTL 30 秒。laptop 仅返回六个
+代理环境变量名称，无值/SSID/IP/MAC。汇总明确采样已过期、需重新
+采样再登记；互联网/DNS/实际代理/性能/计费/故障域/executor 均未验证，
+未登记 capability、安装执行器、改全局网络或批准 grant。详细原结果、
+节点原生会话与部署备份保留私有，不将终端标识或 rollout 公开。
+
+父结果沿原唯一微信通道自动提交一次，实际 outbox 为 accepted；此处
+不证明本人手机收到，不另补发旧通知。电脑 child 自动结果仍为 private
+pending，不因目录升级自动转发。新合同模块已加载且原 native resume
+实际发生，但没有在所检查 rollout 观察到指令回显或 plan checkpoint，
+不把两者标为独立验收；ChatGPT 3–5 天 schedule 与运行期长期原生 goal
+仍待实际配置/核对。长期 goal 继续 active，下一实现片为 PAM-004a。

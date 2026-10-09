@@ -1,10 +1,11 @@
 # 能力目录联邦与重汇合合同
 
-对应 PAM-003a/003b/003c，代码核对日期：2026-10-09。
+对应 PAM-003a/003b/003c/003d，代码核对日期：2026-10-09。
 当前已实现可选导出、只读投影、认证拉取、Node 接线及模型/CLI 查询。
-**尚未正式部署此功能；隔离 VPS↔laptop 的临时 SSH forward 断连/冷恢复/
-重联已实际验收。** 该项不证明 Node 正式同步循环、实际 Wi-Fi 切换或
-全网自主恢复，详见 [实测记录](ACCEPTANCE.md)。目录联邦不是
+**已在正式 VPS↔laptop 加载可选双向 Node 同步，连续认证读取 `ok`；
+正式 Registry 当前为空。** 此前隔离临时 SSH forward 断连/冷恢复/重联
+已实际验收。两项证据分开，不证明实际 Wi-Fi 切换或全网自主恢复，
+详见 [实测记录](ACCEPTANCE.md)。目录联邦不是
 全局 HA、跨 authority 共识或自主最佳调度；研究依据见
 [FRONTIER-MESH-RESEARCH](FRONTIER-MESH-RESEARCH.md)。
 
@@ -115,7 +116,8 @@ spec 中常见凭据字段与 URL userinfo/query/fragment 再次脱敏；自由�
 
 ## 可选私有配置
 
-以下是需要合并到现有配置的结构示例，**不是已执行的部署步骤**。
+以下是需要合并到现有配置的通用结构示例，**不要替换真实节点配置**。
+Root 已在两个现有节点合并相应开关与目录权限，保留原身份与通信路径。
 保留现有身份、A2A grants、worker/runtime 和其他配置；不要用片段覆盖
 完整文件。所有配置/token 位于仓库外的本人 0700 目录，文件 0600，路径
 为部署环境真实绝对路径，见 [NODE-RUNTIME](NODE-RUNTIME.md)。
@@ -187,7 +189,9 @@ hello 和一页 GET export；收到部分页后在下一轮继续。Node 的独�
 认证/目录权限拒绝、路由缺失、身份不符、投影冲突与连接不可用分别
 记录为 `catalog_*` 类别，不把私有响应或原始异常当公开诊断。
 
-已部署相应版本与私有配置后可使用以下只读命令；本文未对实际节点执行：
+已部署相应版本与私有配置后可使用以下只读命令。Root 已在两个正式节点
+实际读取 export/projection，并从持久同步状态核对多轮认证拉取；下方仍是
+通用路径示例，不包含私有配置：
 
 ```bash
 python3 -m assistant_mesh --config /absolute/private/local-operator.json mesh-capabilities
@@ -213,8 +217,10 @@ mesh(action="federated_capabilities",
 source/projection 的临时 SQLite 测试覆盖同 epoch 更新、tombstone、
 有界页、并发源 snapshot、重开、原子游标、重复不续租、issuer 隔离与
 冲突拒绝。实现与夹具证据不能代替正式部署或真实双端故障证据。
-Root 已完成隔离两端目录链路验收和公开发布；正式 Node 部署与运行
-观察仍由 Root 按 PLAN/TASKS 的下一项推进。
+Root 已完成隔离两端目录链路验收、公开发布及正式双向循环加载。原生
+Leader 又在同一 thread 经 A2A 委派 laptop 采样，原父任务真实等待并续接。
+正式目录仍空，网络报告未登记；有内容的持续目录/出口和故障域观察
+按 PLAN/TASKS 的下一项推进，不重复破坏正在工作的节点做验收。
 
 下一条真实链路需记录断连前后的来源/游标、局部任务连续性、重联回读
 原 ID、撤销不被旧页覆盖及 unknown 无第二次执行。尚不包括完整历史
