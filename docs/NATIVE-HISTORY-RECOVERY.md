@@ -84,3 +84,63 @@
 当前代码仅增加诊断，没有实现以上手动刷新自动化。离线测试覆盖
 restore 冲突不启动、启动丢回复仍未知、原身份/效果标记保留、各失败
 阶段、私有异常不外泄；不是某个实际账号或历史刷新成功的验收。
+
+## 下一片：原生写锁保护的旧前缀自治恢复（未实现）
+
+2026-10-10 本机 `/usr/bin/codex --version` 实测为 0.162.0；以下为同
+`rust-v0.162.0` 官方源码审查，**不是已部署恢复功能或实际锁互操作测试**。
+当前 `_publish_selected()` 仍拒绝任何不同 hash 的已有目标，未默认放开
+guard，尚未定义或实现新的 authority CAS 接口。
+
+原生 [WriterLockCoordinator](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/rollout/src/writer_lock.rs)
+已提供同一 Codex home 内的跨进程写锁：`thread-writer-locks/` 下的
+`.coordination.lock` 与 `<thread_id>.lock`。原生 writer 先持 coordination
+再拿线程锁；publication 在持 coordination 时探测线程锁空闲，阻止新
+writer 在检查与发布之间进入。后台 recorder 持有线程锁直到文件工作
+完成。[LocalThreadStore resume](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/thread-store/src/local/live_writer.rs)
+实际使用该锁，并在 writer ownership 下核验 `history_revision`，变化则
+重新加载。Paginated JSONL 是 canonical，SQLite 是可重建且可能落后的
+projection；不以复制或回退整个 Codex SQLite 修复恢复问题。
+
+官方 [App Server 文档](https://learn.chatgpt.com/docs/app-server) 此次读取仍
+称 paginated resume 不支持；同 tag 的
+[thread processor](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/app-server/src/request_processors/thread_processor.rs)
+已经实现 paginated resume/pagination。应按实际安装版本核验，不把滞后
+文档或 main 分支当运行保证。`excludeTurns: true` 省略响应中的 UI turns，
+不是删掉模型历史；协议的 `thread/resume.history` 仍标注 Cloud 专用、
+不应使用，不能以 Responses items 注入替代原线程的完整历史运输。
+[ThreadResumeParams](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)
+
+最小实现只面向已核验版本和已授权 homes 的自包含单 rollout root
+历史：完整 JSONL、完整源/目标字节、同一原 thread，`history_base` 为空，
+无 revert 多 rollout、缺失依赖或未知格式。单个 session metadata JSON、
+`thread/read(includeTurns=false)` 响应、文件 hash 或模型摘要均**不是完整
+native 上下文**。原生
+[rollout lineage](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/thread-store/src/local/rollout_lineage.rs)
+会追踪祖先范围；
+[current rollout resolver](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/thread-store/src/local/thread_rollout_resolver.rs)
+表明 revert 可保持 thread ID 却改变 rollout ID/选中路径。复杂 lineage、
+外置附件和压缩表示须另做完整 manifest/原生运输，不套单文件刷新。
+
+建议后续顺序：
+
+1. Authority 固定原 task/epoch、scope、harness、thread、selected artifact
+   revision 与完整内容 hash；原 lease/Leader term 和原效果 guard 仍生效。
+   未决效果保持原身份和审查状态，历史维护不授权业务重放。
+2. 完整下载并验证，准备仓库外 0600 的完整源、完整旧目标和恢复 journal。
+   对准确 homes 按固定顺序取得原生 coordination，非阻塞探测线程锁；
+   writer 占用则等待正常续接，不杀其它原生终端。
+3. 锁内重查 authority CAS、目标安全性/inode/hash 和源 hash。仅相同
+   字节无需刷新，或严格完整旧字节前缀可刷新；新目标、分叉、变动、
+   不完整、在途或无法核验的历史仍保留冲突。
+4. 备份与 journal 落盘后原子发布完整源，核验 hash 并保存确定回执。
+   释放锁后才进入原任务正常的同 thread ID 续接；回复丢失只核对原
+   repair identity/journal/hash，不换 ID 或重做 native turn。
+
+Mesh scope lease 只证明受管任务的 authority fence，不证明其它原生
+runtime 或脱网节点静止。`thread/loaded/list`、`thread/read` 的状态属于
+所连 runtime，`unsubscribe` 也不保证立即卸载；PID 和文件锁本身不核验
+unknown 效果。原生锁各自只覆盖一个 home，跨节点仍须效果对账。
+首片需实测跨进程锁互斥、旧前缀完整备份、并发 CAS/文件变化拒绝以及
+发布后丢回执的原身份核对；Windows/其它版本留平台适配，不冒称通用。
+这一管控仅保护 Mesh 的历史运输，不拦截任意原生 Shell、联网或文件功能。

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Mesh 手动入口</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+  <h1>Mesh 手动入口</h1>
+  <p class="warning">非官方 Chat MCP。页面账号未验证；请保持本人 @163 原账号。Mesh 身份由本机私有配置绑定。</p>
+  <label>明确要交给 Mesh 的任务<textarea id="input" rows="5" placeholder="输入任务，或主动读取当前选中文字后审查"></textarea></label>
+  <button id="selection" type="button">读取本人选中的文本（不发送）</button>
+  <div class="labels"><label>项目标签<input id="project"></label><label>希望的 agent 标签<input id="agent"></label></div>
+  <button id="prepare" type="button">保存任务与稳定 ID</button>
+  <p id="identity">尚未准备任务</p>
+  <label>保留的原任务<select id="history"><option value="">选择原 ID（不执行网络请求）</option></select></label>
+  <button id="select" type="button">切换到所选原任务</button>
+  <label><input id="confirm" type="checkbox">我已审查文字，并明确要求提交这一原 ID 的任务</label>
+  <div class="actions"><button id="submit" type="button">手动提交原任务</button><button id="status" type="button">查询原状态</button><button id="result" type="button">读取批准成果</button></div>
+  <button id="new" type="button">显式新独立任务（保留所有原 ID）</button>
+  <p>丢回复后先查原状态；不自动重发或换 ID。成果仅当文本显示，不执行网页/模型指令。</p>
+  <pre id="output" aria-live="polite"></pre>
+  <script src="popup.js"></script>
+</body>
+</html>

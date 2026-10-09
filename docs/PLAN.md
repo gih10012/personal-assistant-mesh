@@ -1,6 +1,6 @@
 # 持续执行计划
 
-更新时间：2026-10-09。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-10。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。任务状态与续接点见 [TASKS.json](TASKS.json)。
 
 ## 最新 owner 方向
@@ -24,7 +24,7 @@ Leader。面板只是观察入口。原生 Shell、网络、文件和 MCP 不由
 | 去中心化恢复 | PAM-003 | 003a/b/c 已发布；003d 正式两端已备份加载，双向独立循环连续 `ok`；继续真实目录/故障域观察 | 单节点继续工作；旧消息/撤销/未知效果不因恢复重放；真实断连/重入网 |
 | 自主资源调度 | PAM-004 | 004a 两端 1053 项通过并加载，原 Leader 原线程实际提议/读回；推进 004b 真实出口 | 模型自行选路；底层核对授权/预留/回执；共享瓶颈不重复计容量 |
 | 异构节点适配 | PAM-005 | 定义 enrollment/运行期/能力/持久状态/适配报告合同，AI 按 OS 改装 | 先一个不同环境的真实接入；不要求先写完全部 Windows/手机功能 |
-| 多入口与临时节点 | PAM-006 | 并行研究 Chat/Work 插件、Codex、Codex Cloud；共同 owner/任务身份 | 从入口创建真实任务并读回结果；临时执行结束后持久状态仍在 Mesh |
+| 多入口与临时节点 | PAM-006 | Firefox 手动提交/原 Leader completed/批准成果读回已实测；Codex MCP/Cloud adapter 已实现，待实际接通 | 从入口创建真实任务并读回结果；临时执行结束后持久状态仍在 Mesh |
 | 持续先进性 | PAM-007 | 将下方合同接入 Leader；配置 3–5 天检查的持续任务 | 有实际计划/task/检查记录；新模型/版本的能力与访问实际验证 |
 | 上层项目委派 | PAM-008 | Live、通话、面板及其他应用作为后续 Mesh 项目 | 由 Mesh 自己建 task、分工和集成，不由当前 Root 先包办所有应用 |
 
@@ -39,7 +39,25 @@ PAM-003a/b/c 已发布，003c 隔离 SSH 断连/冷恢复/重联已验证；003d
 关联和薄模型/CLI 入口已实现，保留原 native thread。冻结代码两端
 1053 项完整通过并正式加载；PAM-004b 的受管真实出口仍未验证。PAM-006
 owner-bound ingress 提交/状态及受限成果 HTTP/CLI 合同已实现，入口/成果/
-新诊断合计 95 项测试通过，正在冻结发布；MCP/OAuth/Cloud 连接仍未安装。
+新诊断合计 95 项测试通过。cf308b3 冻结代码两端各 1148 项通过，公开 CI
+37949397598 三个 Python 版本成功，laptop/VPS 已正式加载；重启边界原任务、
+原生会话与执行表指纹保留，原隧道和 cloud node companion 未重启。
+owner-terminal 实际提交/原 ID 重试、原 Leader 原线程 completed epoch 1、
+Root 审查摘要发布与原入口读回全链路已通过。该入口不是 ChatGPT 账号。
+Firefox 155 的本人主账号已在账户设置核对，开发 XPI 已临时加载，专用
+ingress peer/private host 已装；按授权进行人工确认后浏览器只提交一次，实际 accepted
+回执 `task_created=true`，按原稳定 ID 的状态查询也已验证。原任务截至
+2026-10-10 曾观察为 `waiting_backend` epoch 5，失败在原生 history restore，
+不是浏览器收账失败。Root 已在 epoch 15 静止边界核验严格旧前缀、终结
+原生 turn 和未变源引用，保留完整旧字节后原路径原子刷新；前后任务/原生
+authority 行一致，效果标记未改、DB 未恢复。原请求随后实际 completed
+epoch 16，保留原 Leader thread；Root 独立审查、发布受限摘要，Firefox
+按原 request 查到 completed 并读回批准成果，publication/task/request
+精确匹配，手动 browser 全往返已验证。这不是 Chat 模型原生 tools。
+成果 execution/artifact-content/account verified 均保留 false。Cloud 原生只读
+login/list 通过，官方本项目环境查询 HTTP 200 空数组；该查询未返回
+本项目环境，未提交 job。Codex 薄 MCP 已实现且 32 项离线测试通过，
+仍未安装；官方 Chat 模型 tools、MCP/OAuth/Cloud 连接未验收。
 Root 负责发布、计划与集成。研究、实现、
 已安装、实际运行、独立核验分别记录。失败只改变相关 task 的下一步，
 不默默丢掉原目标、不新建 ID 绕过 unknown。
@@ -115,4 +133,28 @@ ingress 后受限成果和 MCP/Cloud，详见任务记录；定时任务仍待�
 Worker 失败阶段诊断新增 20 项测试，相关 98 项回归通过；仅诊断，不改变
 重试/效果 guard 或自动覆盖原生历史。首份冻结代码两端 1111 项各有一个
 固定无本地后端错误被泛化的回归；已修复并保留原测试断言，旧归档未部署。
+当前并行片为 Firefox 手动入口（28 Python + 19 JS 离线合同）、Cloud
+持久单次 job adapter（32 离线测试）和薄原生 Codex MCP/plugin（32 离线
+测试，按已装 0.162 的 legacy stdio 协商）。集成候选源码本机完整 1240
+项测试通过（149.351 秒）；它尚未 commit/公开发布或正式两端部署，
+不能替换 cf308b3 两端/CI 1148 项的已发布证据。没有 Cloud 真实 job
+或临时节点握手，也没有原生 Codex MCP 安装/实际调用证据。
+Firefox 的原 request
+`mesh-firefox-05d0bce8d4728cd553d831b9317529e3` 已绑定真实任务
+`ingress-c3d8bbe11285b26aab751c96b9dd8fe19229aea0bdb78900f6becf44c8799b76`；
+保留它们和原 Leader thread。维护前只读诊断确认权威完整历史 9964417 字节，
+当时候选 0 的目标 9160820 字节是其严格旧前缀；候选 1 持有相同最新
+历史。历史观察中 epoch 5 的 `native_start_attempted=false` 只说明这一轮未
+调用 start，不证明所有 epoch 零效果，不能清效果标记或换 ID 重放。
+维护首轮因 Python 3.6 不支持 backup() 在 history publish 前失败，worker
+已恢复 active、历史未改；随后一致 read-transaction SQL dump 备份和完整
+旧字节保留后维护成功，仅停止/启动该 worker，其他服务保留。
+原 browser task 已实际在原 thread `01a116fc-8aae-7001-a0e2-07a1073c5bcb`
+completed epoch 16、turn `01a1217d-f3e4-7282-878b-5c4e44a15173`。
+Root 独立 review 后发布 `PAM-006b-firefox-result-20261010-v1`，未转发
+原 native result；Firefox 原 ID 状态及批准成果的真实回查、精确绑定已核验。
+该成果仍不证明能力执行或引用内容/账户认证。实际能力目录/remote projection
+为空，PAM-004b 工具仍仅 stage；下一步继续候选发布、Codex 本地 MCP
+入口，以及 004b 新 probe、owner 容量/准入和同 operation 的执行/结算。
+Cloud 本项目环境连接/发布条件单列，不以此缺项阻断 004b 中层真实出口。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。

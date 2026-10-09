@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "personal-assistant-mesh",
+  "version": "0.1.0",
+  "description": "Owner-bound local Mesh task submission, status and approved results. Adds managed capabilities without intercepting native tools.",
+  "author": { "name": "gih10012" },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Personal Assistant Mesh",
+        "shortDescription": "Managed Mesh task entrance",
+        "longDescription": "Submit retained-ID owner tasks, inspect metadata-only status and retrieve owner-approved results through an owner-installed local runtime. No worker enrollment, credential discovery or native tool restrictions.",
+        "developerName": "gih10012",
+        "category": "Productivity",
+        "defaultPrompt": "Use my Mesh for an authorized task; retain its request ID and check the original task's status and approved result."
+      }
+    }
+  }
+}

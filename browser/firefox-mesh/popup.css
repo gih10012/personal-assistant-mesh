@@ -1,0 +1,13 @@
+:root { color-scheme: dark light; font: 14px system-ui, sans-serif; }
+body { width: 440px; padding: 14px; margin: 0; }
+h1 { font-size: 18px; margin: 0 0 10px; }
+p { line-height: 1.5; font-size: 12px; }
+.warning { padding: 8px; border: 1px solid #c28d2c; }
+label { display: block; margin: 8px 0; }
+textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.labels { display: flex; gap: 8px; }
+.labels input { width: 190px; }
+button { margin: 3px 0; padding: 5px 8px; }
+.actions { display: flex; gap: 6px; }
+#identity { overflow-wrap: anywhere; font-family: monospace; }
+pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

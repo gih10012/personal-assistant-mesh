@@ -1,0 +1,7 @@
+{
+  "name": "personal_assistant_mesh",
+  "description": "Private owner-ingress bridge; no shell or arbitrary methods",
+  "path": "/ABSOLUTE/PRIVATE/mesh-firefox-launcher.py",
+  "type": "stdio",
+  "allowed_extensions": ["personal-assistant-mesh@gih10012.local"]
+}

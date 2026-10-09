@@ -1,0 +1,14 @@
+#!/usr/bin/python3 -u
+"""Owner-reviewed Linux template, NOT installed by this repository.
+
+Replace the two constants in a private installed copy. Native messages cannot
+modify these bindings. Firefox appends manifest path + fixed extension ID.
+"""
+import sys
+
+SOURCE_ROOT = '/ABSOLUTE/OWNER/VERIFIED/mesh-source'
+INGRESS_CLIENT = '/ABSOLUTE/PRIVATE/firefox-ingress-client.json'
+sys.path.insert(0, SOURCE_ROOT)
+from assistant_mesh.native_messaging import main
+
+raise SystemExit(main(INGRESS_CLIENT, browser_args=sys.argv[1:]))

@@ -1,15 +1,16 @@
 # Chat / 原生 Codex / Codex Cloud 接入研究
 
-核对日期：2026-10-09。本文区分官方已支持的接口、项目设计推论、以及
-尚未验收的账号能力。此次只读取文档、公开仓库和本项目代码，没有
-登录其他账号、创建云任务、调用模型、配置 connector 或购买 API 服务。
+初版核对日期：2026-10-09；实际入口补充：2026-10-10。本文区分官方
+已支持的接口、项目设计推论、以及尚未验收的账号能力。初版研究只读
+文档、公开仓库和本项目代码；后续 Root 的实际核验/安装另列如下，
+没有将研究当接通、创建 Cloud job 或购买 API 服务。
 优先顺序是底层接入和能力交换，Live 不在本轮实现范围。
 
 ## 三种入口不是同一种运行环境
 
 | Surface | 可作为入口 | 可作为 Mesh 工作节点 | 当前应采用的方式 |
 | --- | --- | --- | --- |
-| ChatGPT Chat | 经本人授权的自定义 MCP plugin 提交/查询/追加指令 | 一次对话或定时 run 内可研究、选择工具、回传结果；不是常驻本机进程 | OAuth 保护的远端 MCP bridge |
+| ChatGPT Chat | 普通 Chat 的自定义 MCP 能力须实际账号核验；Firefox 手动桥接是独立入口，不是模型原生工具 | 支持的对话/定时 run 可研究、选择工具、回传结果；不是常驻本机进程 | 先实测普通 Chat；官方 quickstart 的明确验收面是 Work，不能外推 |
 | 原生 Codex | 原生聊天和终端均可提交/查询 Mesh 工作 | 可以在本人机器常驻或自主离线工作，保留原生 Shell/记忆 | 现有 app-server、持久 thread、Mesh 附加工具 |
 | Codex Cloud | 官方 CLI 可发起并观察 cloud task | 每个 hosted task 可作为有租约的临时 agent；不要假定永久 daemon | 发布 cloud environment + 显式 cloud job adapter |
 
@@ -17,6 +18,47 @@
 自定义 MCP 接入支持读/写 tools，受账号、workspace 安全策略和确认
 设置约束；它不承诺本人的 Plus 账号已开放全部配置按钮。
 [自定义 MCP 接入](https://developers.openai.com/api/docs/guides/custom-mcp-server)
+
+后续实测补充（2026-10-10）：owner-terminal 已实际提交、原 Leader 原线程
+处理并回查审查后的受限摘要；不是 Chat 接入。Firefox 的账户设置已核对
+本人指定主账号，Firefox 155 开发扩展已临时加载，专用 native host/
+ingress peer 已安装。按授权进行人工确认后真实 browser submit 仅一次，accepted 回执明确
+`task_created=true`；原稳定 request 状态回查也已通过。原生 history
+restore 的旧前缀冲突曾令任务 `waiting_backend` epoch 5；epoch 15 完整
+历史维护后原请求原 thread 已实际 completed epoch 16，Root 独立审查/
+受限摘要发布及原 browser 批准成果回查全往返已通过；没有证明 Chat
+模型原生调用 Mesh。
+Cloud 原生只读 list 成功，官方 repo-scoped 环境查询 HTTP 200 返回
+空数组；该查询未返回本项目环境，未提交 job/登记 Cloud node。见
+[Firefox 合同](FIREFOX-CHAT-ENTRYPOINT.md)、[Cloud 实施](CODEX-CLOUD-JOBS.md)。
+[Work quickstart](https://developers.openai.com/plugins/quickstart) 要求切换到
+Work；普通 Chat 是否支持 MCP 不能只看插件按钮或参考账号。
+
+Firefox 原 request
+`mesh-firefox-05d0bce8d4728cd553d831b9317529e3` 保持不变，实际 task
+`ingress-c3d8bbe11285b26aab751c96b9dd8fe19229aea0bdb78900f6becf44c8799b76`
+仍使用原 Leader 上下文。维护前只读诊断确认目标 9160820 字节是权威完整
+9964417 字节历史的严格旧前缀，不是分叉。历史观察中 epoch 5 restore 失败
+的 `native_start_attempted=false` 不证明全 epochs 零效果，不授权换 ID
+或清效果重做。Root 首轮 backup() 不兼容在 publish 前失败，worker 恢复
+active、history 未改；改用一致 read-transaction SQL dump 备份后，
+epoch 15 完整旧字节保留、严格前缀/终结 native/未变引用核验及同原路径
+原子刷新已完成。维护前后 task/native authority 行一致、效果标记未改、
+DB 未恢复，仅该 worker stop/start。原 task 随后在同原 thread 的 turn
+`01a1217d-f3e4-7282-878b-5c4e44a15173` completed epoch 16。Root 独立
+review 后发布 `PAM-006b-firefox-result-20261010-v1` 审查摘要，没有转发
+原 native result；Firefox 真正查到 completed 并读回 approved result，
+publication/task/request 精确匹配，手动全往返已验证。成果 execution/
+artifact-content/account verified 均仍 false；能力目录/remote projection
+仍为空、004b 工具仅 stage。下一步继续 MCP 入口与 004b 实际出口，
+不是据这一桥接声称原生 Chat tools/Cloud 节点或整体 goal 完成。
+
+新增 Firefox/Cloud/Codex MCP 候选代码本机完整 1240 项测试通过，包含
+28 项 native-host、32 项 Cloud、32 项 MCP 测试及 19 个 JS 离线 cases；
+尚未 commit/发布或正式两端部署。生产仍是 cf308b3，两端/公开 CI 各
+1148 项证据；原生 Codex 薄 MCP 当前仅实现/离线通过，尚未安装或实际
+调用。不要用绿色候选测试替代 browser 全链路、官方 Chat connector
+或 Cloud 入网证据。
 
 原生 Codex 可用 `thread/resume` 继续实际保存的 thread；恢复不需要为了
 添加入口而换成应用自写的摘要。动态 tools 和原生能力保持分离。
@@ -79,7 +121,7 @@ MCP API 的有限 schema 约束入口身份和效果，**不是**约束模型可
 把未经映射的网络调用直接变成本机任意执行；获授权的节点 agent 仍可
 自行用它的全部原生能力完成开放任务。
 
-当前项目真实缺口：[server.py](../assistant_mesh/server.py) 的顶层
+最初研究时的项目缺口：[server.py](../assistant_mesh/server.py) 的顶层
 `/v1/tasks`、control、steer 等写入仍是 operator route。不能把现有
 worker credential 接上 MCP 就声称已支持本人入口，也不能把全权限
 operator bearer 发给 ChatGPT 或塞入 connector。应先实现独立

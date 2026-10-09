@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "Personal Assistant Mesh · Manual Chat Entry",
+  "version": "0.1.0",
+  "description": "Send explicitly chosen text to your configured Mesh; no automatic chat access.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "personal-assistant-mesh@gih10012.local",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": ["activeTab", "nativeMessaging", "storage"],
+  "background": {"scripts": ["background.js"], "persistent": false},
+  "browser_action": {"default_title": "Mesh：手动发送与查询", "default_popup": "popup.html"},
+  "content_security_policy": "script-src 'self'; object-src 'none'; connect-src 'none'"
+}
