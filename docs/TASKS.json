@@ -5,15 +5,315 @@
   "updated_at": "2026-10-09",
   "plan": "docs/PLAN.md",
   "status_source": "project coordination record; runtime evidence is separately identified, not invented",
-  "latest_release": {"phase":"PAM-004a","code_commit":"796a1b3689686c9a591f9c8bf9ed3e548a2bd320","ci":"https://github.com/gih10012/personal-assistant-mesh/actions/runs/37936925489","ci_verified_success":true,"production_loaded":true,"native_trial_state":"completed","owner_result_notice_accepted":true,"phone_receipt_verified":false,"whole_goal_completed":false},
+  "latest_release": {
+    "phase": "PAM-004a",
+    "code_commit": "796a1b3689686c9a591f9c8bf9ed3e548a2bd320",
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/37936925489",
+    "ci_verified_success": true,
+    "production_loaded": true,
+    "native_trial_state": "completed",
+    "owner_result_notice_accepted": true,
+    "phone_receipt_verified": false,
+    "whole_goal_completed": false
+  },
   "tasks": [
-    {"id":"PAM-001","title":"工具生命周期底座集成与发布","state":"completed","owner":"root","depends_on":[],"next_action":"阶段已发布；完整自主插件依赖/安装委托仍由后续 Mesh 生命周期任务承接，不等于整体 goal 完成","evidence":{"tests_per_host":941,"public_commit":"b1a10fa453e334c175a8203d35326770ba9757a8","ci":"https://github.com/gih10012/personal-assistant-mesh/actions/runs/37891035551","ci_verified_success":true,"native_authored_versions":[1,2],"same_native_project_thread_verified":true,"actual_operation_epochs":[1,2,3],"results_settlements_capacity_verified":true},"acceptance":"公开源码版本可追溯；实际安装/执行/结果核验与历史状态不混同"},
-    {"id":"PAM-002","title":"实际网络出口与中层能力盘点","state":"in_progress","owner":"root+mesh-leader","depends_on":[],"next_action":"两端原生采样/原父等待与续接汇总已完成；重新采样后明确登记候选，再验证一个受管出口；不自动改联网","evidence":{"specialist_tests_passed":70,"network_inventory_tests":21,"related_cli_tests_passed":54,"laptop_ipv4_wifi_default_route_observed":true,"vps_ipv4_ethernet_default_route_observed":true,"internet_reachability_verified":false,"vps_sample_verified":true,"automatic_advertisement":false,"runtime_handoff_id":"PAM-002-network-handoff-20261009T063100Z","same_native_leader_thread_resumed":true,"a2a_specialist_created":true,"runtime_results_verified":true,"parent_wait_and_same_thread_continuation_verified":true,"capability_registration_performed":false,"automatic_owner_result_accepted":true,"phone_receipt_verified":false},"acceptance":"实际采样/TTL/接口类型/路由候选可用；私有地址/SSID/代理凭据不泄露；未测互联网与性能明确未验证"},
-    {"id":"PAM-003","title":"去中心化故障恢复与重汇合","state":"implementation_in_progress","owner":"root","depends_on":[],"next_action":"003d 正式双向循环已加载并初步连续观察；下一步核对真实目录数据、局部工作与故障域，不重放 unknown","evidence":{"research":"docs/FRONTIER-MESH-RESEARCH.md","contract":"docs/CAPABILITY-FEDERATION.md","public_commit":"7e569cf7af0152b2d9681fbf41b4263a7858c16c","production_release":"06474df7f012b97405fa0dd2a1e7370b082f6e71","tests_per_host":1002,"source_projection_tests_passed":67,"sync_node_independent_tests_passed":16,"related_regression_tests_passed":85,"global_consensus_verified":false,"actual_cross_authority_sync_verified":true,"actual_isolated_forward_disconnect_rejoin_verified":true,"production_nodes_loaded":true,"production_bidirectional_get_loops_verified":true,"production_registered_capabilities":0,"pre_restart_ledger_and_native_sessions_preserved":true,"external_unknown_effect_execution_verified":false},"subtasks":[{"id":"PAM-003a","title":"有界发行者能力导出","state":"completed","owner":"tool_lifecycle_review","next_action":"已发布；完整历史feed/incarnation另列未来扩展"},{"id":"PAM-003b","title":"只读远端能力投影","state":"completed","owner":"tool_lifecycle_gap_audit","next_action":"已发布；目录估计不作为执行授权"},{"id":"PAM-003c","title":"认证同步与隔离两端断连重联","state":"completed","owner":"root","depends_on":["PAM-003a","PAM-003b"],"next_action":"隔离 SSH forward 实际断连/冷恢复/同epoch新revision撤销与旧页拒绝通过；不外推真实网络切换或原生推理"},{"id":"PAM-003d","title":"正式两端部署与持续观察","state":"in_progress","owner":"root","depends_on":["PAM-003c"],"next_action":"一致备份、旧版保留、两方向目录权限与加载已完成；继续真实数据观察，唯一receiver/原隧道及执行grants保留"}],"acceptance":"分区后局部自主；稳定身份与来源；重联不覆盖撤销或重放 unknown；不冒称已拥有全局一致性"},
-    {"id":"PAM-004","title":"模型主导的自主资源与出口调度","state":"implementation_in_progress","owner":"mesh-leader","depends_on":["PAM-002","PAM-003"],"next_action":"004a原Leader真实提议/读回已核验；推进004b具体目标probe/executor，再真实出口canary；执行仍由owner准入","evidence":{"contract":"docs/MODEL-LED-ROUTING.md","routing_journal_implemented":true,"tests_per_host":1053,"frozen_code_tree":"8956042f6a02ec274cbc7611f253d08fd624665d","frozen_archive_sha256":"69f22626900aa1b71baec40e2af908e46b278808a621e544d432121c950a0c24","new_routing_tests":51,"production_nodes_loaded":true,"cloud_preexisting_rows_unchanged":true,"laptop_original_business_rows_unchanged":true,"laptop_maintenance_checkpoint_unchanged":false,"laptop_maintenance_native_thread_preserved":true,"laptop_auto_maintenance_state":"needs_review","laptop_auto_maintenance_error":"codex_usage_limit_exceeded","runtime_handoff_id":"PAM-004a-routing-handoff-20261009T071700Z","runtime_handoff_state":"completed","native_proposal_created_readback_verified":true,"same_native_leader_thread_verified":true,"native_decision_state":"waiting_evidence","native_execution_link_verified":false,"model_selected_canary_verified":false},"subtasks":[{"id":"PAM-004a","title":"模型路由决定与证据账本","state":"completed","owner":"root","next_action":"实现/两端1053项/正式加载/原native Leader提议读回已核验；实际出口与真实执行关联由004b继续，不把fixture当模型选型"},{"id":"PAM-004b","title":"一个真实出口的模型选择canary","state":"planned","owner":"mesh-leader","depends_on":["PAM-004a"],"next_action":"已授权目标有界只读请求；目的owner核对观测/grant/共享池/原operation与真实结果"}],"acceptance":"模型能选择与改路，实际资源结算；共享瓶颈不重复计算；不以静态模型排名替代判断"},
-    {"id":"PAM-005","title":"AI 个性化异构节点入网","state":"planned","owner":"mesh-leader","depends_on":["PAM-002","PAM-003"],"next_action":"定义平台中立 enrollment/适配报告/持久状态合同，再由节点 agent 按实际系统改装","acceptance":"先验证一个不同环境；不把 Linux 包、进程常驻或终端权限作为所有节点的假设"},
-    {"id":"PAM-006","title":"ChatGPT/Codex/Codex Cloud 多入口与节点","state":"research_ready","owner":"root","depends_on":[],"next_action":"依据 ENTRYPOINTS-RESEARCH 定义独立 owner-bound ingress，再接有 OAuth 的 MCP 侧车与临时 cloud job 合同；尚未连接账号","evidence":{"research":"docs/ENTRYPOINTS-RESEARCH.md","connector_installed":false,"cloud_job_submitted":false},"acceptance":"入口产生并回查真实持久任务；cloud 退出后状态保留；账户能力与额度限制实际核验"},
-    {"id":"PAM-007","title":"Leader 持续计划与前沿自升级","state":"in_progress","owner":"root","depends_on":[],"next_action":"同thread等待/续接及真实结果已核验；补实际native plan/长期goal与3–5天schedule入口，模型自主选型仍待实现/验收","evidence":{"coordination_tasks_created":true,"plan":"docs/PLAN.md","task_record":"docs/TASKS.json","working_contract":"AGENTS.md","native_request_contract_implemented":true,"contract_and_protocol_tests_passed":22,"production_contract_module_loaded":true,"production_native_resume_verified":true,"native_instruction_echo_verified":false,"production_native_plan_verified":false,"production_long_running_native_goal_verified":false,"runtime_schedule_created":false},"acceptance":"计划/任务可续接；目录驱动模型判断；升级有真实证据和回退；未创建定时任务不声称已运行"},
-    {"id":"PAM-008","title":"将 Live/通话/面板等上层项目交给 Mesh","state":"deferred_to_mesh","owner":"mesh-leader","depends_on":["PAM-003","PAM-004","PAM-006"],"next_action":"底层到位后由 Mesh 自己创建项目 task、分工与接入","acceptance":"由 Mesh 持续推进与交付，上层入口不变成权限根或 Leader 工作区"}
-  ]
+    {
+      "id": "PAM-001",
+      "title": "工具生命周期底座集成与发布",
+      "state": "completed",
+      "owner": "root",
+      "depends_on": [],
+      "next_action": "阶段已发布；完整自主插件依赖/安装委托仍由后续 Mesh 生命周期任务承接，不等于整体 goal 完成",
+      "evidence": {
+        "tests_per_host": 941,
+        "public_commit": "b1a10fa453e334c175a8203d35326770ba9757a8",
+        "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/37891035551",
+        "ci_verified_success": true,
+        "native_authored_versions": [
+          1,
+          2
+        ],
+        "same_native_project_thread_verified": true,
+        "actual_operation_epochs": [
+          1,
+          2,
+          3
+        ],
+        "results_settlements_capacity_verified": true
+      },
+      "acceptance": "公开源码版本可追溯；实际安装/执行/结果核验与历史状态不混同"
+    },
+    {
+      "id": "PAM-002",
+      "title": "实际网络出口与中层能力盘点",
+      "state": "in_progress",
+      "owner": "root+mesh-leader",
+      "depends_on": [],
+      "next_action": "两端原生采样/原父等待与续接汇总已完成；重新采样后明确登记候选，再验证一个受管出口；不自动改联网",
+      "evidence": {
+        "specialist_tests_passed": 70,
+        "network_inventory_tests": 21,
+        "related_cli_tests_passed": 54,
+        "laptop_ipv4_wifi_default_route_observed": true,
+        "vps_ipv4_ethernet_default_route_observed": true,
+        "internet_reachability_verified": false,
+        "vps_sample_verified": true,
+        "automatic_advertisement": false,
+        "runtime_handoff_id": "PAM-002-network-handoff-20261009T063100Z",
+        "same_native_leader_thread_resumed": true,
+        "a2a_specialist_created": true,
+        "runtime_results_verified": true,
+        "parent_wait_and_same_thread_continuation_verified": true,
+        "capability_registration_performed": false,
+        "automatic_owner_result_accepted": true,
+        "phone_receipt_verified": false
+      },
+      "acceptance": "实际采样/TTL/接口类型/路由候选可用；私有地址/SSID/代理凭据不泄露；未测互联网与性能明确未验证"
+    },
+    {
+      "id": "PAM-003",
+      "title": "去中心化故障恢复与重汇合",
+      "state": "implementation_in_progress",
+      "owner": "root",
+      "depends_on": [],
+      "next_action": "003d 正式双向循环已加载并初步连续观察；下一步核对真实目录数据、局部工作与故障域，不重放 unknown",
+      "evidence": {
+        "research": "docs/FRONTIER-MESH-RESEARCH.md",
+        "contract": "docs/CAPABILITY-FEDERATION.md",
+        "public_commit": "7e569cf7af0152b2d9681fbf41b4263a7858c16c",
+        "production_release": "06474df7f012b97405fa0dd2a1e7370b082f6e71",
+        "tests_per_host": 1002,
+        "source_projection_tests_passed": 67,
+        "sync_node_independent_tests_passed": 16,
+        "related_regression_tests_passed": 85,
+        "global_consensus_verified": false,
+        "actual_cross_authority_sync_verified": true,
+        "actual_isolated_forward_disconnect_rejoin_verified": true,
+        "production_nodes_loaded": true,
+        "production_bidirectional_get_loops_verified": true,
+        "production_registered_capabilities": 0,
+        "pre_restart_ledger_and_native_sessions_preserved": true,
+        "external_unknown_effect_execution_verified": false
+      },
+      "subtasks": [
+        {
+          "id": "PAM-003a",
+          "title": "有界发行者能力导出",
+          "state": "completed",
+          "owner": "tool_lifecycle_review",
+          "next_action": "已发布；完整历史feed/incarnation另列未来扩展"
+        },
+        {
+          "id": "PAM-003b",
+          "title": "只读远端能力投影",
+          "state": "completed",
+          "owner": "tool_lifecycle_gap_audit",
+          "next_action": "已发布；目录估计不作为执行授权"
+        },
+        {
+          "id": "PAM-003c",
+          "title": "认证同步与隔离两端断连重联",
+          "state": "completed",
+          "owner": "root",
+          "depends_on": [
+            "PAM-003a",
+            "PAM-003b"
+          ],
+          "next_action": "隔离 SSH forward 实际断连/冷恢复/同epoch新revision撤销与旧页拒绝通过；不外推真实网络切换或原生推理"
+        },
+        {
+          "id": "PAM-003d",
+          "title": "正式两端部署与持续观察",
+          "state": "in_progress",
+          "owner": "root",
+          "depends_on": [
+            "PAM-003c"
+          ],
+          "next_action": "一致备份、旧版保留、两方向目录权限与加载已完成；继续真实数据观察，唯一receiver/原隧道及执行grants保留"
+        }
+      ],
+      "acceptance": "分区后局部自主；稳定身份与来源；重联不覆盖撤销或重放 unknown；不冒称已拥有全局一致性"
+    },
+    {
+      "id": "PAM-004",
+      "title": "模型主导的自主资源与出口调度",
+      "state": "implementation_in_progress",
+      "owner": "mesh-leader",
+      "depends_on": [
+        "PAM-002",
+        "PAM-003"
+      ],
+      "next_action": "004a原Leader真实提议/读回已核验；推进004b具体目标probe/executor，再真实出口canary；执行仍由owner准入",
+      "evidence": {
+        "contract": "docs/MODEL-LED-ROUTING.md",
+        "routing_journal_implemented": true,
+        "tests_per_host": 1053,
+        "frozen_code_tree": "8956042f6a02ec274cbc7611f253d08fd624665d",
+        "frozen_archive_sha256": "69f22626900aa1b71baec40e2af908e46b278808a621e544d432121c950a0c24",
+        "new_routing_tests": 51,
+        "production_nodes_loaded": true,
+        "cloud_preexisting_rows_unchanged": true,
+        "laptop_original_business_rows_unchanged": true,
+        "laptop_maintenance_checkpoint_unchanged": false,
+        "laptop_maintenance_native_thread_preserved": true,
+        "laptop_auto_maintenance_state": "needs_review",
+        "laptop_auto_maintenance_error": "codex_usage_limit_exceeded",
+        "laptop_quota_turn_command_execution_verified": true,
+        "laptop_zero_effect_quota_replay_eligible": false,
+        "runtime_handoff_id": "PAM-004a-routing-handoff-20261009T071700Z",
+        "runtime_handoff_state": "completed",
+        "native_proposal_created_readback_verified": true,
+        "same_native_leader_thread_verified": true,
+        "native_decision_state": "waiting_evidence",
+        "native_execution_link_verified": false,
+        "model_selected_canary_verified": false
+      },
+      "subtasks": [
+        {
+          "id": "PAM-004a",
+          "title": "模型路由决定与证据账本",
+          "state": "completed",
+          "owner": "root",
+          "next_action": "实现/两端1053项/正式加载/原native Leader提议读回已核验；实际出口与真实执行关联由004b继续，不把fixture当模型选型"
+        },
+        {
+          "id": "PAM-004b",
+          "title": "一个真实出口的模型选择canary",
+          "state": "in_progress",
+          "owner": "mesh-leader",
+          "depends_on": [
+            "PAM-004a"
+          ],
+          "next_action": "独立probe、同身份认证/严格前缀完整历史恢复已核验；原Leader原线程已完成工具编写与11项离线测试，工具已stage。配置独立新观测和owner容量，再原Leader选择并真实执行，不把stage当启用",
+          "evidence": {
+            "author_task_id": "PAM-004b-egress-author-20261009T134300Z",
+            "target": "owner public repository README at fixed commit 796a1b3",
+            "independent_probe_verified": true,
+            "managed_execution_verified": false,
+            "probe_sample_time": "2026-10-09T13:58:25Z",
+            "probe_requests": 1,
+            "probe_body_bytes": 10814,
+            "probe_raw_sha256": "00e502b82056d6f5e0e6eabd1b8505553a42d7b1769a393f1d89f85f258249c8",
+            "probe_duration_seconds": 0.38606454990804195,
+            "probe_is_installed_capability": false,
+            "probe_is_current_admission": false,
+            "native_author_task_state": "completed",
+            "native_author_task_epoch": 28,
+            "native_author_turn_started_verified": true,
+            "same_original_native_leader_thread_verified": true,
+            "native_authored_offline_tests_passed": 11,
+            "native_authored_source_sha256": "982cf1027248a1682ee84eefcdd4798deddcbabdfe29b3e79088374a52b5dec8",
+            "tool_staged": true,
+            "tool_activated": false,
+            "spare_profile_same_identity_auth_sync_verified": true,
+            "spare_profile_account_and_quota_available_verified": true,
+            "native_history_stale_prefix_verified": true,
+            "native_history_recovery_in_progress": false,
+            "native_history_full_bytes_preserved_verified": true
+          }
+        }
+      ],
+      "acceptance": "模型能选择与改路，实际资源结算；共享瓶颈不重复计算；不以静态模型排名替代判断"
+    },
+    {
+      "id": "PAM-005",
+      "title": "AI 个性化异构节点入网",
+      "state": "planned",
+      "owner": "mesh-leader",
+      "depends_on": [
+        "PAM-002",
+        "PAM-003"
+      ],
+      "next_action": "定义平台中立 enrollment/适配报告/持久状态合同，再由节点 agent 按实际系统改装",
+      "acceptance": "先验证一个不同环境；不把 Linux 包、进程常驻或终端权限作为所有节点的假设"
+    },
+    {
+      "id": "PAM-006",
+      "title": "ChatGPT/Codex/Codex Cloud 多入口与节点",
+      "state": "implementation_in_progress",
+      "owner": "root",
+      "depends_on": [],
+      "next_action": "006a owner-bound原子提交/状态与受限成果HTTP/CLI已实现，冻结两端回归和发布，再部署真实owner-terminal入口；随后普通Chat/Work实际入口与Cloud job/临时节点，尚未连接真实账号",
+      "evidence": {
+        "research": "docs/ENTRYPOINTS-RESEARCH.md",
+        "connector_installed": false,
+        "cloud_job_submitted": false,
+        "contract": "docs/INGRESS-CONTRACT.md",
+        "owner_ingress_contract_implemented": true,
+        "policy_tests_passed": 31,
+        "http_cli_tests_passed": 13,
+        "ingress_native_scope_override_allowed": false,
+        "production_ingress_installed": false,
+        "result_publication_implemented": true,
+        "result_publication_tests_passed": 31,
+        "production_result_publication_installed": false,
+        "native_failure_diagnostic_tests_passed": 20,
+        "related_failure_regression_tests_passed": 98,
+        "first_frozen_full_suite_tests_per_host": 1111,
+        "first_frozen_full_suite_failures_per_host": 1,
+        "first_frozen_archive_deployed": false,
+        "fixed_native_no_backend_category_preserved": true
+      },
+      "acceptance": "入口产生并回查真实持久任务；cloud 退出后状态保留；账户能力与额度限制实际核验",
+      "subtasks": [
+        {
+          "id": "PAM-006a",
+          "title": "独立owner-bound任务入口基础",
+          "state": "implemented_pending_release",
+          "owner": "root+egress_admission_review",
+          "next_action": "独立审查后完成冻结源两端回归与公开发布；不将fixture当真实OAuth/账号接入"
+        },
+        {
+          "id": "PAM-006b",
+          "title": "受限成果发布与OAuth/MCP/Cloud接入",
+          "state": "implementation_in_progress",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-006a"
+          ],
+          "next_action": "任务绑定的受限成果底座和31项测试已完成；先随006a发布，再localhost MCP/普通Chat入口及官方Cloud job适配，实际核对@163账号与临时节点范围；不传operator bearer"
+        }
+      ]
+    },
+    {
+      "id": "PAM-007",
+      "title": "Leader 持续计划与前沿自升级",
+      "state": "in_progress",
+      "owner": "root",
+      "depends_on": [],
+      "next_action": "同thread等待/续接及真实结果已核验；补实际native plan/长期goal与3–5天schedule入口，模型自主选型仍待实现/验收",
+      "evidence": {
+        "coordination_tasks_created": true,
+        "plan": "docs/PLAN.md",
+        "task_record": "docs/TASKS.json",
+        "working_contract": "AGENTS.md",
+        "native_request_contract_implemented": true,
+        "contract_and_protocol_tests_passed": 22,
+        "production_contract_module_loaded": true,
+        "production_native_resume_verified": true,
+        "native_instruction_echo_verified": false,
+        "production_native_plan_verified": false,
+        "production_long_running_native_goal_verified": false,
+        "runtime_schedule_created": false
+      },
+      "acceptance": "计划/任务可续接；目录驱动模型判断；升级有真实证据和回退；未创建定时任务不声称已运行"
+    },
+    {
+      "id": "PAM-008",
+      "title": "将 Live/通话/面板等上层项目交给 Mesh",
+      "state": "deferred_to_mesh",
+      "owner": "mesh-leader",
+      "depends_on": [
+        "PAM-003",
+        "PAM-004",
+        "PAM-006"
+      ],
+      "next_action": "底层到位后由 Mesh 自己创建项目 task、分工与接入",
+      "acceptance": "由 Mesh 持续推进与交付，上层入口不变成权限根或 Leader 工作区"
+    }
+  ],
+  "current_work": {
+    "phase": "PAM-004b + PAM-006a",
+    "whole_goal_completed": false
+  }
 }

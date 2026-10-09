@@ -37,8 +37,10 @@ PAM-003a/b/c 已发布，003c 隔离 SSH 断连/冷恢复/重联已验证；003d
 执行 grant、付费资源或隧道。正式目录仍为空，不把空页同步外推为已登记
 出口或自主调度。PAM-004a 的 task-bound 证据/不可变决定/原执行身份
 关联和薄模型/CLI 入口已实现，保留原 native thread。冻结代码两端
-1053 项完整通过并正式加载；PAM-004b 的真实出口仍未验证。PAM-006 研究
-已准备，待 owner-bound ingress。Root 负责发布、计划与集成。研究、实现、
+1053 项完整通过并正式加载；PAM-004b 的受管真实出口仍未验证。PAM-006
+owner-bound ingress 提交/状态及受限成果 HTTP/CLI 合同已实现，入口/成果/
+新诊断合计 95 项测试通过，正在冻结发布；MCP/OAuth/Cloud 连接仍未安装。
+Root 负责发布、计划与集成。研究、实现、
 已安装、实际运行、独立核验分别记录。失败只改变相关 task 的下一步，
 不默默丢掉原目标、不新建 ID 绕过 unknown。
 
@@ -98,6 +100,19 @@ checkpoint 仍未观察到，不把此 proposal 当替代。
 停在 needs_review。旧业务行保留，但原自维护 checkpoint 更新；不声称
 所有行都未变，不重放该未知阶段、不恢复旧 DB 抹去它。下一片为
 PAM-004b 一个真实出口及其独立 probe/owner 准入/真实 executor；
-PAM-006 先 owner-bound
-ingress 后 MCP/Cloud，详见任务记录；定时任务仍待实际配置。
+PAM-004b 已取得独立 Git oracle 与 VPS 单目标实际 GET（内容哈希匹配），
+备用 profile 认证拒绝已通过同身份核对、备份与较新已有 OAuth 同步修复，
+account-only 认证/额度通过。该 profile 的原 thread 历史是权威完整历史的
+严格字节前缀；在原任务尚未进入 native turn 的静止边界保留完整旧字节
+及一致 DB 备份，原路径原子刷新为完整历史，没有新建 thread 或恢复旧 DB。
+原 Leader 原 ID 已在 epoch 28 completed，编写工具的 11 项离线测试通过；
+Root 独立复跑通过，工具已 stage，未 publish/activate/实际受管执行。
+不把探测、认证恢复或 stage 替代模型选择和实际执行。
+原 laptop 维护 turn 确有只读诊断 Shell 回执，不能套零效果 quota 重放；
+保留 needs_review，后续使用显式效果对账合同。
+范围见 [EGRESS-CANARY](EGRESS-CANARY.md)。PAM-006 先 owner-bound
+ingress 后受限成果和 MCP/Cloud，详见任务记录；定时任务仍待实际配置。
+Worker 失败阶段诊断新增 20 项测试，相关 98 项回归通过；仅诊断，不改变
+重试/效果 guard 或自动覆盖原生历史。首份冻结代码两端 1111 项各有一个
+固定无本地后端错误被泛化的回归；已修复并保留原测试断言，旧归档未部署。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。

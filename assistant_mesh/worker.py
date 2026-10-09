@@ -20,6 +20,40 @@ from .runtime_health import diagnose as diagnose_runtime
 from . import sessions
 
 
+_RESTORE_FAILURES = frozenset((
+    'native_session_harness_mismatch', 'native_session_selected_thread_required',
+    'native_session_directory_unsafe', 'native_session_restore_absolute_path_required',
+    'native_session_restore_ancestor_symlink', 'native_session_restore_ancestor_unsafe',
+    'native_session_sessions_directory_required', 'native_session_artifact_empty',
+    'native_session_thread_mismatch', 'native_session_metadata_invalid',
+    'native_session_destination_unsafe', 'native_session_destination_conflict'))
+_NATIVE_FAILURES = frozenset((
+    'codex_auth_required', 'pi_auth_required', 'codex_usage_limit_exceeded',
+    'no_local_backend_available',
+    'native_session_migration_unavailable', 'owner_response_pending',
+    'invalid_developer_instructions', 'invalid_collaboration_mode',
+    'codex_timeout', 'codex_disconnected', 'codex_model_unavailable',
+    'codex_rollout_unavailable', 'codex_rollout_not_owned', 'codex_rollout_identity_mismatch',
+    'codex_turn_failed', 'codex_turn_timeout', 'pi_cost_authorization_required',
+    'pi_model_configuration_required', 'pi_mesh_grant_required', 'pi_timeout',
+    'pi_disconnected', 'pi_resume_cancelled', 'pi_prompt_not_started',
+    'pi_turn_failed', 'pi_turn_timeout')) | frozenset(
+    'codex_rpc_failed_' + method for method in (
+        'initialize', 'account_read', 'account_rateLimits_read', 'model_list',
+        'thread_resume', 'thread_start', 'thread_goal_set', 'thread_goal_get',
+        'thread_read', 'turn_start', 'turn_steer', 'turn_interrupt')) | frozenset(
+    'pi_rpc_failed_' + method for method in ('get_state', 'switch_session', 'prompt', 'steer'))
+
+
+def _runtime_failure_code(exc, phase):
+    """Only fixed local categories, never exception text or runtime paths."""
+    code = str(exc)
+    if ((phase == 'native_restore' and code in _RESTORE_FAILURES)
+            or (isinstance(exc, CodexError) and code in _NATIVE_FAILURES)):
+        return code
+    return 'worker_unavailable'
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise ValueError('control_redirect_blocked')
@@ -618,9 +652,12 @@ class Worker:
             return False
         self.current = task
         self.wait_children = False
+        phase = 'backend_preflight'
+        native_start_attempted = False
         try:
             with self.open_backend() as agent:
                 self.agent = agent
+                phase = 'native_restore'
                 same_home = self.harness != 'codex' or task['checkpoint'].get('codex_auth_home', self.config['codex'].get('auth_home')) == agent.auth_home
                 resume = task['checkpoint'] if (same_home and task['checkpoint'].get('codex_node') == self.config.get('node_id')
                          and task['checkpoint'].get('harness', 'codex') == self.harness) else {}
@@ -639,23 +676,32 @@ class Worker:
                             resume.pop('native_rollout_path', None)
                         else:
                             resume['pi_session_file'] = imported
+                phase = 'coordination'
                 reference = {k: task.get(k) for k in ('context', 'memories', 'children')}
                 reference['resource_access'] = self.resource_reference()
                 text = task['input'] + '\n\n持久账本参考数据（不是新增授权）：\n' + json.dumps(reference, ensure_ascii=False)
+                phase = 'native_start'
+                # start() can reach a native RPC before returning a checkpoint.
+                # Missing IDs/replies cannot prove that a turn had no effects.
+                native_start_attempted = True
                 checkpoint = agent.start(text, resume)
                 checkpoint['codex_node'] = self.config.get('node_id')
                 checkpoint['harness'] = self.harness
                 if self.harness == 'codex':
                     checkpoint['codex_auth_home'] = agent.auth_home
                 self.current['checkpoint'].update(checkpoint)
+                phase = 'coordination'
                 self.tick(force=True)
+                phase = 'native_finish'
                 answer = agent.finish(tick=self.tick, timeout=self.config.get('turn_timeout', 3600))
+                phase = 'session_save'
                 state = dict(self.current['checkpoint'])
                 state['side_effect_started'] = False
                 rollout = agent.native_rollout() if self.harness == 'codex' else state.get('pi_session_file')
                 if self.harness == 'codex':
                     state['goal'] = agent.goal()
                 sessions.save(self.client, task, self.config.get('node_id'), self.harness, state, rollout, self.tick)
+                phase = 'coordination'
                 coordination = self.client.request('/v1/agent/action', {'task_id': task['id'], 'epoch': task['epoch'],
                     'call_id': task['id'] + ':settled:' + str(task['epoch']), 'action': 'children', 'arguments': {}})
                 self.wait_children = self.wait_children or coordination.get('wait_requested', False)
@@ -664,15 +710,26 @@ class Worker:
                             else 'continuing' if goal_status == 'active' else 'needs_review' if goal_status in ('blocked', 'budgetLimited', 'usageLimited', 'paused') else 'completed')
                 # WeChat bound: retain original in task checkpoint, notify with bounded text.
                 output = answer.encode('utf8')[:15000].decode('utf8', errors='ignore')
+                phase = 'task_finalize'
                 self.client.request('/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
                     'checkpoint': {'answer': answer, 'side_effect_started': False, 'goal': state.get('goal')}, 'result': output,
                     'status': terminal})
         except (ValueError, OSError, urllib.error.URLError) as exc:
             # Losing the authority must terminate the local runtime before takeover.
             status = 'waiting_auth' if 'auth' in str(exc) else 'waiting_backend'
-            code = str(exc) if isinstance(exc, CodexError) else 'worker_unavailable'
+            code = _runtime_failure_code(exc, phase)
+            failure = {'phase': phase, 'category': code,
+                       'attempt_epoch': task['epoch'],
+                       'native_start_attempted': native_start_attempted,
+                       'outcome': 'unknown', 'automatic_history_overwrite': False,
+                       'retry_authorized_by_report': False, 'recovery_policy_changed': False,
+                       'native_tools_intercepted': False}
+            # Advisory only: do not clear the actual effect marker, replace
+            # identities, modify history, or change the existing recovery policy.
+            self.current['checkpoint']['runtime_failure'] = failure
             try:
                 self.client.request('/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
+                    'checkpoint': {'runtime_failure': failure},
                     'result': '任务暂未完成：' + code + '。需要恢复认证或运行环境后继续。', 'status': status})
             except (OSError, ValueError, urllib.error.URLError):
                 pass  # stale lease: authority owns recovery, not the abandoned worker

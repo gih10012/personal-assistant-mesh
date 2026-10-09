@@ -205,6 +205,15 @@ class Store:
             return dict(db.execute('SELECT * FROM leader').fetchone())
 
     def create_task(self, text, required=None, parent_id=None, task_id=None, context=None):
+        with self.transaction() as db:
+            return self._create_task_in_db(db, text, required, parent_id, task_id, context)
+
+    def _create_task_in_db(self, db, text, required=None, parent_id=None, task_id=None, context=None):
+        """Create inside the caller's transaction, e.g. with an ingress binding.
+
+        Internal composition only: identity/permissions belong to the caller.
+        Do not open a nested transaction or commit this connection here.
+        """
         if not isinstance(text, str) or not text.strip() or len(text.encode('utf8')) > 65536:
             raise ValueError('invalid_task_input')
         required = required or ['leader']
@@ -221,20 +230,19 @@ class Store:
             if not objective or len(objective) > 4000:
                 raise ValueError('invalid_goal_objective')
             context.setdefault('goal', {'objective': objective, 'status': 'active'})
-        with self.transaction() as db:
-            task_id = task_id or uuid.uuid4().hex
-            previous = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            if previous:
-                if (previous['input'] != text or json.loads(previous['required']) != required
-                        or previous['parent_id'] != parent_id or json.loads(previous['context']) != context):
-                    raise Conflict('task_id_content_conflict')
-                return task_id
-            if parent_id and not db.execute('SELECT 1 FROM tasks WHERE id=?', (parent_id,)).fetchone():
-                raise ValueError('parent_not_found')
-            scope = self.session_scope(context)
-            db.execute('INSERT INTO tasks(id,parent_id,input,required,status,created,context,scope) VALUES(?,?,?,?,?,?,?,?)',
-                       (task_id, parent_id, text, json.dumps(required), 'pending', self.clock(), json.dumps(context), scope))
+        task_id = task_id or uuid.uuid4().hex
+        previous = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if previous:
+            if (previous['input'] != text or json.loads(previous['required']) != required
+                    or previous['parent_id'] != parent_id or json.loads(previous['context']) != context):
+                raise Conflict('task_id_content_conflict')
             return task_id
+        if parent_id and not db.execute('SELECT 1 FROM tasks WHERE id=?', (parent_id,)).fetchone():
+            raise ValueError('parent_not_found')
+        scope = self.session_scope(context)
+        db.execute('INSERT INTO tasks(id,parent_id,input,required,status,created,context,scope) VALUES(?,?,?,?,?,?,?,?)',
+                   (task_id, parent_id, text, json.dumps(required), 'pending', self.clock(), json.dumps(context), scope))
+        return task_id
 
     def ingest(self, messages, cursor, owner, bot):
         """Persist whole batch, owner context, business tasks and cursor in ONE transaction."""

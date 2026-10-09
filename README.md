@@ -27,6 +27,8 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 - Codex 启动/认证不可用且尚未开始执行时，才尝试配置好的 Pi；不跨 harness 重放已起效 turn。Pi 真实兜底仍需配置/验收。
 - 复用已有 Codex 认证，从账户实时模型目录选择，不要求在面板粘贴 API Key。
 - 项目只读观察 API、viewer/operator 权限分离。浏览器鉴权由 Dots 产品层处理。
+- 可选 owner-bound ingress：独立来源/subject/scopes 凭据提交持久任务并回查有限状态，原生 Leader scope 由部署配置绑定，同请求去重与任务创建同事务；不暴露 operator 权限或原始结果。HTTP/CLI 已实现，OAuth/MCP/Chat/Cloud 实际连接尚未安装，见 [入口合同](docs/INGRESS-CONTRACT.md)。
+- 受限成果发布：operator 显式审查的有界摘要绑定已完成任务与实际结果摘要哈希，入口仅回查同一来源/subject 的成果；不自动发布原始结果或下载任意路径，见 [成果合同](docs/INGRESS-RESULTS.md)。
 - 资源/算力/性能/工具/连接的开放能力目录、租约、证据指标、资源图、exact scope/action 远端授权与审计；provider 声明不等于验证。
 - 模型选择能力/路径后的事务型共享容量预留、provider 接收/启动/未知/结算回执；可选独立 provider 运行器承接宿主安装的版本化工具和持久执行 journal。已有跨宿主只读 SHA 工具真实执行验收；这不是自主最佳调度或性能验收。只有受管 Mesh 合同受此管控，不接管原生工具，见 [共享容量与回执合同](docs/MANAGED-ALLOCATIONS.md)。
 - 可选本地 `tool-release`：模型通过原生工具编写/测试后，离线保留源码快照、一次性认证发布、独立激活及新 epoch 回滚；执行账本不重置。独立只读 observer 核对实际输出、owner 参考答案、结算及容量释放，不能把安装或自测冒充验证。见 [工具生命周期](docs/TOOL-LIFECYCLE.md)。
@@ -67,6 +69,9 @@ python3 -m assistant_mesh --config /absolute/private/provider-client.json provid
 | `POST /v1/heartbeat`, `/v1/claim`, `/v1/task/update` | 节点声明、领取、fenced 更新 |
 | `POST /v1/tasks`, `/v1/task/control` | owner 创建、暂停、恢复 |
 | `POST /v1/task/status` | operator/viewer 查看实际结果和原生状态 |
+| `POST /v1/ingress/tasks`, `/v1/ingress/task/status` | 专用 scoped ingress 提交/回查自身 request ID；不能覆写权限/会话或查全局账本 |
+| `POST /v1/ingress/task/result` | 同来源/subject 的已审查成果；不是原始结果/任意文件接口 |
+| `POST /v1/ingress-result/publish` | 仅 operator 显式审查发布已完成任务成果；入口不能自我授予发布权 |
 | `POST /v1/agent/action` | 模型记忆、委派、等待、通知 |
 | `POST /v1/session` | 同 scope/harness 的选定原生状态同步 |
 | `POST /v1/interaction`, `/v1/interaction/resolve` | 问题/单次审批与 owner 回答 |

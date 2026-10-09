@@ -284,7 +284,7 @@ def main():
     parser = _CLIParser(description='Durable personal-assistant mesh')
     parser.add_argument('--config', help='Required private configuration except for local network-inventory')
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
-                                          'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'capability-events', 'resource-graph', 'node',
+                                          'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'ingress-submit', 'ingress-status', 'ingress-result', 'ingress-publish', 'capability-events', 'resource-graph', 'node',
                                           'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export', 'provider', 'tool-release', 'network-inventory'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
@@ -348,11 +348,25 @@ def main():
     if args.command == 'recovery':
         from .recovery import run
         return run(config)
-    if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'capability-events', 'resource-graph',
+    if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'ingress-submit', 'ingress-status', 'ingress-result', 'ingress-publish', 'capability-events', 'resource-graph',
                         'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export'):
         from .worker import Client
         client = Client(config)
-        if args.command == 'route-decisions':
+        if args.command in ('ingress-submit', 'ingress-status', 'ingress-result', 'ingress-publish'):
+            foreign = ('text', 'request_id', 'action', 'kind', 'principal', 'limit', 'after', 'id',
+                       'task_id', 'epoch', 'call_id', 'issuer')
+            if not args.payload_file or args.include_unavailable or any(getattr(args, field) is not None for field in foreign):
+                parser.error('ingress_requires_private_payload_without_identity_overrides')
+            try:
+                payload = resource_payload(args.payload_file, 'owner-ingress')['arguments']
+            except ValueError as error:
+                parser.error(str(error))
+            route = {'ingress-submit': '/v1/ingress/tasks',
+                     'ingress-status': '/v1/ingress/task/status',
+                     'ingress-result': '/v1/ingress/task/result',
+                     'ingress-publish': '/v1/ingress-result/publish'}[args.command]
+            value = client.request(route, payload)
+        elif args.command == 'route-decisions':
             query = {key: value for key, value in (('decision_id', args.id), ('task_id', args.task_id), ('limit', args.limit))
                      if value is not None}
             value = client.request('/v1/routing/decisions' + ('?' + urlencode(query) if query else ''))

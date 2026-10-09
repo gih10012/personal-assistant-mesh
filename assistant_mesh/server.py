@@ -9,6 +9,8 @@ from urllib.parse import parse_qs, urlsplit
 from .allocations import Allocations
 from .channel import Channel, ILink
 from .config import read_secret
+from .ingress import Ingress, validate_config as validate_ingress_config, validate_peer as validate_ingress_peer
+from .ingress_results import IngressResults
 from .resources import Registry
 from .routing import Routing
 from .routing_context import RoutingContext
@@ -24,9 +26,27 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 class API:
     def __init__(self, config):
         self.config = config
+        ingress_config = validate_ingress_config(config['ingress']) if 'ingress' in config else None
+        if ingress_config is not None and not config.get('node_id'):
+            raise ValueError('ingress_requires_authority_identity')
+        for peer in config['peers']:
+            if peer.get('role') == 'ingress':
+                if ingress_config is None:
+                    raise ValueError('ingress_not_configured')
+                validate_ingress_peer(peer, ingress_config['owner_id'])
+        self.peers = [(read_secret(peer['token_file']), peer) for peer in config['peers']]
+        for index, (secret, peer) in enumerate(self.peers):
+            for previous_secret, previous_peer in self.peers[:index]:
+                if ('ingress' in (peer.get('role'), previous_peer.get('role'))
+                        and hmac.compare_digest(secret, previous_secret)):
+                    # Ambiguous role/source/subject mappings are never resolved
+                    # by peer order. Reject before opening the business ledger.
+                    raise ValueError('ambiguous_ingress_credential')
         self.store = Store(config['database'],
                            notification_policy=config.get('notification_policy'),
                            node_id=config.get('node_id'))
+        self.ingress = Ingress(self.store, config['node_id'], ingress_config) if ingress_config is not None else None
+        self.ingress_results = IngressResults(self.store, config['node_id'], ingress_config) if ingress_config is not None else None
         resource_config = config.get('resources', {})
         self.resources = Registry(self.store, owner_principal='operator',
                                   trusted_verifiers=resource_config.get('trusted_verifiers', ()))
@@ -64,7 +84,6 @@ class API:
             self.remote = Remote(self.store, self.network)
         if self.store.get('activate_after_ms') is None:
             self.store.set('activate_after_ms', int(time.time() * 1000))
-        self.peers = [(read_secret(p['token_file']), p) for p in config['peers']]
 
     def principal(self, authorization):
         if not authorization.startswith('Bearer '):
@@ -77,6 +96,26 @@ class API:
         worker = role == 'worker' and bool(node)
         parsed = urlsplit(path)
         query = parse_qs(parsed.query, keep_blank_values=True)
+        if role == 'ingress' or parsed.path.startswith('/v1/ingress/'):
+            # Scoped entrypoints must not fall through to existing global
+            # status/discovery/operator/worker routes, even with a node field.
+            if role != 'ingress' or self.ingress is None:
+                raise PermissionError('ingress_not_authorized')
+            if method != 'POST' or query:
+                raise PermissionError('ingress_route_not_authorized')
+            if parsed.path == '/v1/ingress/tasks':
+                return self.ingress.submit(peer, payload)
+            if parsed.path == '/v1/ingress/task/status':
+                return self.ingress.status(peer, payload)
+            if parsed.path == '/v1/ingress/task/result':
+                return self.ingress_results.read(peer, payload)
+            raise PermissionError('ingress_route_not_authorized')
+        if parsed.path == '/v1/ingress-result/publish':
+            # Owner approval is an independent private route. A scoped ingress
+            # cannot become its own publisher by supplying reviewed=true.
+            if role != 'operator' or self.ingress_results is None or method != 'POST' or query:
+                raise PermissionError('ingress_result_publish_not_authorized')
+            return self.ingress_results.publish(peer, payload)
         can_discover = role in ('operator', 'viewer') or bool(node)
         mesh_member = role in ('operator', 'viewer') or (role in ('worker', 'agent_peer') and bool(node))
         if parsed.path in ('/v1/routing/action', '/v1/routing/decisions'):
