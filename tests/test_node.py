@@ -16,6 +16,7 @@ from unittest.mock import patch
 from assistant_mesh.codex import CodexError
 from assistant_mesh.networking import PROTOCOL, digest, native_scope
 from assistant_mesh.node import LOCAL_RUNTIME, LOCAL_WORKER, Node, run
+from assistant_mesh.node import _FreshNotificationClient
 from assistant_mesh.remote import Remote
 from assistant_mesh.server import serve
 from assistant_mesh.store import Store
@@ -211,6 +212,87 @@ class NodeTests(unittest.TestCase):
         self.rewrite(config['local_server_config'], ilink_account='/private/channel.json')
         with self.assertRaisesRegex(ValueError, 'second_channel_receiver'):
             self.node(config)
+
+    def notification_config(self):
+        config = self.config('notify-node', other='cloud')
+        self.rewrite(config['local_server_config'], notification_policy={
+            'mode': 'private', 'owner_relay': {'peer': 'cloud', 'authority': 'cloud'}})
+        client = {'control_url': 'http://127.0.0.1:1', 'token_file': self.secret('notify-cloud')}
+        config['peers'] = [{'node': 'cloud', 'authority': 'cloud',
+                           'client_config': self.private('notify-client.json', client)}]
+        return config
+
+    def test_notification_loop_is_optional_without_second_receiver(self):
+        node = self.node(self.config('alice'))
+        node.start()
+        self.assertIsNone(node.notification_thread)
+        self.assertEqual('disabled', node.status()['owner_notifications']['status'])
+        self.assertFalse(node.status()['owner_notifications']['delivery_verified'])
+
+    def test_pending_notification_does_not_block_node_step_or_native_work(self):
+        entered = threading.Event()
+
+        class WaitingRelay:
+            def __init__(self, *args):
+                pass
+
+            def serve(self, stop, on_report):
+                on_report({'status': 'waiting', 'delivery_verified': False})
+                entered.set()
+                stop.wait(10)
+
+        node = self.node(self.notification_config())
+        with patch('assistant_mesh.notification_relay.NotificationRelay', WaitingRelay):
+            node.start()
+            self.assertTrue(entered.wait(1))
+        self.assertTrue(node.notification_thread.is_alive())
+        began = time.monotonic()
+        # The notification loop has no event on the mesh probe path.
+        with patch.object(node, 'probe'):
+            status = node.step()
+        self.assertLess(time.monotonic() - began, 1)
+        self.assertTrue(status['local_work_allowed'])
+        self.assertTrue(status['local_server_alive'])
+        self.assertFalse(status['global_takeover_allowed'])
+        self.assertEqual('waiting', status['owner_notifications']['status'])
+        node.stop()
+        self.assertFalse(node.notification_thread.is_alive())
+
+    def test_notification_initialization_error_does_not_stop_native_node(self):
+        node = self.node(self.notification_config())
+        with patch('assistant_mesh.notification_relay.NotificationRelay', side_effect=ValueError('private detail')):
+            node.start()
+        self.assertIsNone(node.notification_thread)
+        with patch.object(node, 'probe'):
+            status = node.step()
+        self.assertTrue(status['local_work_allowed'])
+        self.assertTrue(status['local_server_alive'])
+        self.assertEqual(['notification_runtime_failed'], status['owner_notifications']['diagnostics'])
+        self.assertNotIn('private detail', json.dumps(status))
+
+    def test_owner_relay_requires_exact_enrolled_peer_authority(self):
+        config = self.notification_config()
+        config['peers'][0]['authority'] = 'imposter'
+        with self.assertRaisesRegex(ValueError, 'notification_relay_peer_not_enrolled'):
+            self.node(config)
+
+    def test_notification_token_rotation_preserves_fixed_peer_route(self):
+        config = {'control_url': 'http://127.0.0.1:17680', 'token_file': self.secret('rotate-notification')}
+        clients = []
+
+        class ReadingClient(Client):
+            def request(self, path, payload=None):
+                clients.append(self)
+                return {'url': self.url, 'token': self.token}
+
+        relay = _FreshNotificationClient(ReadingClient, config)
+        before = relay.request('/fixture-only')
+        Path(config['token_file']).write_text('b' * 64, encoding='utf8')
+        config['control_url'] = 'http://127.0.0.1:1'
+        after = relay.request('/fixture-only')
+        self.assertNotEqual(before['token'], after['token'])
+        self.assertEqual(before['url'], after['url'])
+        self.assertEqual(2, len(clients))
 
     def test_companion_reuses_existing_central_roles_without_launching_them(self):
         node = self.node(self.config('bob', central=True))

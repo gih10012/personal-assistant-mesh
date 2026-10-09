@@ -36,6 +36,18 @@ class PeerContractError(ValueError):
     pass
 
 
+class _FreshNotificationClient:
+    """Refresh only the credential on the fixed owner-enrolled peer route."""
+    def __init__(self, factory, config):
+        self.factory = factory
+        self.config = json.loads(json.dumps(config))
+
+    def request(self, path, payload=None):
+        # Client reads the same private token file at construction. A token
+        # rotation must not strand notifications or change their destination.
+        return self.factory(self.config).request(path, payload)
+
+
 def _failure(exc):
     if isinstance(exc, PeerContractError):
         return str(exc)  # only fixed codes created in this module
@@ -127,7 +139,13 @@ class Node:
             # Validate URL and owned token now, without issuing network traffic.
             self.client_factory(client_config)
             self.peers[name] = dict(peer, authority=authority, client=client_config)
-        self.store = Store(self.server_config['database'], clock=clock, recover_inflight=self.start_server)
+        self.store = Store(self.server_config['database'], clock=clock, recover_inflight=self.start_server,
+                           notification_policy=self.server_config.get('notification_policy'), node_id=self.node_id)
+        relay = self.store.notification_policy.get('owner_relay')
+        if relay and (relay['peer'] not in self.peers or self.peers[relay['peer']]['authority'] != relay['authority']):
+            raise ValueError('notification_relay_peer_not_enrolled')
+        self.notification_relay, self.notification_thread = None, None
+        self.notification_observation = {'status': 'disabled', 'delivery_verified': False}
         self.network = Network(self.store, self.node_id)
         with self.store.transaction() as db:
             for statement in (
@@ -661,6 +679,7 @@ class Node:
                 raise ValueError('local_node_server_start_failed')
         self._observe_runtime()
         self._ensure_worker()
+        self._start_notification_relay()
 
     def step(self):
         if not self.started or self.stop_event.is_set():
@@ -693,6 +712,37 @@ class Node:
         self.store.set('node_runtime', snapshot)
         return snapshot
 
+    def _start_notification_relay(self):
+        """Optional owned loop, never on the native heartbeat/reconnect path."""
+        route = self.store.notification_policy.get('owner_relay')
+        if not route:
+            return
+        try:
+            from .notification_relay import NotificationRelay
+            peer = self.peers[route['peer']]
+            self.notification_relay = NotificationRelay(self.store, self.node_id, route['peer'], route['authority'],
+                                                       _FreshNotificationClient(self.client_factory, peer['client']))
+        except Exception:
+            self.notification_observation = {'status': 'error', 'diagnostics': ['notification_runtime_failed'],
+                                             'delivery_verified': False}
+            return
+
+        def observe(report):
+            # The relay's reports are fixed categories/counts, not message
+            # bodies, source credentials, account identity or raw exceptions.
+            self.notification_observation = dict(report)
+            self.notification_observation.setdefault('status', report.get('state', 'unknown'))
+
+        def run_relay():
+            try:
+                self.notification_relay.serve(stop=self.stop_event, on_report=observe)
+            except Exception:
+                self.notification_observation = {'status': 'error', 'diagnostics': ['notification_runtime_failed'],
+                                                 'delivery_verified': False}
+        self.notification_thread = threading.Thread(target=run_relay)
+        self.notification_thread.daemon = True
+        self.notification_thread.start()
+
     def status(self):
         links = self.network.links()
         incident, incident_unknown = None, self.runtime_legacy_unknown
@@ -713,6 +763,7 @@ class Node:
         if worker_failures and (worker_incident is None or not worker_incident['active']):
             worker_unknown = True  # a failed optional write is not recovery
         return {'node': self.node_id, 'mode': links['mode'], 'links': links['links'],
+                'owner_notifications': dict(self.notification_observation),
                 'a2a_reachable': any(link['kind'] == 'a2a' and link['reachable'] for link in links['links']),
                 'leader_reachable': any(link['leader_available'] for link in links['links']),
                 'local_work_allowed': True, 'global_takeover_allowed': False,
@@ -746,6 +797,10 @@ class Node:
 
     def stop(self):
         self.stop_event.set()
+        if self.notification_thread and self.notification_thread is not threading.current_thread():
+            # Pending RPC timeout/crash remains in its durable intent. This
+            # bounded join does not assert remote delivery or quiescence.
+            self.notification_thread.join(timeout=5)
         if self.worker:
             self.worker.stop.set()
             agent = getattr(self.worker, 'agent', None)

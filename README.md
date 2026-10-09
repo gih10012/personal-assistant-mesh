@@ -29,6 +29,7 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 - 模型选择能力/路径后的事务型共享容量预留、provider 接收/启动/未知/结算回执；可选独立 provider 运行器承接宿主安装的版本化工具和持久执行 journal。已有跨宿主只读 SHA 工具真实执行验收；这不是自主最佳调度或性能验收。只有受管 Mesh 合同受此管控，不接管原生工具，见 [共享容量与回执合同](docs/MANAGED-ALLOCATIONS.md)。
 - 统一的 `mesh(action, arguments)` 额外工具入口；旧 `mesh_*` 保留，连续旧线程不重建。见 [模型入口合同](docs/MESH-GATEWAY.md)。
 - 独立节点 authority/worker、断网本地任务、持续 native 子 agent、持久重连退避与去重维护任务。
+- 可选的节点→本人文字通知回传：显式授权 `owner.notify`、固定账号/目的地、持久提交与原子去重；不启动第二个微信接收器，不自动转发历史记录或节点任务结果，详见 [通知合同](docs/OWNER-NOTIFICATIONS.md)。
 - A2A 远端代理 child 回到原父账本并自动续接；SSH 另有执行 journal，未知结果不重放。当前自有 `mesh-a2a/1`，不冒称标准 A2A 兼容。
 - 实验性 native Live 同线程/账户 pin/权限与事件核心；真实连接、音频和常驻接线须另验收。
 
@@ -71,6 +72,7 @@ python3 -m assistant_mesh --config /absolute/private/provider-client.json provid
 | `POST /v1/allocation/action` | 认证绑定的共享容量池、预留和 provider 回执；回执不证明工具已执行 |
 | `GET /v1/mesh/hello`, `/v1/mesh/links`, `/v1/mesh/task` | 认证节点、链路与原 sender 的任务结果 |
 | `POST /v1/mesh/delegate`, `/v1/mesh/send`, `/v1/mesh/report` | 活任务租约下远端子任务、原子防重接收、仅证据报告 |
+| `POST /v1/mesh/notify`, `/v1/mesh/notify/status` | 已授权节点向绑定本人回传文字/查询回执，不可指定收件人 |
 
 ## 未完成范围
 

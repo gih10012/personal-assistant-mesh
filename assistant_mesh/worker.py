@@ -273,6 +273,7 @@ class Worker:
                          'allocation_execution': '共享容量预留和provider回执是受管Mesh合同；start不是工具执行证明。没有实际provider适配器不得宣称完成；未知或running占用不会仅因TTL自动释放。',
                          'native_tools_intercepted': False,
                          'execution': '目录/graph/authorize 只表示声明、证据或权限检查，不自动执行能力；queued/allowed 不等于完成。',
+                         'notifications': 'notify 是显式通知本人；使用配置且授权的本人通道/节点回传，private 模式没有回传时 recorded_private。private 节点自动结果不自动转发；queued/accepted 不证明手机送达。',
                          'connectivity': 'mesh 内入口的授权不限制原生网络路线；失联可继续用其他本人授权的原生路线自主恢复连接。'},
                      'actions': ['discover', 'describe', 'graph', 'audit', 'advertise', 'renew', 'observe', 'link',
                                  'revoke', 'request_grant', 'authorize'],

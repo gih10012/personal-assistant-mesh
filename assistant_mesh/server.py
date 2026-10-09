@@ -10,7 +10,8 @@ from .allocations import Allocations
 from .channel import Channel, ILink
 from .config import read_secret
 from .resources import Registry
-from .networking import Network
+from .networking import Network, digest
+from .remote_notifications import PROTOCOL as NOTIFY_PROTOCOL, RemoteNotifications
 from .store import Conflict, Store
 
 
@@ -21,12 +22,25 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 class API:
     def __init__(self, config):
         self.config = config
-        self.store = Store(config['database'])
+        self.store = Store(config['database'],
+                           notification_policy=config.get('notification_policy'),
+                           node_id=config.get('node_id'))
         resource_config = config.get('resources', {})
         self.resources = Registry(self.store, owner_principal='operator',
                                   trusted_verifiers=resource_config.get('trusted_verifiers', ()))
         self.allocations = Allocations(self.store, self.resources)
         self.network = Network(self.store, config['node_id']) if config.get('node_id') else None
+        self.ilink = None
+        account_binding = None
+        if config.get('ilink_account') and self.store.notification_policy.get('mode', 'channel') == 'channel':
+            # ILink initialization validates only the configured private file.
+            # Keep this exact account snapshot for sending; a later disk edit
+            # cannot retarget messages between readiness proof and channel use.
+            self.ilink = ILink(config['ilink_account'])
+            account_binding = digest([NOTIFY_PROTOCOL, self.ilink.base,
+                                      self.ilink.account['ilink_user_id'], self.ilink.account['ilink_bot_id']])
+        self.notifications = (RemoteNotifications(self.store, config['node_id'], route_id=account_binding)
+                              if config.get('node_id') else None)
         if self.network:
             from .remote import Remote
             self.remote = Remote(self.store, self.network)
@@ -47,6 +61,8 @@ class API:
         query = parse_qs(parsed.query, keep_blank_values=True)
         can_discover = role in ('operator', 'viewer') or bool(node)
         mesh_member = role in ('operator', 'viewer') or (role in ('worker', 'agent_peer') and bool(node))
+        if parsed.path in ('/v1/mesh/notify', '/v1/mesh/notify/status'):
+            return self.notification_dispatch(method, parsed.path, query, payload, peer)
         if self.network and parsed.path.startswith('/v1/mesh/'):
             return self.mesh_dispatch(method, parsed.path, query, payload, peer, mesh_member)
         if method == 'GET' and path == '/v1/status':
@@ -91,6 +107,11 @@ class API:
         if method == 'POST' and path == '/v1/task/control' and role == 'operator':
             return self.store.control_task(payload['id'], payload['command'])
         if method == 'POST' and path == '/v1/agent/action' and worker:
+            grants = peer.get('capabilities', [])
+            if (payload.get('action') == 'notify'
+                    and self.store.notification_policy.get('owner_relay')
+                    and (not isinstance(grants, list) or 'owner.notify' not in grants)):
+                raise PermissionError('owner_notification_not_authorized')
             return self.store.agent_action(payload['task_id'], node, payload['epoch'], payload['call_id'], payload['action'], payload.get('arguments', {}))
         if method == 'POST' and path == '/v1/session' and worker:
             return self.store.session_action(payload['task_id'], node, payload['epoch'], payload['action'], payload.get('payload', {}))
@@ -117,6 +138,23 @@ class API:
         if method == 'POST' and path == '/v1/budget/reserve' and role == 'operator':
             return self.store.budget_reserve(payload['id'], payload['amount'], self.config.get('budget', {}))
         raise PermissionError('route_not_authorized')
+
+    def notification_dispatch(self, method, path, query, payload, peer):
+        # Deployment credentials bind both source identity and this one finite
+        # permission. Operators/viewers cannot supply a node to elevate roles.
+        grants = peer.get('capabilities', [])
+        if (method != 'POST' or query or peer.get('role') not in ('worker', 'agent_peer')
+                or not peer.get('node') or not isinstance(grants, list)
+                or 'owner.notify' not in grants):
+            raise PermissionError('owner_notification_not_authorized')
+        # A private/no-channel node must reject even a query before touching its
+        # receipt ledger. It cannot become a second iLink receiver by accident.
+        if (not self.notifications or self.ilink is None
+                or self.store.notification_policy.get('mode', 'channel') != 'channel'):
+            raise PermissionError('owner_notification_channel_unavailable')
+        if path == '/v1/mesh/notify':
+            return self.notifications.receive(peer['node'], payload)
+        return self.notifications.status(peer['node'], payload)
 
     def mesh_dispatch(self, method, path, query, payload, peer, member):
         role, node = peer.get('role'), peer.get('node')
@@ -313,8 +351,8 @@ def serve(config, ready=None):
     server = ThreadingHTTPServer(('127.0.0.1', config.get('port', 17680)), Handler)
     server.daemon_threads = True
     channel = None
-    if config.get('ilink_account'):
-        channel = Channel(api.store, ILink(config['ilink_account']))
+    if api.ilink is not None:
+        channel = Channel(api.store, api.ilink)
         for target in (channel.run_poll, channel.run_send):
             threading.Thread(target=target, daemon=True).start()
     if ready:

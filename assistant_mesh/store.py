@@ -17,7 +17,25 @@ class Conflict(ValueError):
 
 
 class Store:
-    def __init__(self, path, clock=time.time, recover_inflight=True):
+    def __init__(self, path, clock=time.time, recover_inflight=True, notification_policy=None, node_id=None):
+        # Only this extra managed notification route is configured here.
+        # Native communication, Shell and network tools are unaffected.
+        policy = {'mode': 'channel'} if notification_policy is None else notification_policy
+        if (not isinstance(policy, dict) or set(policy) - {'mode', 'owner_relay'}
+                or policy.get('mode') not in ('channel', 'private')):
+            raise ValueError('invalid_notification_policy')
+        policy = json.loads(json.dumps(policy))
+        relay = policy.get('owner_relay')
+        if relay is not None:
+            from .networking import identifier
+            if policy['mode'] != 'private' or not isinstance(relay, dict) or set(relay) != {'peer', 'authority'}:
+                raise ValueError('invalid_owner_notification_relay')
+            identifier(node_id)
+            identifier(relay['peer'])
+            identifier(relay['authority'])
+            if relay['peer'] == node_id:
+                raise ValueError('invalid_owner_notification_relay')
+        self.notification_policy, self.notification_node = policy, node_id
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path, self.clock = str(path), clock
@@ -70,6 +88,13 @@ class Store:
                 '''CREATE TABLE IF NOT EXISTS steering(
                     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, epoch INTEGER NOT NULL,
                     text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending')''',
+                '''CREATE TABLE IF NOT EXISTS notification_relays(
+                    request_id TEXT PRIMARY KEY, source_node TEXT NOT NULL,
+                    peer TEXT NOT NULL, authority TEXT NOT NULL, fingerprint TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'pending', attempt INTEGER NOT NULL DEFAULT 0,
+                    post_attempted INTEGER NOT NULL DEFAULT 0,
+                    lease_until REAL NOT NULL DEFAULT 0, receipt TEXT, error TEXT,
+                    created REAL NOT NULL, updated REAL NOT NULL)''',
             )
             for statement in statements:
                 db.execute(statement)
@@ -77,6 +102,15 @@ class Store:
                 db.execute('ALTER TABLE outbox ADD COLUMN media_items TEXT')
             if 'retry_count' not in [r[1] for r in db.execute('PRAGMA table_info(outbox)')]:
                 db.execute('ALTER TABLE outbox ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0')
+            if 'delivery_route' not in [r[1] for r in db.execute('PRAGMA table_info(outbox)')]:
+                # Historical pending messages retain their original route;
+                # installing a relay never opts old messages into replay.
+                db.execute("ALTER TABLE outbox ADD COLUMN delivery_route TEXT NOT NULL DEFAULT 'channel'")
+            if 'post_attempted' not in [r[1] for r in db.execute('PRAGMA table_info(notification_relays)')]:
+                # Existing ambiguous attempts are not permission to create a
+                # replacement delivery after an upgrade or receipt loss.
+                db.execute('ALTER TABLE notification_relays ADD COLUMN post_attempted INTEGER NOT NULL DEFAULT 0')
+                db.execute('UPDATE notification_relays SET post_attempted=1 WHERE attempt>0')
             if 'context' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
                 db.execute("ALTER TABLE tasks ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
             if 'scope' not in [r[1] for r in db.execute('PRAGMA table_info(tasks)')]:
@@ -473,7 +507,8 @@ class Store:
                 text = arguments['text']
                 if not isinstance(text, str) or not text or len(text.encode()) > 16000:
                     raise ValueError('invalid_outbound_text')
-                output = {'id': self._enqueue(db, 'agent-' + action_id, text), 'status': 'queued', 'delivery_verified': False}
+                identity = self._enqueue(db, 'agent-' + action_id, text, explicit=True)
+                output = self._notification_status(db, identity)
             else:
                 raise ValueError('unknown_agent_action')
             db.execute('INSERT INTO agent_actions VALUES(?,?,?)', (action_id, fingerprint, json.dumps(output)))
@@ -673,22 +708,45 @@ class Store:
                 db.execute("UPDATE steering SET state='submitting' WHERE id=?", (row['id'],))
             return {'steering': dict(row) if row else None}
 
-    def _enqueue(self, db, request_id, text):
+    def _enqueue(self, db, request_id, text, delivery_route=None, explicit=False):
+        if not isinstance(request_id, str) or not request_id or len(request_id) > 200:
+            raise ValueError('invalid_notification_request_id')
+        relay = self.notification_policy.get('owner_relay')
+        route = delivery_route or ('relay' if explicit and relay else self.notification_policy['mode'])
+        if route not in ('channel', 'private', 'relay') or (route == 'relay' and not relay):
+            raise ValueError('invalid_notification_route')
+        if route == 'relay':
+            import re
+            if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}', request_id):
+                raise ValueError('invalid_notification_request_id')
         fingerprint = hashlib.sha256(text.encode()).hexdigest()
         previous = db.execute('SELECT fingerprint FROM outbox WHERE id=?', (request_id,)).fetchone()
         if previous:
             if previous['fingerprint'] != fingerprint:
                 raise Conflict('request_id_content_conflict')
             return request_id
-        db.execute('INSERT INTO outbox(id,fingerprint,body,status,client_id,created) VALUES(?,?,?,?,?,?)',
-                   (request_id, fingerprint, text, 'pending', 'mesh-' + uuid.uuid4().hex, self.clock()))
+        db.execute('INSERT INTO outbox(id,fingerprint,body,status,client_id,created,delivery_route) VALUES(?,?,?,?,?,?,?)',
+                   (request_id, fingerprint, text, 'pending', 'mesh-' + uuid.uuid4().hex, self.clock(), route))
+        if route == 'relay':
+            now = self.clock()
+            db.execute('INSERT INTO notification_relays(request_id,source_node,peer,authority,fingerprint,created,updated) VALUES(?,?,?,?,?,?,?)',
+                       (request_id, self.notification_node, relay['peer'], relay['authority'], fingerprint, now, now))
         return request_id
 
     def enqueue(self, request_id, text):
         if not isinstance(text, str) or not text or len(text.encode()) > 16000:
             raise ValueError('invalid_outbound_text')
         with self.transaction() as db:
-            return self._enqueue(db, request_id, text)
+            return self._enqueue(db, request_id, text, explicit=True)
+
+    @staticmethod
+    def _notification_status(db, request_id):
+        row = db.execute('SELECT delivery_route FROM outbox WHERE id=?', (request_id,)).fetchone()
+        if not row:
+            raise ValueError('send_not_found')
+        route = row['delivery_route']
+        return {'id': request_id, 'status': 'recorded_private' if route == 'private' else 'queued',
+                'delivery_route': route, 'delivery_verified': False}
 
     def enqueue_media(self, request_id, items):
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict) or items[0].get('type') not in (2, 4, 5):
@@ -704,7 +762,7 @@ class Store:
     def next_send(self):
         with self.transaction() as db:
             context = self._meta(db, 'owner_context', {})
-            row = db.execute("SELECT * FROM outbox WHERE status='pending' OR (status='rejected' AND retry_count<1 AND COALESCE(context_version,'')!=?) ORDER BY created LIMIT 1", (context.get('version', ''),)).fetchone()
+            row = db.execute("SELECT * FROM outbox WHERE delivery_route='channel' AND (status='pending' OR (status='rejected' AND retry_count<1 AND COALESCE(context_version,'')!=?)) ORDER BY created LIMIT 1", (context.get('version', ''),)).fetchone()
             if not row:
                 return None
             client_id = 'mesh-' + uuid.uuid4().hex if row['status'] == 'rejected' else row['client_id']
@@ -775,11 +833,22 @@ class Store:
 
     def send_status(self, request_id):
         with self.transaction() as db:
-            row = db.execute('SELECT id,status,detail FROM outbox WHERE id=?', (request_id,)).fetchone()
+            row = db.execute('SELECT id,status,detail,delivery_route FROM outbox WHERE id=?', (request_id,)).fetchone()
             if not row:
                 raise ValueError('send_not_found')
             value = dict(row)
             value['detail'] = json.loads(value['detail'])
+            if row['delivery_route'] == 'private':
+                value['status'] = 'recorded_private'
+                value['delivery_verified'] = False
+            elif row['delivery_route'] == 'relay':
+                relay = db.execute('SELECT state,receipt,error FROM notification_relays WHERE request_id=?', (request_id,)).fetchone()
+                if not relay:
+                    raise ValueError('notification_relay_record_missing')
+                value['status'] = relay['state']
+                value['detail'] = {'receipt': json.loads(relay['receipt']) if relay['receipt'] else None,
+                                   'error': relay['error'], 'delivery_verified': False}
+                value['delivery_verified'] = False
             return value
 
     def task_status(self, task_id):

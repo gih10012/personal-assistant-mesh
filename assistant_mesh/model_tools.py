@@ -34,7 +34,7 @@ TOOLS = [
          {'peer': STRING, 'input': STRING, 'project_id': STRING, 'agent_id': STRING, 'role': STRING}, ['peer', 'input']),
     tool('mesh_children', '查看本任务的子任务状态及实际结果。'),
     tool('mesh_wait_children', '请求在子任务完成后自动继续。调用后结束本轮，不宣称父目标已完成。'),
-    tool('mesh_notify', '通过可靠队列主动微信通知本人；queued 或 accepted 都不等于已确认送达。', {'text': STRING}, ['text']),
+    tool('mesh_notify', '显式通知本人：使用配置的本人通道或节点回传链路；private 模式没有回传时仅 recorded_private。queued 或 accepted 都不等于手机已确认送达。', {'text': STRING}, ['text']),
     tool('mesh_resource', '发现、描述或登记模型创建的工具与动态资源能力；支持算力、性能观测和可达路径。'
          '能力目录不是原生终端白名单。跨节点必须 exact action/scope 授权，模型只能 request_grant，不能自行批准；'
          '声明/health 不等于验证或已执行。actions: discover, describe, graph, audit, advertise, renew, observe, link, revoke, request_grant, authorize。',
