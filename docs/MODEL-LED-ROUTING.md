@@ -1,6 +1,6 @@
 # PAM-004：模型主导的节点、出口与资源选择
 
-源码核对：2026-10-09。本文是**下一步实现合同**，不宣称已具备自主
+源码核对：2026-10-09。PAM-004a 已实现，PAM-004b 仍是下一步合同；不宣称已具备自主
 调度、真实出口执行或全网最优性能。PAM-003 已有目录联邦与隔离重联
 证据；PAM-003d 正式双向循环已加载，空目录认证读取连续 `ok`，有内容
 目录与故障域观察继续。状态以 [TASKS](TASKS.json) 和
@@ -29,7 +29,7 @@
 | [federated_capabilities](CAPABILITY-FEDERATION.md) | issuer/id/revision 隔离的远端公告与连接时效估计 | 当前不导出远端 metrics、graph、grants 或 pool；不能拿投影在当地预留远端容量 |
 | [Allocations](../assistant_mesh/allocations.py) | 同 authority 的验证、共享容量原子预留、provider 回执和 unknown 保留 | 不选择最佳计划，不跨 authority 原子准入，也不是 OS/网络硬隔离 |
 | [remote_delegate](../assistant_mesh/remote.py) | 模型明确选择 peer；原父任务的持久 child/消息/回执，目的端本地运行 | 控制面失联不证明业务效果未发生，换 peer/new callId 可能重复业务操作 |
-| [Worker](../assistant_mesh/worker.py) / native plan | 原生 plan 更新已有 checkpoint，连续 thread 可续接 | 尚无结构化路由决定与证据快照/执行 ID 的关联账本 |
+| [Routing](../assistant_mesh/routing.py) / [RoutingContext](../assistant_mesh/routing_context.py) | task/Leader-bound 原子证据视图、不可变决定、原执行身份关联；连续 thread 可通过开放 mesh 或 CLI 接入 | 提议不执行；关联不是实际模型选择、计划匹配或业务成功证明；真实出口待 004b |
 | [ProviderRuntime](../assistant_mesh/provider_runtime.py) | 私有安装的版本化 callback、effects journal 和真实结果补结算 | 没有内置通用出口 executor；计划不能自动变成任意代理 URL/Shell 源码 |
 
 当前 [Codex.start](../assistant_mesh/codex.py) 的 `catalog-first` 取实时
@@ -72,7 +72,7 @@ owner，跨域 escrow/预留另做合同，不伪造全网原子容量。
 
 ## 第一片 PAM-004a：小型路由决定账本
 
-**拟新增，当前没有 `routing_context` / `route_propose` API。**
+**已实现 `routing_context` / `route_propose` 和薄 CLI/HTTP 入口。**
 只做 task-bound 只读 evidence view 与持久 proposal，不在 proposal
 写入时执行、登记能力、批准 grant、创建 pool 或修改全局网络。
 先复用现有 Registry/Projection 读取；inventory 由节点在本机采样或
@@ -96,14 +96,56 @@ observed_outcome：实际读回的结果引用/unknown/review，不是模型口�
 新增 proposal 只影响本 job 的计划记录，不取代 goal、native plan、
 连续 thread 或现有任务所有权。
 
-落地范围可以只有一个小模块、独立私有表与薄工具接线：
+当前落地为两个小模块、独立私有表与薄工具接线：
 
 1. 对实际 task lease 原子校验；绑定不可由 prompt 覆盖。
 2. 保存有界证据引用和不可变决定；同 ID/同内容幂等、异内容拒绝。
 3. 返回只读查询。证据是当时快照，不能当永久 admission token。
 4. 执行仍用现有 allocation/remote_delegate；保存其真实返回的身份
    作为 execution_link。若提交或记录回执之间中断，先按原 ID 对账，
-   不重新让模型猜一次委派。并发 plan/业务版本需在接线时做 CAS。
+   不重新让模型猜一次委派。关联 immutable，不能因 unknown 换引用；
+   原执行的 CAS/准入仍留在既有 authority，不在提议里新增业务 CAS。
+
+### 已实现入口与证据边界
+
+开放 `mesh(action,arguments)` 中新增动作，不重建原生 thread/dynamicTools：
+
+| action | arguments | 含义 |
+| --- | --- | --- |
+| `routing_context` | 可选 kind/issuer/include_unavailable/limit/observation_max_age_seconds | 同一 local authority 事务的有界证据视图，无总分/执行/联网 |
+| `route_propose` | decision | 六个必需字段 decision_id/work/candidates/selection/rationale/evidence_refs；对象内容开放，同 ID 同内容幂等 |
+| `route_inspect` / `route_list` | decision_id / 可选 limit | 当前 task/Leader fence 的提议与原执行引用查询 |
+| `route_link` | decision_id/kind/reference_id | kind 为 remote_delegation 或 managed_allocation；实际本任务、原 actor 身份核对，一次不可变关联 |
+
+HTTP `POST /v1/routing/action` 的唯一包络为
+`{task_id,epoch,action,arguments}`，action=context/propose/inspect/list/link。
+只允许有 deployment-bound node 的 worker；node/authority 不由模型提供。
+`GET /v1/routing/decisions` 是 operator/viewer 只读历史，支持
+decision_id/task_id/limit，不接受 worker/agent_peer 借 node 字段伪装 owner。
+历史读在任务结束后仍可用，不为模型写操作取消 lease 校验。
+
+旧线程可用原生 CLI：`routing --task-id CURRENT --epoch CURRENT --action NAME
+--payload-file /private/arguments.json`；配置与 payload 保持本人所有、0600、
+仓库之外。运行期参考给出当前 task/epoch，不输出 credential。
+owner 历史 CLI 为 `route-decisions --id DECISION` 或 `--task-id TASK`。
+
+证据视图保留单位、scope/workload、样本/接收时间、epoch/revision 和来源。
+可选 age 是 caller 要求的 freshness，不等于 admission；精确截止时刻为
+stale，未来样本/旧 epoch 不为 fresh。当前可信验证者、与当前 provider
+独立性另列布尔值；保留历史 verification，scope/workload 仍未核对。
+cap/pool availability 使用同一 as_of；远端 outer available 才是投影时效，
+内层 capability 是来源当时的声明。远端 metrics/pool/grant 不被导入。
+
+local observations/edges/bindings 只覆盖 sampled capability IDs；按数量与
+2MiB 总响应截断时显式标明 partial，不假称全网完整。checksum 是当前
+authority 生成的视图摘要，但模型抄入 evidence_refs 后仍是 unchecked
+引用，未自动核验。共享池显示原 owner 合同与 held/remaining，不累加
+同名公告。两类执行候选分别限量，保留原 child/operation 与 actor/epoch。
+
+提议只写 route_decisions；link 只核对真实执行身份，不核验计划因果。
+始终 `model_selection_verified=false`、`execution_verified=false`；native
+真实选型和独立业务结果另做验收。unknown 先查原 ID，不更换引用、
+新建 ID 或调用新 peer 重放；此入口失败也不阻断任何原生功能。
 
 第一轮不需要远端导出全部 metrics。模型可用远端公告发现候选，目的
 节点收到明确委派后查询其本 authority 的新鲜观测并自主决定本地实现；
@@ -177,8 +219,9 @@ accepted/running/unknown 不能因 TTL、节点/模型变更或进程消失释�
    保留；真实中断注入须另获当前部署范围内安全授权，不为验收破坏
    活跃业务。真实出口/模型/故障证据与 fixture 分开。
 
-本文只交付实现合同，尚未创建 proposal 表/API、部署 canary 或执行
-模型实验。Root 在真实工作开始后维护 PLAN/TASKS 与执行证据；不因
-此文档完成就将 PAM-004 标记完成。异构节点全适配、远端观测 feed、
+PAM-004a 已有 proposal 表/API、工具和 CLI；测试、发布、正式加载、
+真实模型使用分别见 PLAN/TASKS/ACCEPTANCE，不将 fixture 或提议当作
+004b 出口验收。Root 维护执行证据，不因本文完成就将 PAM-004 标记完成。
+异构节点全适配、远端观测 feed、
 模型选择专用入口、跨 authority escrow 和全局最优性能留待具体后续，
 不阻碍第一条有结果的模型选择链路。

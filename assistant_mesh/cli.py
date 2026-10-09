@@ -284,7 +284,7 @@ def main():
     parser = _CLIParser(description='Durable personal-assistant mesh')
     parser.add_argument('--config', help='Required private configuration except for local network-inventory')
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
-                                          'resources', 'resource', 'allocation', 'capability-events', 'resource-graph', 'node',
+                                          'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'capability-events', 'resource-graph', 'node',
                                           'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export', 'provider', 'tool-release', 'network-inventory'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
@@ -318,6 +318,14 @@ def main():
         parser.error('the following arguments are required: --config')
     if args.issuer is not None and args.command != 'mesh-capabilities':
         parser.error('issuer_option_requires_mesh_capabilities_command')
+    if args.command in ('routing', 'route-decisions'):
+        if (any(getattr(args, key) is not None for key in ('principal', 'kind', 'after', 'call_id'))
+                or args.include_unavailable):
+            parser.error('routing_filters_belong_in_private_arguments_not_actor_overrides')
+        if args.command == 'route-decisions' and (args.action or args.payload_file or args.epoch is not None):
+            parser.error('route_decisions_is_read_only')
+        if args.command == 'routing' and (args.id is not None or args.limit is not None):
+            parser.error('routing_arguments_belong_in_private_payload')
     if args.command == 'tool-release':
         return _tool_command(args)
     if any(getattr(args, name) is not None for name in ('state_dir', 'operation_id', 'candidate_config',
@@ -340,11 +348,24 @@ def main():
     if args.command == 'recovery':
         from .recovery import run
         return run(config)
-    if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'allocation', 'capability-events', 'resource-graph',
+    if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'capability-events', 'resource-graph',
                         'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export'):
         from .worker import Client
         client = Client(config)
-        if args.command in ('mesh-hello', 'mesh-links'):
+        if args.command == 'route-decisions':
+            query = {key: value for key, value in (('decision_id', args.id), ('task_id', args.task_id), ('limit', args.limit))
+                     if value is not None}
+            value = client.request('/v1/routing/decisions' + ('?' + urlencode(query) if query else ''))
+        elif args.command == 'routing':
+            if not args.task_id or args.epoch is None or not args.action:
+                parser.error('routing requires task-id, epoch and action')
+            try:
+                payload = resource_payload(args.payload_file, args.action)
+            except ValueError as exc:
+                parser.error(str(exc))
+            payload.update(task_id=args.task_id, epoch=args.epoch)
+            value = client.request('/v1/routing/action', payload)
+        elif args.command in ('mesh-hello', 'mesh-links'):
             value = client.request('/v1/mesh/' + args.command[5:])
         elif args.command in ('mesh-capabilities', 'mesh-capability-export'):
             fields = ('issuer', 'kind', 'limit') if args.command == 'mesh-capabilities' else ('after', 'limit')

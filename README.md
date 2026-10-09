@@ -76,6 +76,8 @@ python3 -m assistant_mesh --config /absolute/private/provider-client.json provid
 | `GET /v1/resources`, `/v1/resource`, `/v1/resource/graph`, `/v1/capability-events` | 动态能力、实测指标、图与近期审计 |
 | `POST /v1/resource/action` | provider 注册/观测/请求授权，operator 才能审批 |
 | `POST /v1/allocation/action` | 认证绑定的共享容量池、预留和 provider 回执；回执不证明工具已执行 |
+| `POST /v1/routing/action` | worker 当前 task/Leader 绑定的原子证据快照、不可变提议和真实原执行身份关联；不评分或执行 |
+| `GET /v1/routing/decisions` | operator/viewer 只读历史；不向模型开放 owner 写权限 |
 | `GET /v1/mesh/hello`, `/v1/mesh/links`, `/v1/mesh/task` | 认证节点、链路与原 sender 的任务结果 |
 | `GET /v1/mesh/capability-export`, `/v1/mesh/capability-projection` | 显式启用的来源目录导出与只读投影；不复制授权/容量 |
 | `POST /v1/mesh/delegate`, `/v1/mesh/send`, `/v1/mesh/report` | 活任务租约下远端子任务、原子防重接收、仅证据报告 |

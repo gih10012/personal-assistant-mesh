@@ -295,37 +295,47 @@ class Projection:
             raise ValueError('invalid_projection_limit')
         with self.store.transaction() as db:
             now = _time(self.store.clock())
-            query = '''SELECT p.*,s.connected,s.contact_deadline FROM federation_projection_capabilities p
-                JOIN federation_projection_sources s ON s.issuer=p.issuer'''
-            values = []
-            if issuer is not None:
-                query += ' WHERE p.issuer=?'
-                values.append(issuer)
-            candidates = []
-            # Filter before LIMIT so stale announcements cannot starve the live
-            # candidates. No JSON SQLite extension is required on older hosts.
-            for row in db.execute(query + ' ORDER BY p.issuer,p.id', values):
-                cap = json.loads(row['capability'])
-                if kind is not None and cap['kind'] != kind:
-                    continue
-                connected = bool(row['connected'] and row['contact_deadline'] > now)
-                expired = row['local_deadline'] <= now
-                available = connected and not expired and not cap['revoked'] and cap['health'] not in ('unavailable', 'failed')
-                if not include_unavailable and not available:
-                    continue
-                reason = ('revoked' if cap['revoked'] else 'source_disconnected' if not row['connected']
-                          else 'source_stale' if not connected else 'lease_expired_estimate' if expired
-                          else 'source_health_unavailable' if cap['health'] in ('unavailable', 'failed')
-                          else 'delegation_candidate_only')
-                candidates.append(dict(_FLAGS, issuer=row['issuer'], id=row['id'], revision=row['revision'],
-                                       capability=cap, available=available,
-                                       remote_delegation_candidate=available, unavailable_reason=reason,
-                                       received_at=row['received'], local_deadline_estimate=row['local_deadline'],
-                                       remaining_seconds_estimate=max(0, row['local_deadline'] - now),
-                                       freshness_verification='declared_estimate',
-                                       transport_delay_accounted=False, source_clock_verified=False))
-                if len(candidates) >= limit:
-                    break
-            return dict(_FLAGS, capabilities=candidates, as_of=now,
-                        freshness_verification='declared_estimate',
-                        transport_delay_accounted=False, source_clock_verified=False)
+            return self._discover_view(db, now, issuer, kind, include_unavailable, limit)
+
+    @staticmethod
+    def _discover_view(db, now, issuer, kind, include_unavailable, limit):
+        """Pure view for an existing authority transaction and validated filters.
+
+        Does not initialize/import projection, refresh contact, or open another
+        transaction. Used by task-bound routing evidence without copying the
+        projection's availability semantics.
+        """
+        query = '''SELECT p.*,s.connected,s.contact_deadline FROM federation_projection_capabilities p
+            JOIN federation_projection_sources s ON s.issuer=p.issuer'''
+        values = []
+        if issuer is not None:
+            query += ' WHERE p.issuer=?'
+            values.append(issuer)
+        candidates = []
+        # Filter before LIMIT so stale announcements cannot starve live rows.
+        # No JSON SQLite extension is required on older hosts.
+        for row in db.execute(query + ' ORDER BY p.issuer,p.id', values):
+            cap = json.loads(row['capability'])
+            if kind is not None and cap['kind'] != kind:
+                continue
+            connected = bool(row['connected'] and row['contact_deadline'] > now)
+            expired = row['local_deadline'] <= now
+            available = connected and not expired and not cap['revoked'] and cap['health'] not in ('unavailable', 'failed')
+            if not include_unavailable and not available:
+                continue
+            reason = ('revoked' if cap['revoked'] else 'source_disconnected' if not row['connected']
+                      else 'source_stale' if not connected else 'lease_expired_estimate' if expired
+                      else 'source_health_unavailable' if cap['health'] in ('unavailable', 'failed')
+                      else 'delegation_candidate_only')
+            candidates.append(dict(_FLAGS, issuer=row['issuer'], id=row['id'], revision=row['revision'],
+                                   capability=cap, available=available,
+                                   remote_delegation_candidate=available, unavailable_reason=reason,
+                                   received_at=row['received'], local_deadline_estimate=row['local_deadline'],
+                                   remaining_seconds_estimate=max(0, row['local_deadline'] - now),
+                                   freshness_verification='declared_estimate',
+                                   transport_delay_accounted=False, source_clock_verified=False))
+            if len(candidates) >= limit:
+                break
+        return dict(_FLAGS, capabilities=candidates, as_of=now,
+                    freshness_verification='declared_estimate',
+                    transport_delay_accounted=False, source_clock_verified=False)

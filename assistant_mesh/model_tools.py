@@ -24,6 +24,10 @@ TOOLS = [
          '目录、authorize.allowed 或 queued 不等于实际执行完成；'
          'action=federated_capabilities,arguments={issuer,kind,include_unavailable,limit} 查询可选远端能力投影，'
          '是带issuer/revision的声明证据，不导入授权或容量；远端执行仍通过remote_delegate由owner authority核对。'
+         'action=routing_context,arguments={kind,issuer,include_unavailable,limit,observation_max_age_seconds} 读取任务绑定证据快照；无固定排序/评分，不探网或授权。'
+         'route_propose,arguments={decision:{decision_id,work,candidates,selection,rationale,evidence_refs}} 保存不可变提议；refs仍为模型引用，未自动核验。'
+         'route_inspect{decision_id}/route_list{limit}/route_link{decision_id,kind,reference_id}；link的kind为remote_delegation或managed_allocation，'
+         '仅核对实际账本原执行身份，不证明模型选择、计划对齐或业务成功。unknown必须查原ID，不新建ID重做。'
          '没有执行适配器的能力不会通过此入口自动执行。mesh 路线失败不限制 agent 自行使用其他已授权的原生通信路线。',
          {'action': STRING, 'arguments': {'type': 'object', 'additionalProperties': True}}, ['action']),
     tool('mesh_remember', '保存本人偏好或经过验证的工作事实到跨设备持久记忆；不要保存凭据。', {'text': STRING}, ['text']),

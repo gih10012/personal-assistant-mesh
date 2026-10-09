@@ -704,3 +704,58 @@ pending，不因目录升级自动转发。新合同模块已加载且原 native
 实际发生，但没有在所检查 rollout 观察到指令回显或 plan checkpoint，
 不把两者标为独立验收；ChatGPT 3–5 天 schedule 与运行期长期原生 goal
 仍待实际配置/核对。长期 goal 继续 active，下一实现片为 PAM-004a。
+
+### PAM-004a：任务绑定证据与不可变路由决定
+
+2026-10-09，Root 与两个并行 specialist 实现/独立审查 Routing、
+RoutingContext 和 server/worker/model tool/CLI 薄接线。冻结树
+`8956042f6a02ec274cbc7611f253d08fd624665d`，同归档 SHA-256
+`69f22626900aa1b71baec40e2af908e46b278808a621e544d432121c950a0c24`。
+该归档 laptop Python 3.14.7 **1053 项完整通过**（133.606 秒），
+VPS Python 3.6.8 **1053 项完整通过**（132.731 秒），新增 51 项路由
+测试。正式源码的随后差异仅为文档，不以排队/提交替代公开 CI 状态。
+
+提议仅写 route_decisions，不执行/登记/授权/预留；模型对象开放，没有
+固定排序或节点评分器。当前 task/Leader fence 及 peer-bound 身份原子
+核对，同 ID 同内容幂等、异内容拒绝。实际 remote child 或 allocation
+关联须匹配本任务及原 actor，引用不可替换；unknown 不自动重做。模型
+引用仍 unchecked，关联只证明账本身份，不证明真实模型选择、计划匹配
+或业务成功。operator/viewer 才能读任务结束后的历史，不借 node 字段
+为 worker 或 agent_peer 提升角色。
+
+证据视图同一 authority 事务，不调用有审计写入的 authorize。显式公开
+列避免将未来 private 字段带出；单位/scope/workload/source/time/epoch
+保留，严格截止时效和当前 verifier 独立性分列。available 用同一 as_of，
+remote 声明不导入本地池/额度。数量及 2MiB 总字节有界、partial 明示，
+采样 capability IDs 在字节截断后仍可解释保留观测。独立审查实际复现
+并促成修正：pool live helper 返回 None/抛 Conflict 不能用作 bool，及
+父公告被字节截断后观测覆盖范围标签不准确；对应 fixture 回归通过。
+真实私有 token HTTP 覆盖角色、伪造身份、历史查询、原委派关联和
+传输 unknown，无新任务/执行/容量副作用；原生工具接线未拦截。
+
+在现有两端空闲边界保存 config、SQLite 一致 backup 与旧版源码，
+随后只加载代码，不改 server/node/worker/account/网络配置，不开新
+receiver、不重启原反向隧道或购买资源。新历史 API 实际读取成功、
+quick_check 为 ok，五项正式 unit active/NRestarts=0。
+cloud 新工作前受保护账本及 native_sessions 全行指纹一致。
+
+laptop 因暂时 cloud 控制连接断开，按原 Node 机制自动创建本地 episode 3
+self-maintenance task，恢复原自维护 thread；随后
+codex_usage_limit_exceeded，needs_review 且 side_effect_started=true。
+原业务 task/消息/执行/授权/池行不变，但既有自维护 native_sessions
+checkpoint 已更新，并增加新任务/结果行，不能声称全部指纹未变。
+不恢复旧 DB 抹去记录，不切账号/新 ID 重放该未知阶段；保留待核对。
+这证明该范围的本地故障任务触发与原线程连续性，不证明修复成功、
+离线推理或所有模型均不可用。备份与原结果私存 0700/0600，不发布。
+
+原 Leader 的稳定 ID 试用 task 实际 completed，resume 同一原 thread；
+selected-turn native rollout 已读回，包含四次原生 exec 的 routing 接续
+路径。实际 authority 读回同一不可变 proposal/hash 与 context 引用，
+两端历史候选由模型比较后选择 waiting_evidence。所有目录/观测/池和
+执行候选仍为空；模型不认为重复被动采样能补齐 probe/executor，故未
+另建 child，linked_execution=null。这证明本次原生模型使用提议/读回
+入口，不证明实际选出了最佳出口、关联了真实效果或自动核验证据。
+core 的 model_selection_verified/plan_alignment/execution_verified 仍 false。
+原生 plan/长期 goal checkpoint 未观察到，仍待 PAM-007。
+PAM-004b 的真实出口 executor/probe/admission/结果仍未验收，长期 goal
+保持 active。

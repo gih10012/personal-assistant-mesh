@@ -202,6 +202,20 @@ class Worker:
                     or not isinstance(arguments.get('arguments', {}), dict)):
                 return result({'error': 'invalid_mesh_gateway_arguments'}, False)
             action, nested = arguments['action'], arguments.get('arguments', {})
+            routing_actions = {'routing_context': ('context', {'kind', 'issuer', 'include_unavailable', 'limit', 'observation_max_age_seconds'}),
+                               'route_propose': ('propose', {'decision'}), 'route_inspect': ('inspect', {'decision_id'}),
+                               'route_list': ('list', {'limit'}), 'route_link': ('link', {'decision_id', 'kind', 'reference_id'})}
+            if action in routing_actions:
+                route_action, allowed = routing_actions[action]
+                if set(nested) - allowed:
+                    return result({'error': 'routing_arguments_or_runtime_identity_invalid'}, False)
+                payload = {'task_id': self.current['id'], 'epoch': self.current['epoch'],
+                           'action': route_action, 'arguments': nested}
+                try:
+                    output = self.client.request('/v1/routing/action', payload)
+                except (OSError, ValueError) as exc:
+                    return self._mesh_tool_failure(exc, 'routing_authority', True)
+                return result(output)
             if action == 'federated_capabilities':
                 if set(nested) - {'issuer', 'kind', 'include_unavailable', 'limit'}:
                     return result({'error': 'invalid_federated_capabilities_arguments'}, False)
@@ -305,6 +319,18 @@ class Worker:
                        '模型自主选择证据/节点；远端执行仍用 remote_delegate 在资源 owner authority 准入与结算。'
                        '不同 issuer 的同名能力不合并，重联不重放 unknown；连接在线不证明推理/互联网/性能。',
             'managed_invocation_authorized': False}
+        reference['routing'] = {
+            'context': 'mesh(action="routing_context",arguments={kind,issuer,include_unavailable,limit,observation_max_age_seconds})',
+            'propose': 'mesh(action="route_propose",arguments={decision:{decision_id,work,candidates,selection,rationale,evidence_refs}})',
+            'inspect': 'mesh(action="route_inspect",arguments={decision_id})',
+            'list': 'mesh(action="route_list",arguments={limit})',
+            'link': 'mesh(action="route_link",arguments={decision_id,kind,reference_id})',
+            'purpose': '任务绑定的证据快照和不可变模型提议，不是评分器或执行授权。提议写入不会预留容量、批准grant、探测网络或执行。'
+                       '证据摘要仍须核对来源、单位、scope/workload、时效和截断；远端声明不是本地共享容量。'
+                       'link只核对同一任务原actor的实际remote_delegation或managed_allocation身份，不证明模型选择、计划匹配或业务成功。'
+                       'unknown保留原operation/child ID查证，不换节点新ID重放；原生功能不受影响。',
+            'cli_command': 'routing', 'historical_owner_read': 'route-decisions (operator/viewer only)',
+            'model_selection_verified': False, 'managed_invocation_authorized': False}
         # Only fixed host states enter the prompt, never exception messages or
         # private response bodies. This is advisory, not a native-tool gate.
         steering = (self.current or {}).get('checkpoint', {}).get('mesh_steering_status', {})
@@ -333,7 +359,10 @@ class Worker:
                 'resource_usage': '把 arguments JSON 写入 git 仓库之外本人所有的 0600 私有文件；'
                                   '把 resources 换成 resource --action NAME --payload-file /private/args.json。'
                                   '配置/token 保持在受保护文件中，不要读取或输出 token 值。',
-                'allocation_usage': 'allocation --action NAME --payload-file /private/args.json；reserve需当前task_id/task_epoch，优先mesh allocation入口自动绑定。'}
+                'allocation_usage': 'allocation --action NAME --payload-file /private/args.json；reserve需当前task_id/task_epoch，优先mesh allocation入口自动绑定。',
+                'routing_usage': 'routing --task-id CURRENT_TASK --epoch CURRENT_EPOCH --action context/propose/inspect/list/link --payload-file /private/args.json；'
+                                 'worker凭据及当前lease必需，JSON仅arguments。route-decisions --id DECISION或--task-id TASK是operator/viewer只读历史。',
+                'routing_task_binding': {'task_id': self.current['id'], 'epoch': self.current['epoch']} if self.current else None}
             reference['a2a'] = {'fresh_thread_tool': 'mesh(action="remote_delegate",arguments={peer,input,project_id,agent_id})',
                 'legacy_tool': 'mesh_remote_delegate(peer,input,project_id,agent_id)',
                 'payload_shape': {'peer': 'owner-enrolled-peer', 'arguments': {'input': 'model-selected task',

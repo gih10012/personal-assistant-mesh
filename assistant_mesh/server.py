@@ -10,6 +10,8 @@ from .allocations import Allocations
 from .channel import Channel, ILink
 from .config import read_secret
 from .resources import Registry
+from .routing import Routing
+from .routing_context import RoutingContext
 from .networking import Network, digest
 from .remote_notifications import PROTOCOL as NOTIFY_PROTOCOL, RemoteNotifications
 from .store import Conflict, Store
@@ -43,6 +45,9 @@ class API:
         if federation.get('projection_enabled'):
             from .federation_projection import Projection
             self.federation_projection = Projection(self.store)
+        self.routing = Routing(self.store, config['node_id']) if self.network else None
+        self.routing_context = (RoutingContext(self.store, config['node_id'], self.resources,
+            self.allocations, self.federation_projection) if self.network else None)
         self.ilink = None
         account_binding = None
         if config.get('ilink_account') and self.store.notification_policy.get('mode', 'channel') == 'channel':
@@ -74,6 +79,8 @@ class API:
         query = parse_qs(parsed.query, keep_blank_values=True)
         can_discover = role in ('operator', 'viewer') or bool(node)
         mesh_member = role in ('operator', 'viewer') or (role in ('worker', 'agent_peer') and bool(node))
+        if parsed.path in ('/v1/routing/action', '/v1/routing/decisions'):
+            return self.routing_dispatch(method, parsed.path, query, payload, peer)
         if parsed.path in ('/v1/mesh/notify', '/v1/mesh/notify/status'):
             return self.notification_dispatch(method, parsed.path, query, payload, peer)
         if self.network and parsed.path.startswith('/v1/mesh/'):
@@ -151,6 +158,40 @@ class API:
         if method == 'POST' and path == '/v1/budget/reserve' and role == 'operator':
             return self.store.budget_reserve(payload['id'], payload['amount'], self.config.get('budget', {}))
         raise PermissionError('route_not_authorized')
+
+    def routing_dispatch(self, method, path, query, payload, peer):
+        # Only this additional Mesh surface is fenced. Native Shell, networking
+        # and tools do not pass through here. Authority is deployment-bound.
+        if self.routing is None:
+            raise PermissionError('routing_authority_unavailable')
+        if path == '/v1/routing/decisions':
+            if method != 'GET' or peer.get('role') not in ('operator', 'viewer'):
+                raise PermissionError('routing_history_not_authorized')
+            if (payload or set(query) - {'decision_id', 'task_id', 'limit'}
+                    or any(len(values) != 1 for values in query.values())):
+                raise ValueError('invalid_routing_history_query')
+            return self.routing.owner_read(query.get('decision_id', [None])[0],
+                query.get('task_id', [None])[0], int(query.get('limit', ['20'])[0]))
+        if method != 'POST' or peer.get('role') != 'worker' or not peer.get('node'):
+            raise PermissionError('routing_task_not_authorized')
+        if (query or not isinstance(payload, dict) or set(payload) != {'task_id', 'epoch', 'action', 'arguments'}
+                or not isinstance(payload['arguments'], dict)):
+            raise ValueError('invalid_routing_request')
+        methods = {'context': (self.routing_context.read, {'kind', 'issuer', 'include_unavailable', 'limit', 'observation_max_age_seconds'}),
+                   'propose': (self.routing.propose, {'decision'}),
+                   'inspect': (self.routing.inspect, {'decision_id'}),
+                   'list': (self.routing.list, {'limit'}),
+                   'link': (self.routing.link, {'decision_id', 'kind', 'reference_id'})}
+        action = payload['action']
+        if not isinstance(action, str) or action not in methods:
+            raise ValueError('unknown_routing_action')
+        function, fields = methods[action]
+        args = payload['arguments']
+        required = {'propose': {'decision'}, 'inspect': {'decision_id'},
+                    'link': {'decision_id', 'kind', 'reference_id'}}.get(action, set())
+        if set(args) - fields or not required <= set(args):
+            raise ValueError('invalid_routing_arguments')
+        return function(payload['task_id'], peer['node'], payload['epoch'], **args)
 
     def notification_dispatch(self, method, path, query, payload, peer):
         # Deployment credentials bind both source identity and this one finite
