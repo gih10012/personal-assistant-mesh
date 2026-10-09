@@ -460,3 +460,74 @@ Unix socket 的认证 hello 实际返回 laptop/laptop、mesh-a2a/1。
 后续须显式区分私有工作/audit 与本人通知、按凭据权限选择投递路径，
 保留 source-node/原 outbox ID/内容指纹并查询云端状态；历史 8 条不能
 自动批量重投或另开接收器。原生通信工具仍不受这个 Mesh 缺口限制。
+
+### `51c2f21` 节点向绑定本人的通知回传
+
+2026-10-09，新增可选的 `mesh-notify/1` 文字入口与独立节点 relay
+线程。显式通知与自动任务结果分开；private 节点的自动结果仅本机
+记录，历史 outbox 不自动 enrollment。云端已有 laptop `agent_peer`
+以及本机 worker 明确增加 `owner.notify`；没有授予 operator 身份或
+选择收件人的能力，没有启动第二个 iLink receiver。
+
+冻结树为 `0c54749971cb4dd1f76cec557e21aa39c93b0a11`，随后发布为
+`51c2f21cf0ce28642510612a23873528e0d32eb6`。同一源码归档的 SHA-256：
+`338d624bd54e08ed621f682c3feee3667967b0b351c03aa240cbc86ee1c6c8da`。
+本机 Python 3.14.7 实际通过 **843 项**完整测试（101.643 秒），VPS
+Python 3.6.8 也实际通过 **843 项**（107.590 秒）。公开
+[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37871322088)
+的 Python 3.8、3.12、3.14 全部 success；不因此改变 package 原有
+Python >= 3.8 的安装要求。
+
+新增测试包括 authenticated loopback HTTP、同 ID 并发原子去重、
+真实子进程在云端入账后退出及冷恢复、私有跨进程 flock、损坏回执、
+权限撤销、旧记录保守迁移、挂住的通知不阻断 Node.step、令牌轮换
+不改变固定目标，以及停止发生在提交意图落盘后的保守隔离。
+
+交叉复核找到并实测修复了两类边界：查询后换账号的 TOCTOU 必须
+在实际 POST 入队前再次检查 route_id；同账号换空账本也必须改变
+持久接收实例标识。仅靠实例标识仍不能检测同实例旧快照回滚，因此
+本机在 POST 前同事务持久化 `post_attempted=1`，后续回执消失时
+只查询、不自动重新入队。真实 HTTP/SQLite 旧快照恢复回归、提交
+在到达云端前断开的回归均验证这种保守行为；尚未尝试 POST 的通知
+仍可在查询网络恢复后首次提交。
+
+这不是一般性微信快照反回滚保证：若直接恢复实际发送前的旧
+`channel/pending` 行并盲启发送器，或者本机 intent 也一起回滚/丢失，
+仍需独立核对和隔离。没有自动清库、恢复生产快照或解除 unknown。
+完整规则见 [通知合同](OWNER-NOTIFICATIONS.md)。
+
+两端先 dry-run，再在 running task/submitting outbox 均为 0 的空闲
+边界做受控升级。私有一致 SQLite 备份为：
+
+- VPS：`~/.local/state/personal-assistant-mesh/backup-51c2f21-20261009T014700Z/ledger.sqlite`。
+- 本机：`~/.local/state/personal-assistant-node/backup-51c2f21-20261009T014800Z/ledger.sqlite`。
+
+备份目录 0700、数据库 0600；云端旧完整源码保留为
+`~/.local/share/personal-assistant-mesh.before-51c2f21`，配置更新各自
+保留旧私有配置。两端按备份所有原 task/outbox 列逐项比较，缺失或
+改写数都为 **0**。当时云端 23 completed/5 failed、49 accepted；
+本机 5 completed、原有 8 pending/channel 均保留，不自动转成 relay。
+
+VPS authority/worker/companion 和本机 node/worker 都 active，
+NRestarts=0；本机原 reverse tunnel PID 1642 未重启。两端 loopback
+healthz 都 ok；cloud 经原私有 Unix socket 的认证 hello 实际返回
+laptop/laptop、mesh-a2a/1。本机 peer 对云端通知 status 的认证查询
+实际返回 mesh-notify/1、cloud/laptop、not_found、idempotent_receive
+true；只读 readiness 查询没有创建远端通知或回执。
+
+随后只发了一条已授权的本人进展通知，稳定请求 ID 为
+`mesh-owner-relay-51c2f21-20261009`。路径是本机 owner notify 入队 →
+独立 relay → 云端 credential-bound 原子接收 → 原有唯一微信通道。
+本机持久 relay 最终 accepted，attempt=2（首次提交/后续查询，
+不是两次微信发送）、post_attempted=1、error=null；云端该来源/ID
+只有 **1 条**回执，通道 accepted、context retry_count=0，累计
+accepted 变为 50。历史 8 条本机 pending 仍保留，没有批量补发。
+
+本次实际验证到微信协议服务端接受为止，所有回执仍
+`delivery_verified=false`；没有手机收件或单次显示证明，没有追加
+桌面历史/通话/媒体验收。未请求新 API key、付费资源或模型推理，
+未改全局代理、桌面/PIN、原生工具权限或连续原生会话。
+
+本机 relay 使用独立持久状态，底层 outbox 行不借用微信 sender 的
+状态更新；应通过 notify/status 查看其 accepted 回执，不能把原始
+outbox 的 pending 合计当作未送达证明。idle 也不表示云端通道健康。
