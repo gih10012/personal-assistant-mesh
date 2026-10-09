@@ -757,5 +757,11 @@ selected-turn native rollout 已读回，包含四次原生 exec 的 routing 接
 入口，不证明实际选出了最佳出口、关联了真实效果或自动核验证据。
 core 的 model_selection_verified/plan_alignment/execution_verified 仍 false。
 原生 plan/长期 goal checkpoint 未观察到，仍待 PAM-007。
+公开代码提交 `796a1b3689686c9a591f9c8bf9ed3e548a2bd320` 的
+[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37936925489)
+已实际 completed/success；Python 3.8/3.12/3.14 三项测试步骤成功。
+该提交与两端冻结归档只差 README/四份文档，功能代码完全一致。
+原 Leader 本次结果沿唯一本人通道提交一次并 accepted，不证明手机
+已收到；不另补发或新 ID 重试旧通知。
 PAM-004b 的真实出口 executor/probe/admission/结果仍未验收，长期 goal
 保持 active。
