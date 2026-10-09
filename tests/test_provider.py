@@ -2,19 +2,42 @@
 import copy
 import hashlib
 import json
+import multiprocessing
 import os
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 import unittest
 from contextlib import closing, contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from assistant_mesh.provider import Adapter, ManagedProvider
 from assistant_mesh.server import API, serve
 from assistant_mesh.worker import Client
+
+
+def initialize_provider_journal(path, index, rounds=2):
+    """Independent connections to one private journal; no authority or callback."""
+    for _ in range(rounds):
+        provider = ManagedProvider(None, path, 'node:fixture', {}, 'fixture-authority')
+        with provider._db() as db:
+            db.execute('INSERT OR IGNORE INTO provider_executions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                       ('constructor-' + str(index), 'fixture-capability', 'receipt-' + str(index),
+                        'fixture-fingerprint', '{}', 'prepared', None, None, None, None, 1000.0, 1000.0))
+
+
+def process_initialize_provider(path, index, barrier, results):
+    try:
+        barrier.wait(timeout=15)
+        initialize_provider_journal(path, index)
+        results.put((index, None))
+    except BaseException:
+        results.put((index, traceback.format_exc()))
 
 
 class BoundClient:
@@ -610,6 +633,228 @@ provider.run_pending()
             self.assertFalse(result['local_adapter_result_recorded'])
             self.assertEqual([], self.invocations)
             self.assertEqual(1, self.remaining())
+
+
+class ProviderInitializationTests(unittest.TestCase):
+    """Actual private SQLite constructors, not remote execution acceptance."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='mesh-provider-start.')
+        self.root = Path(self.temp.name)
+        self.journal = self.root / 'provider.db'
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def provider(self):
+        return ManagedProvider(None, self.journal, 'node:fixture', {}, 'fixture-authority')
+
+    @contextmanager
+    def fail_statement(self, target, message='fixture_setup_failure'):
+        original_connect = sqlite3.connect
+        connections, statements = [], []
+
+        class FailingConnection(sqlite3.Connection):
+            def __setattr__(db, name, value):
+                if target == 'ROW_FACTORY' and name == 'row_factory':
+                    raise sqlite3.OperationalError(message)
+                sqlite3.Connection.__setattr__(db, name, value)
+
+            def execute(db, sql, *args, **kwargs):
+                statements.append(sql)
+                if sql == target:
+                    raise sqlite3.OperationalError(message)
+                return sqlite3.Connection.execute(db, sql, *args, **kwargs)
+
+        def connect(*args, **kwargs):
+            self.assertEqual(5, kwargs['timeout'])
+            kwargs['factory'] = FailingConnection
+            db = original_connect(*args, **kwargs)
+            connections.append(db)
+            return db
+
+        with patch('assistant_mesh.provider.sqlite3.connect', side_effect=connect):
+            yield connections, statements
+
+    def assert_closed(self, connections):
+        self.assertTrue(connections)
+        for db in connections:
+            with self.assertRaisesRegex(sqlite3.ProgrammingError, 'closed'):
+                db.execute('SELECT 1')
+
+    def snapshot(self):
+        with closing(sqlite3.connect(str(self.journal))) as db:
+            return (list(db.execute("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")),
+                    list(db.execute('SELECT * FROM provider_metadata ORDER BY key')),
+                    list(db.execute('SELECT * FROM provider_executions ORDER BY operation_id,capability_id')))
+
+    def test_setup_failures_close_real_connection_before_yield(self):
+        provider = self.provider()
+        before = self.snapshot()
+        for statement in ('ROW_FACTORY', 'PRAGMA busy_timeout=0', 'PRAGMA journal_mode=WAL',
+                          'PRAGMA busy_timeout=5000', 'PRAGMA synchronous=FULL', 'BEGIN IMMEDIATE'):
+            with self.subTest(statement=statement), self.fail_statement(statement) as (connections, statements):
+                with patch('assistant_mesh.provider.time.sleep') as sleep:
+                    with self.assertRaisesRegex(sqlite3.OperationalError, '^fixture_setup_failure$'):
+                        with provider._db():
+                            self.fail('failed setup must not yield a transaction')
+                    sleep.assert_not_called()
+            self.assert_closed(connections)
+            self.assertEqual(before, self.snapshot())
+
+    def test_wal_lock_retry_has_single_five_second_budget_and_closes(self):
+        provider = self.provider()
+        before = self.snapshot()
+        readings, sleeps = iter((0.0, 0.0, 4.98, 5.0)), []
+        clock = SimpleNamespace(monotonic=lambda: next(readings), sleep=sleeps.append)
+        with self.fail_statement('PRAGMA journal_mode=WAL', 'database is locked') as (connections, statements):
+            with patch('assistant_mesh.provider.time', clock):
+                with self.assertRaisesRegex(sqlite3.OperationalError, '^database is locked$'):
+                    with provider._db():
+                        self.fail('expired setup must not yield a transaction')
+        self.assertEqual(3, statements.count('PRAGMA journal_mode=WAL'))
+        self.assertEqual(1, statements.count('PRAGMA busy_timeout=0'))
+        self.assertNotIn('PRAGMA busy_timeout=5000', statements)
+        self.assertNotIn('BEGIN IMMEDIATE', statements)
+        self.assertEqual(2, len(sleeps))
+        self.assertEqual(0.05, sleeps[0])
+        self.assertAlmostEqual(0.02, sleeps[1])
+        self.assert_closed(connections)
+        self.assertEqual(before, self.snapshot())
+
+    def test_transient_wal_lock_retries_only_setup_and_restores_busy_wait(self):
+        provider = self.provider()
+        original_connect = sqlite3.connect
+        attempts, connections, bodies = [], [], []
+
+        class TransientConnection(sqlite3.Connection):
+            def execute(db, sql, *args, **kwargs):
+                if sql == 'PRAGMA journal_mode=WAL':
+                    attempts.append(sql)
+                    if len(attempts) <= 2:
+                        raise sqlite3.OperationalError(('database is locked', 'database is busy')[len(attempts) - 1])
+                return sqlite3.Connection.execute(db, sql, *args, **kwargs)
+
+        def connect(*args, **kwargs):
+            kwargs['factory'] = TransientConnection
+            db = original_connect(*args, **kwargs)
+            connections.append(db)
+            return db
+
+        with patch('assistant_mesh.provider.sqlite3.connect', side_effect=connect):
+            with patch('assistant_mesh.provider.time.sleep') as sleep:
+                with provider._db() as db:
+                    bodies.append('one-business-transaction')
+                    self.assertEqual(5000, db.execute('PRAGMA busy_timeout').fetchone()[0])
+                    self.assertEqual(2, db.execute('PRAGMA synchronous').fetchone()[0])
+                    db.execute('CREATE TABLE business(id INTEGER PRIMARY KEY)')
+                    db.execute('INSERT INTO business VALUES(1)')
+        self.assertEqual(3, len(attempts))
+        self.assertEqual(2, sleep.call_count)
+        self.assertEqual(['one-business-transaction'], bodies)
+        self.assert_closed(connections)
+        with closing(sqlite3.connect(str(self.journal))) as db:
+            self.assertEqual([(1,)], list(db.execute('SELECT * FROM business')))
+
+    def test_begin_and_business_lock_errors_never_replay_caller_writes(self):
+        provider = self.provider()
+        before = self.snapshot()
+        for statement in ('BEGIN IMMEDIATE', 'INSERT INTO partial_business VALUES(1)'):
+            bodies = []
+            with self.subTest(statement=statement), self.fail_statement(statement, 'database is locked') as (connections, statements):
+                with patch('assistant_mesh.provider.time.sleep') as sleep:
+                    with self.assertRaisesRegex(sqlite3.OperationalError, '^database is locked$'):
+                        with provider._db() as db:
+                            bodies.append('one-business-transaction')
+                            db.execute('CREATE TABLE partial_business(id INTEGER)')
+                            db.execute('INSERT INTO partial_business VALUES(1)')
+                    sleep.assert_not_called()
+            self.assertEqual([] if statement == 'BEGIN IMMEDIATE' else ['one-business-transaction'], bodies)
+            self.assertEqual(1, statements.count(statement))
+            self.assert_closed(connections)
+            self.assertEqual(before, self.snapshot())
+
+    def test_namespace_and_schema_are_validated_before_wal_conversion(self):
+        self.provider()
+        with closing(sqlite3.connect(str(self.journal))) as db:
+            self.assertEqual('delete', db.execute('PRAGMA journal_mode=DELETE').fetchone()[0])
+        before = self.snapshot()
+        for provider, authority in (('node:other', 'fixture-authority'), ('node:fixture', 'other-authority')):
+            with self.subTest(provider=provider, authority=authority):
+                with self.fail_statement('PRAGMA journal_mode=WAL', 'WAL must not be reached') as (connections, statements):
+                    with self.assertRaisesRegex(ValueError, '^provider_journal_identity_or_schema_mismatch$'):
+                        ManagedProvider(None, self.journal, provider, {}, authority)
+                self.assertNotIn('PRAGMA journal_mode=WAL', statements)
+                self.assert_closed(connections)
+                self.assertEqual(before, self.snapshot())
+                with closing(sqlite3.connect(str(self.journal))) as db:
+                    self.assertEqual('delete', db.execute('PRAGMA journal_mode').fetchone()[0])
+        with closing(sqlite3.connect(str(self.journal))) as db:
+            db.execute("UPDATE provider_metadata SET value='99' WHERE key='schema'")
+            db.commit()
+        before = self.snapshot()
+        with self.fail_statement('PRAGMA journal_mode=WAL', 'WAL must not be reached') as (connections, statements):
+            with self.assertRaisesRegex(ValueError, '^provider_journal_identity_or_schema_mismatch$'):
+                self.provider()
+        self.assertNotIn('PRAGMA journal_mode=WAL', statements)
+        self.assert_closed(connections)
+        self.assertEqual(before, self.snapshot())
+        with closing(sqlite3.connect(str(self.journal))) as db:
+            self.assertEqual('delete', db.execute('PRAGMA journal_mode').fetchone()[0])
+
+    def assert_complete_journal(self, count):
+        with closing(sqlite3.connect(str(self.journal))) as db:
+            self.assertEqual({'schema': '1', 'provider': 'node:fixture', 'authority': 'fixture-authority'},
+                             dict(db.execute('SELECT key,value FROM provider_metadata')))
+            self.assertEqual(count, db.execute('SELECT COUNT(*) FROM provider_executions').fetchone()[0])
+            self.assertEqual([('prepared',)], list(db.execute('SELECT DISTINCT state FROM provider_executions')))
+            self.assertEqual('wal', db.execute('PRAGMA journal_mode').fetchone()[0])
+            self.assertEqual('ok', db.execute('PRAGMA integrity_check').fetchone()[0])
+        self.assertEqual(0o600, self.journal.stat().st_mode & 0o777)
+
+    def test_threads_concurrently_initialize_same_cold_private_journal(self):
+        count, failures, lock = 8, [], threading.Lock()
+        barrier = threading.Barrier(count)
+
+        def initialize(index):
+            try:
+                barrier.wait(timeout=15)
+                initialize_provider_journal(str(self.journal), index)
+            except BaseException:
+                with lock:
+                    failures.append(traceback.format_exc())
+
+        threads = [threading.Thread(target=initialize, args=(index,)) for index in range(count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(20)
+        self.assertTrue(all(not thread.is_alive() for thread in threads), 'constructor thread did not finish')
+        self.assertEqual([], failures)
+        self.assert_complete_journal(count)
+
+    def test_spawned_processes_concurrently_initialize_same_cold_private_journal(self):
+        count = 6
+        context = multiprocessing.get_context('spawn')
+        barrier, results = context.Barrier(count), context.Queue()
+        processes = [context.Process(target=process_initialize_provider,
+                     args=(str(self.journal), index, barrier, results)) for index in range(count)]
+        try:
+            for process in processes:
+                process.start()
+            observations = [results.get(timeout=20) for _ in processes]
+            self.assertEqual([], [observation for observation in observations if observation[1] is not None])
+            for process in processes:
+                process.join(10)
+                self.assertFalse(process.is_alive(), 'constructor process did not finish')
+                self.assertEqual(0, process.exitcode)
+        finally:
+            for process in processes:
+                if process.is_alive():
+                    process.terminate()
+                process.join(5)
+            results.close()
+            results.join_thread()
+        self.assert_complete_journal(count)
 
 
 if __name__ == '__main__':

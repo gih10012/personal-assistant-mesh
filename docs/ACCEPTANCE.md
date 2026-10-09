@@ -361,3 +361,10 @@ socket 超时抢先于整体截止检查，误报为 transport failure；两台�
 通过不能替代这个检查。后续修复只在真实 timeout 且整体 deadline
 已过时改报 deadline，其他网络/HTTP 错误保留原分类，并补确定性测试；
 修复的整套回归和新 CI 还须单独验收。
+
+`7e4a022` 后续冻结归档在本机 Python 3.14.7 与云端 Python 3.6.8
+分别通过 664 项完整测试；修复后的
+[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37862375692)
+在 Python 3.8、3.12、3.14 三个 job 均实际 success。新增 5 项确定性
+回归覆盖 open/read 的真实 timeout、URLError 包装、截止前超时、
+连接重置/普通 OSError 和 HTTP503；checkpoint 与既有输出保护未放宽。

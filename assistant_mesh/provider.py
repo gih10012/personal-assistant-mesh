@@ -141,10 +141,27 @@ class ManagedProvider:
     def _db(self, initialize=False):
         _checked_path(self.path)
         db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-        db.row_factory = sqlite3.Row
         try:
+            db.row_factory = sqlite3.Row
             if not initialize:
-                db.execute('PRAGMA journal_mode=WAL')
+                # Namespace/schema validation above must happen before any WAL
+                # conversion. Concurrent validated constructors can then race
+                # on that conversion, where SQLite may skip its busy handler.
+                # Own one five-second setup budget rather than stacking the
+                # connection's five-second busy wait on every retry. Retry
+                # ONLY this setup statement, never BEGIN or a caller's writes.
+                db.execute('PRAGMA busy_timeout=0')
+                expires = time.monotonic() + 5
+                while True:
+                    try:
+                        db.execute('PRAGMA journal_mode=WAL')
+                        break
+                    except sqlite3.OperationalError as error:
+                        remaining = expires - time.monotonic()
+                        if str(error) not in ('database is locked', 'database is busy') or remaining <= 0:
+                            raise
+                        time.sleep(min(0.05, remaining))
+                db.execute('PRAGMA busy_timeout=5000')
             db.execute('PRAGMA synchronous=FULL')
             _checked_path(self.path)
             db.execute('BEGIN IMMEDIATE')

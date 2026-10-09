@@ -54,6 +54,30 @@ provider.run_pending()
 
 callback 必须自行实现有界执行，并返回实际 result_reference 与 resource_quiescent；异常、超时或 PID 消失都不能代替它。`local_invocation_intent_recorded` 与 `local_invocation_started` 分开，未知 intent 不假报已调用。所有结果仍标 `provider_reported`，独立验证为 false。
 
+首次并发开库只有 WAL 设置的精确 locked/busy 错误可在五秒总预算内
+重试；身份/schema 仍先验证，BEGIN、业务写入和 callback 都不重试。
+这项可用性处理不把未知效果改为“没有执行”。
+
+## 隔离实际执行验收
+
+`scripts.probe_provider_execution` 是 owner 显式分阶段运行的验收器，
+不启动模型、服务或 SSH。先在本人已有 0700 `/var/tmp` 根中 `prepare`，
+将同一 bundle 放到两端同一绝对路径，但 **owner-reference.json 只留
+owner 端**。随后 owner 显式启动无 iLink 的独立 authority，执行
+`submit`，由原 requester credential heartbeat/claim 唯一固定父任务，
+再按真实 task/Leader epoch `reserve`，在 provider 宿主 `execute`。
+
+默认 `observe --root PRIVATE_ROOT` 只读 API 与闭合 provider journal，
+核对实际 SHA、原 operation/receipt、结算和容量释放；不构造 bridge，
+不创建 state/journal，不补 SHM。SQLite reader 须 >= 3.22；旧节点可以
+execute，闭合 journal 可复制到新版节点验收。`reconcile` 必须显式使用
+原 ID，仅重报已保存结果，不再调用 callback。超时不换 ID；丢失 state
+也不能当作没执行。持久记录和完整 SQLite 文件应另作私有备份。
+
+这里独立观察的只是实际 64-byte 输入与结果参考，不是延迟、吞吐、
+CPU/GPU 强制配额或全网最佳调度。单 slot pool 是 owner 的逻辑 admission
+合同，不是机器级资源限制；该验收也不证明模型自主选择/安装了工具。
+
 ## 必须继续实现和验收
 
 这是一项宿主库，还未默认接入 Node 常驻自动执行，也没有自动创建原账本子任务或执行未批准的模型命令。下一段必须接通各节点实际安装/版本升级、真正能力执行和独立结果验证、进程/产出核对，以及组合路径的逐跳失败恢复。请求超时不证明未执行，不能换 operation ID 重做。
