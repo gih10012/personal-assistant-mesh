@@ -13,12 +13,37 @@
     "vps_python36_full_suite_tests_passed": 1508,
     "vps_python36_full_suite_duration_seconds": 142.894,
     "actual_opt_in_idle_verified": false,
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38038660385",
+    "ci_verified_success": true,
     "actual_idle_failure": "pre-start global notification matched unknown thread and read uninitialized drain trackers; no model/thread/goal calls",
     "production_deployed": false,
     "original_unknown_replayed": false,
-    "correction_state": "source fixed; separate frozen two-host and opt-in idle verification pending"
+    "correction_state": "superseded by separately frozen 58fac34 two-host 1510/CI and opt-in idle verification; original failed attempt retained"
   },
   "latest_source_release": {
+    "phase": "PAM-007c-2 opt-in admitted drain and optional frozen-session upload; validated source candidate, not production",
+    "code_commit": "58fac34ebb2622eda0df6bf632d9d53a7c919972",
+    "archive_sha256": "b8a6ef446b5e7255fc3a1be17c3585e9dceb89da4f4188cf7e9a3443834d0c0c",
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38038923724",
+    "ci_verified_success": true,
+    "source_public": true,
+    "local_full_suite_tests_passed": 1510,
+    "local_full_suite_duration_seconds": 138.158,
+    "vps_python36_full_suite_tests_passed": 1510,
+    "vps_python36_full_suite_duration_seconds": 142.777,
+    "actual_opt_in_idle_verified": true,
+    "actual_idle_probe_versions": {"local": "0.162.0", "vps": "0.159.2"},
+    "actual_idle_probe_scope": "same frozen source with native_goal_drain true: owned-peer initialize, loaded list empty, exit 0 and reader reaped; no model/thread/goal calls, no forced cleanup; this is not active drain execution",
+    "active_drain_model_execution_verified": false,
+    "independent_yielded_seal_implemented": false,
+    "strict_fingerprint_upload_default_enabled": false,
+    "native_goal_drain_default_enabled": false,
+    "production_core_loaded": false,
+    "production_runtime_and_configuration_changed": false,
+    "original_unknown_replayed": false,
+    "active_goal_cooperative_yield_verified": false
+  },
+  "previous_alias_source_release": {
     "phase": "PAM-007c official Unix alias and owned peer adaptation; validated candidate, not production",
     "code_commit": "ee6f924c3d74346683f9750caee7ef06586606c7",
     "archive_sha256": "8fd8b9ab04d4e54e0009e6dc542e6d07d822870687ce21be02623f21d45b07f4",
@@ -555,7 +580,7 @@
       "state": "in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "ee6f924同一冻结版本两端1449项/CI与0.162、0.159.2零模型owned-peer连接/自然退出已验收，候选未部署。接PAM-007c-2 admission drain/event pump、007c-3独立yielded seal、007c-4原task/原goal父子续接及原生历史checkpoint；私有原resume unknown不重放。正式仍3198c87；Chat/Cloud/剩余入口隔离及3–5天schedule单列",
+      "next_action": "58fac34冻结两端1510项/CI及opt-in零模型owned-peer idle已验收，默认禁用且未部署。007c-2只记录drained_unverified/保留guard；接007c-3独立goal/history yielded seal，再以新受控canary实际验drain/原task父子往返。私有原resume unknown不重放。正式仍3198c87；Chat/Cloud/剩余入口隔离及3–5天schedule单列",
       "evidence": {
         "coordination_tasks_created": true,
         "plan": "docs/PLAN.md",
@@ -668,10 +693,10 @@
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
         {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "handoff_prerequisites_source_implemented_yield_incomplete",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "007c-1源码ee6f924冻结两端1449项/CI与0.162/0.159.2零模型idle实际通过；下一步007c-2 drain event pump和007c-3独立yielded seal，再007c-4原父task/原thread/原goal等待唤醒roundtrip。私有原resume unknown不重放，生产lease/children交接未验收",
+         "next_action": "007c-2源码58fac34两端1510项/CI及opt-in零模型idle通过，候选未部署，原guard与unknown保留。继续007c-3独立yielded seal，然后新受控canary实际drain和007c-4原父task/thread/goal等待唤醒roundtrip；不重放私有unknown，不冒称生产lease/children交接已验收",
          "implementation_slices": [
            {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
-           {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "source_implemented_offline_verified_pending_corrected_frozen_two_host_suite", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "默认false、Unix owned-peer opt-in已实现；23 drain与6 Worker新fixture通过，原生近邻238通过，保持drained_unverified/false settled与原guard。e229651两端1508项通过但实机opt-in idle失败已保留；修正后的同一冻结源码做两端完整回归和CI/idle。active模型实测另验，不借旧私有probe；之后007c-3独立seal"},
+           {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "source_candidate_two_host_ci_idle_verified_active_drain_unverified", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "58fac34同一冻结源码两端1510项/CI与opt-in零模型idle已核验，默认false、未部署；23 drain与6 Worker新fixture保留drained_unverified/false settled/原guard。原e229651实机失败保留。接007c-3独立seal后以新受控canary验真实active drain，不借旧私有probe、未知原trial不重放"},
            {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "planned_with_optional_frozen_file_upload_prerequisite", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "sessions.save可选expected_fingerprint严格三阶段同FD与实际压缩字节校验已实现，33新fixture通过，默认未启用；这不制造goal/history证据。接独立observer核对同goal/连续用量、closed turns与稳定原生历史，outcome yielded独立于terminal seal，证据+artifact commit齐全后才清guard"},
            {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "先受控specialist合同实测，再原Leader正式启用；按原task/thread/goal/counters续接，最后child唤醒原task；未知原trial不重放、不用新ID伪称修复"}
          ]},
@@ -701,7 +726,7 @@
     }
   ],
   "current_work": {
-    "phase": "PAM-007c-1 ee6f924 frozen two-host 1449/CI and actual idle 0.162/0.159.2 verified, not production; next 007c-2 drain, 007c-3 yielded seal, 007c-4 original task/goal child roundtrip; original unknown retained; Chat/Cloud remains separate",
+    "phase": "PAM-007c-2 58fac34 frozen two-host 1510/CI and opt-in zero-model idle 0.162/0.159.2 verified; source candidate only, default disabled; next 007c-3 independent goal/history seal, then active drain canary and 007c-4 original task/goal child roundtrip; original unknown retained; Chat/Cloud still not joined",
     "whole_goal_completed": false
   }
 }

@@ -290,13 +290,16 @@ Unix peer、先 gate/持久原 epoch intent ACK、一次 owned PID TERM、
 23 drain 与 6 Worker 新 fixture、原生近邻238项通过；新 adapter 的
 active 模型实测和独立 yielded seal 尚未验收，正式配置未启用。
 `PAM-007c-3` 的可选 frozen-file upload 前置亦已实现（33新fixture），
-默认保存行为不变；不把文件 SHA 当作原生 goal 迁移证明。下一步先
-冻结同一版本做两端完整回归/发布，再接独立 goal/history observer。
+默认保存行为不变；不把文件 SHA 当作原生 goal 迁移证明。
 首版 e229651 两端1508项通过但 opt-in idle 实机失败，不列成功；
-pre-start 全局通知/tracker 修正后的冻结回归与实机验收另外记录。
-下一切片按固定 task ID 推进：`007c-2` 一次持久 TERM intent + admitted
-drain event pump（持续 lease/tick，当前 turn 内收到 wait 就停止新 admission，
-不以阻塞 close/强杀冒充排空）；`007c-3` 自然回收后的独立同 goal/用量/
+pre-start 全局通知/tracker 修正后的冻结 `58fac34` 已在本机/VPS
+Python3.6.8各通过1510项（138.158s/142.777s），公共 CI38038923724
+实际success；同一源码 opt-in idle 在native0.162/0.159.2实际
+owned-peer initialize、loaded list空、自然0及reader回收，无强杀。
+候选未部署、drain默认false、严格fingerprint默认None；正式核心
+PID/NRestarts/原codex.py哈希保持3198c87。新 adapter 未启动模型或
+active goal，不能把此验收当真实active drain或父子交接已完成。
+下一切片按固定 task ID 推进：`007c-3` 自然回收后的独立同 goal/用量/
 turns/历史核验与独立 yielded seal；`007c-4` 原父 task 等待/唤醒、新 epoch
 同 thread/goal 输入真实往返。未核验不能清 guard，stdio 仍明确未支持。
 详见 [输入与归属前置合同](NATIVE-INPUT-HANDOFF.md)。

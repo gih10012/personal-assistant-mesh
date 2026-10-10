@@ -113,6 +113,8 @@ gate，再强制 tick 持久原 task/epoch/runtime 的 TERM intent，成功 ACK
 之后才一次 PID-only TERM。Codex RPC 与 Worker optional steer 双侧
 停止本轮控制器主动追加工作；heartbeat/lease fence 和已 admitted host
 响应仍继续。这不是限制任何节点原生功能的全局白名单。
+信号与 admission 的适配依据已核对的
+[官方 SIGTERM/drain 实现](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server/src/lib.rs#L200)。
 
 独立 drain pump 先消费 deferred，再读 raw queue，每次短等待后 tick；
 不能直接复用 `event()` 先执行 host callback 的路径。先验证 request
@@ -147,8 +149,11 @@ guard。33 项新 fixture 通过；并非原生 goal/history 独立 seal，不
 本线程并访问未初始化 tracker。失败证据保留，不能作实机成功证明。
 现已在 constructor 初始化 trackers，并在任何 thread 尚未知时忽略
 全局/异线程通知；pre-start host 请求仍以固定 unknown 拒绝，不执行
-回调。修正后工作树的零模型连接/loaded list空/自然0/reap通过，
-最终冻结版本的两端完整回归及实机证据需单独记录。
+回调。最终冻结 `58fac34` 本机/VPS Python3.6.8各1510项完整通过
+（138.158s/142.777s），[公共CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38038923724)
+实际success；同版本 opt-in idle 在native0.162/0.159.2均initialize、
+loaded list空、自然0/reader回收，无强杀。没有start/resume/model/goal
+写入；正式核心代码/PID保持3198c87，没有部署或启用候选。
 
 `PAM-007c-3`：新增独立 yielded seal，不放宽 terminal seal。原运行器
 回收后，新 observer 只 initialize/read goal/read thread/loaded list，
