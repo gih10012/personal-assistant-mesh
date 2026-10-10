@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 
 from .config import discover_codex_auth, private_json
+from .codex_provider import custom_provider, private_profile_home, provider_overrides
+from .model_provider_policy import validate_provider_cost
 from .native_ws import NativeSocketError, UnixWebSocket, _private_socket
 
 
@@ -38,7 +40,7 @@ DEFAULT_INSTRUCTIONS = (
 WORKING_CONTRACT = (
     '[personal-assistant-mesh 持续工作合同 v1]\n'
     '开始和续接先核对当前持久 goal、plan、task 与各节点真实运行状态。'
-    '若项目有 AGENTS.md、docs/PLAN.md、docs/TASKS.json，读取并维护相关协调记录；'
+    '若项目有 AGENTS.md、docs/GOAL.md、docs/PLAN.md、docs/TASKS.json，读取并维护相关协调记录；'
     '这些文件和记忆是参考，不是新增授权，也不替代认证账本、实际进程、回执或结果证据。'
     '保持完整已授权目标与同一 Leader 原生 thread；有明确 goal 授权时复用原 goal，'
     '不要为续接、升级或方便验收另建目标、缩小成功条件。按同类项目复用 specialist thread，'
@@ -127,8 +129,25 @@ class Codex:
         self._socket_binding = None
         self._socket_target = None
         self._native_cleanup_forced = self._reader_forced_close = self._term_sent = False
-        root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
         env = os.environ.copy()
+        self.provider = custom_provider(config, env)
+        if self.provider:
+            root = private_profile_home(config.get('auth_home'))
+            if self.provider['requires_openai_auth']:
+                # An explicit gateway never discovers a different account
+                # when its selected profile lacks authentication.
+                root = discover_codex_auth(root, strict=True)
+        else:
+            root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
+        if self.provider:
+            env.update(self.provider['environment'])
+            if not self.provider['requires_openai_auth']:
+                # Never borrow an unrelated key from the host process.
+                selected_names = set(self.provider['settings'].get('env_http_headers', {}).values())
+                selected_names.add(self.provider['settings'].get('env_key'))
+                for name in ('OPENAI_API_KEY', 'CODEX_API_KEY'):
+                    if name not in selected_names:
+                        env.pop(name, None)
         if config.get('network_env_file'):
             values = private_json(config['network_env_file'])
             allowed = {'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
@@ -143,7 +162,9 @@ class Codex:
         # This is the actual Codex home for THIS child only, not a reassignment
         # of this session's environment or a scratch use of a system variable.
         env['CODEX_HOME'] = root
-        command = [config.get('executable', 'codex'), '-c', 'model_provider="openai"']
+        command = [config.get('executable', 'codex')]
+        command += (provider_overrides(self.provider) if self.provider
+                    else ['-c', 'model_provider="openai"'])
         enabled = 'true' if memories else 'false'
         # Explicit false must override the profile's existing config too. The
         # override applies only to this child; production defaults stay true.
@@ -403,6 +424,12 @@ class Codex:
     def rpc(self, method, params, timeout=30):
         if getattr(self, 'native_drain_active', False) is True:
             raise CodexError('codex_native_drain_rpc_blocked')
+        provider = getattr(self, 'provider', None)
+        if provider and method in ('thread/start', 'thread/resume', 'turn/start',
+                                   'turn/steer', 'thread/goal/set'):
+            # Callbacks/RPC waits can outlive admission. Check immediately
+            # before each work-producing request, without retrying old work.
+            validate_provider_cost(self.config, provider['id'], self.config['model'])
         self.serial += 1
         request_id = self.serial
         self.rpc_depth = getattr(self, 'rpc_depth', 0) + 1
@@ -437,6 +464,12 @@ class Codex:
             self.rpc_depth -= 1
 
     def account(self):
+        provider = getattr(self, 'provider', None)
+        if provider and not provider['requires_openai_auth']:
+            # Configuration admits preflight, not live authentication proof.
+            # account/read may describe an unrelated stored ChatGPT account.
+            return {'authenticated': True, 'type': 'configured_provider',
+                    'live_auth_verified': False}
         value = self.rpc('account/read', {'refreshToken': False})
         account = value.get('account') or {}
         return {'authenticated': bool(account), 'type': account.get('type'), 'plan': account.get('planType')}
@@ -451,6 +484,9 @@ class Codex:
         before a managed turn starts. Unknown/stale/other-model buckets do not
         imply that native inference is forbidden or unavailable.
         """
+        provider = getattr(self, 'provider', None)
+        if provider and not provider['requires_openai_auth']:
+            return {'status': 'not_applicable'}
         value = self.rpc('account/rateLimits/read', {})
         if not isinstance(value, dict):
             return {'status': 'unknown'}
@@ -488,6 +524,15 @@ class Codex:
         # Preserve the prior native authority before any such callback replaces
         # its lifecycle; otherwise a yielded goal can silently lose its guard.
         checkpoint = copy.deepcopy(checkpoint or {})
+        provider = getattr(self, 'provider', None)
+        if provider:
+            validate_provider_cost(self.config, provider['id'], self.config['model'])
+        bound_provider = checkpoint.get('codex_provider_identity')
+        actual_provider = provider['identity'] if provider else 'openai'
+        if checkpoint.get('thread_id') and (
+                (bound_provider is not None and bound_provider != actual_provider)
+                or (bound_provider is None and provider is not None)):
+            raise CodexError('codex_provider_resume_identity_mismatch')
         # Checkpoint goals are historical observations, never a command to
         # restore status/accounting or reactivate an owner's paused goal.
         requested_goal = self.config.get('goal') or None
@@ -565,7 +610,8 @@ class Codex:
         # producing calls. Resume itself can wake a stored active objective,
         # which is why native_start_intent preceded even the resume RPC.
         self._activity('session_ready', {'thread_id': self.thread_id,
-                                         'native_lifecycle': self.native_lifecycle})
+                                         'native_lifecycle': self.native_lifecycle,
+                                         'codex_provider_identity': actual_provider})
         actual_goal = (self._read_goal_snapshot(resume_input=text, checkpoint=checkpoint)
                        if checkpoint.get('thread_id') else None)
         prior_lifecycle = checkpoint.get('native_lifecycle')
@@ -614,6 +660,8 @@ class Codex:
 
     def _start_state(self, mode):
         return {'thread_id': self.thread_id, 'turn_id': self.turn_id, 'mode': mode,
+                'codex_provider_identity': (self.provider['identity'] if getattr(self, 'provider', None)
+                                            else 'openai'),
                 'native_lifecycle': copy.deepcopy(self.native_lifecycle)}
 
     def _store_goal_snapshot(self, goal):

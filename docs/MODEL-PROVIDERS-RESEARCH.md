@@ -40,7 +40,12 @@ Completions；`muse-spark-1.3-contributor-free` 列为 Responses，是 Codex
 session 来源，不把模型 alias 当兼容性。未来 Claude 中转看真实
 协议、数据和费用条款，不凭“兼容”宣传。
 
-## 当前源码差距与 PAM-010
+## 初始源码差距与 PAM-010
+
+以下是本次实施前的审计，保留为起点而非最新部署状态。现在已有
+[Codex custom provider](CODEX-PROVIDERS.md)、[Pi 隔离 provider](PI-PROVIDERS.md)
+源码候选与成本声明/续接保护；未部署、未验第三方推理。统一实时
+目录与多候选模型路由仍待 010a，完整工具往返仍待 010d。
 
 - codex.py 写死 model_provider=openai，认证 discovery 只针对 ChatGPT。
 - pi.py 已传 provider/model，缺隔离 agent_dir/endpoint 与真实认证

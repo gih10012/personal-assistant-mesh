@@ -37,7 +37,7 @@ VPS/Leader 工作区。内建 node ID `cloud` 保留且指 Alibaba VPS，展示
 | 持续先进性 | PAM-007 | 原 Leader 同 thread 的真实 native plan 已验收；继续 goal 多 turn 生命周期，再配置 3–5 天检查 | 有实际计划/task/检查记录；新模型/版本的能力与访问实际验证 |
 | 上层项目委派 | PAM-008 | Live、通话、面板及其他应用作为后续 Mesh 项目 | 由 Mesh 自己建 task、分工和集成，不由当前 Root 先包办所有应用 |
 | 沟通入口容灾 | PAM-009 | 当前 VPS 单收发；优先候选承载/私有 checkpoint/受控交接，再故障接管 | 旧 holder 失权、原消息/task/unknown 连续；不启两个重复 poller |
-| 多模型能力 | PAM-010 | Codex/Pi/Zen 主源研究已完成；接线未实现 | Responses 与 Pi 多协议的真实工具往返、续接、成本/隐私边界 |
+| 多模型能力 | PAM-010 | Codex 显式 Responses、Pi 私有配置/目录/选择与成本合同源码候选已实现；未部署 | Responses 与 Pi 多协议的真实工具往返、续接、成本/隐私边界 |
 
 ### 本次重新排定的下一片
 
@@ -100,6 +100,29 @@ Root 负责发布、计划与集成。研究、实现、
 不默默丢掉原目标、不新建 ID 绕过 unknown。
 
 ## Leader 持续工作合同
+
+### 2026-10-10 后续实际实施切片
+
+- **002a** 已有独立 `egress probe/run/hold`：owned loopback SOCKS5h、
+  远端 DNS、仅 child 环境；最终源码实机 laptop→VPS→GitHub GET 200、
+  TLS 0，12,327 字节与独立 Git oracle SHA 相同。17 项聚焦测试本机/
+  VPS Python3.6.8 通过。Chat403/API401仅到达；能力登记/统一便捷入口、
+  第二执行环境、现有认证推理和 campus002b 尚缺。[出口](EGRESS-PATH.md)
+- **010b/c 有限源码**：Codex custom Responses 与显式私有 profile、
+  原 provider identity 续接保护；Pi 原生目录/同 route 选模、私有
+  agent_dir/models.json、原 session；共用精确、过期可撤销的成本
+  声明。默认订阅/native权限不变，不创建 key/费用。本机 native
+  0.162.1 实际配置初始化/读回/空 loaded list/自然0已通过，零模型；
+  Pi/第三方 stream→tool→原会话尚未实测。010a统一目录和010d实际
+  推理仍推进。[Codex](CODEX-PROVIDERS.md)、[Pi](PI-PROVIDERS.md)
+- **009b 有限源码**：单 BEGIN 只读私有 checkpoint，原任务树/
+  authority/游标/context/出站ID/unknown保留；其他执行关系仅SHA锚点。
+  格式强制不可迁移，不是新receiver或接管；旧承载失权/完整历史/
+  实际handoff由009c/d继续。[checkpoint](CHANNEL-CHECKPOINT.md)
+
+本片下一步冻结双端完整测试/公开CI，再将通用出口接到统一能力入口
+和实际承载；009c排他/受控交接另并行。正式核心仍3198c87，不把
+开发文件/配置初始化/单路径GET外推为已安装的全网智能或HA。
 
 1. 开始/续接先读当前 goal、plan、任务账本和各节点真实状态，保留同一
    Leader 原生 thread；按项目复用子 agent，压缩使用原生机制。

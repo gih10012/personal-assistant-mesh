@@ -302,8 +302,19 @@
       "subtasks": [
         {
           "id": "PAM-002a", "title": "VPS受管通用公网出口",
-          "state": "planned", "owner": "root+mesh-leader", "depends_on": [],
-          "next_action": "设计最薄TLS端到端CONNECT/SOCKS或等效路径；私有配置后逐项验证网页/API认证/真实推理，不把403/401当可用；VPS为受管流量默认路径，原生备用联网保持",
+          "state": "single_actual_transport_verified_source_candidate", "owner": "root+egress_path_impl+mesh-leader", "depends_on": [],
+          "next_action": "owned SOCKS5h薄路径和一次真实laptop→VPS→公开GET已通过；冻结集成后接能力目录/统一入口与实际承载，另环境和现有认证推理分别验；campus另列、不全局强制代理",
+          "evidence": {
+            "contract": "docs/EGRESS-PATH.md", "focused_tests_per_host": 17,
+            "actual_laptop_vps_https_get_verified": true, "http_status": 200,
+            "tls_verify_result": 0, "response_bytes": 12327,
+            "response_sha256": "ad50b296f9d754827c0a96e37d467eab238d915c8e18eba5c490c04bcfbfbb27",
+            "independent_git_oracle_matches": true, "owned_ssh_exit_code": 0,
+            "owned_ssh_reaped": true, "global_proxy_changed": false,
+            "actual_authenticated_model_inference_verified": false,
+            "second_execution_environment_real_request_verified": false,
+            "capability_registered": false, "standing_production_path_installed": false
+          },
           "acceptance": "laptop及另一个执行环境能实际使用VPS路径；范围/TTL/失败/回执明确，不全局强制代理"
         },
         {
@@ -889,7 +900,7 @@
     },
     {
       "id": "PAM-009", "title": "ClawBot沟通能力多节点承载与安全接管",
-      "state": "design_ready_implementation_pending", "owner": "root+mesh-leader",
+      "state": "partial_checkpoint_source_candidate_handoff_pending", "owner": "root+mesh-leader",
       "depends_on": [],
       "next_action": "优先009a/b候选与checkpoint，再009c/d受控交接和实际故障验证；与002出口/010模型并行，不以007未完成阻塞。当前VPS单收发保留，不另启第二poller",
       "evidence": {
@@ -899,15 +910,20 @@
         "cross_carrier_channel_lease_implemented": false,
         "cross_carrier_checkpoint_handoff_verified": false,
         "actual_failure_takeover_verified": false,
-        "scope": "source audit and current read-only deployment state; not HA implementation"
+        "scope": "read-only checkpoint source plus current VPS-only deployment; not lease/import/handoff/HA",
+        "checkpoint_contract": "docs/CHANNEL-CHECKPOINT.md",
+        "checkpoint_new_fixture_tests_passed": 35,
+        "checkpoint_related_fixture_tests_passed": 125,
+        "checkpoint_real_production_export_verified": false,
+        "checkpoint_migration_ready": false
       },
       "subtasks": [
         {"id": "PAM-009a", "title": "任意节点沟通承载候选能力", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": [],
          "next_action": "定义owner/account/runtime/private credential refs并核本机与VPS能力；候选/holder/Leader位置分离，探测不自动启动receiver"},
-        {"id": "PAM-009b", "title": "版本化私有通道checkpoint交接", "state": "planned",
-         "owner": "root+mesh-leader", "depends_on": [],
-         "next_action": "保留cursor/inbox/context/canonical task及authority映射/outbox/client IDs/intent/unknown/receipt；私有备份与单次交接协议，不复制token就假称完成"},
+        {"id": "PAM-009b", "title": "版本化私有通道checkpoint交接", "state": "partial_audit_checkpoint_source_candidate_not_migration_ready",
+         "owner": "root+clawbot_ha_capability_audit+mesh-leader", "depends_on": [],
+         "next_action": "35新/125相关测试通过；单一致只读view、全部task/parent/authority与通道unknown保留，其他执行关系仅SHA锚点。冻结后实际私有只读导出，继续闭合原执行/history引用；不导入、复制token或开第二poller冒称handoff"},
         {"id": "PAM-009c", "title": "通道任期和旧承载失权排他", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-009a", "PAM-009b"],
          "next_action": "account/holder/epoch/deadline/checkpoint revision独立于Leader lease；poll与send各边界fence、在途效果对账；明确两节点分区限制，选现有零费仲裁/可证明停止机制，不凭ping抢权"},
@@ -919,13 +935,23 @@
     },
     {
       "id": "PAM-010", "title": "Codex/Pi任意可接入模型能力",
-      "state": "research_complete_implementation_pending", "owner": "root+mesh-leader",
+      "state": "provider_source_candidates_actual_inference_pending", "owner": "root+mesh-leader",
       "depends_on": [],
-      "next_action": "上游主源研究已完成；010a目录合同、010b Codex显式Responses provider、010c Pi多协议隔离配置并行，再010d无秘密真实工具续接。OpenCode仅作为模型服务，不更换Leader",
+      "next_action": "010b/c有限provider源码已实现，先冻结双端/CI；继续010a统一动态目录/实际多候选路由和010d无秘密真实协议/工具续接；免费/隐私/新授权独立核验，OpenCode仅服务不换Leader",
       "evidence": {
         "research": "docs/MODEL-PROVIDERS-RESEARCH.md",
         "pi_upstream_commit": "c5f5b3282d5e4203c085e59837ba17aeaf2829b5",
         "current_mesh_codex_provider_hardcoded_openai": true,
+        "current_mesh_codex_provider_hardcoded_openai_scope": "unchanged production3198c87; new candidate supports explicit Responses",
+        "custom_provider_source_implemented": true,
+        "codex_custom_provider_new_fixture_tests_passed": 16,
+        "codex_actual_native_config_readback_version": "0.162.1",
+        "codex_actual_native_config_readback_verified": true,
+        "codex_actual_native_config_readback_model_calls": 0,
+        "pi_private_provider_source_implemented": true,
+        "pi_provider_new_fixture_tests_passed": 27,
+        "pi_provider_related_fixture_tests_passed": 65,
+        "providers_production_deployed": false,
         "current_pi_single_candidate_after_codex_chain": true,
         "new_credentials_created": false,
         "new_billing_enabled": false,
@@ -935,12 +961,12 @@
         {"id": "PAM-010a", "title": "模型协议/成本/隐私/时效目录", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": [],
          "next_action": "登记harness/protocol/provider/model/context/tools/cost/privacy/availability及私有认证引用；动态目录供模型选择，不把限时免费或model alias当保证"},
-        {"id": "PAM-010b", "title": "Codex custom Responses provider", "state": "planned",
+        {"id": "PAM-010b", "title": "Codex custom Responses provider", "state": "partial_source_candidate_native_config_readback_verified",
          "owner": "root+mesh-leader", "depends_on": ["PAM-010a"],
-         "next_action": "移除openai写死但保留默认订阅，显式隔离provider配置和真实版本兼容；SSE/tools/history/metadata完整验证，Messages/ChatCompletion不直接假充Responses"},
-        {"id": "PAM-010c", "title": "Pi原生多协议provider配置与选择", "state": "planned",
+         "next_action": "默认openai不变，custom显式私有配置/selected credentials和同provider续接已实现，16fixture/local native0.162.1配置读回零模型通过；冻结后验旧VPS版本、010a目录与010d实际SSE/tools/history，不能把初始化当推理"},
+        {"id": "PAM-010c", "title": "Pi原生多协议provider配置与选择", "state": "partial_source_candidate_offline_verified",
          "owner": "root+mesh-leader", "depends_on": ["PAM-010a"],
-         "next_action": "增加隔离agent_dir/private models.json、真实目录/模型选择、原Pi session续接、准确免费API/受控付费合同；不把Codex历史直接当Pi会话"},
+         "next_action": "隔离agent_dir/models.json、原生目录/同route选模和原session保护已实现，27新/65相关fixture通过；冻结双端并验实际Pi/native协议/无秘密工具；paid_api未开放、不复制Codex历史"},
         {"id": "PAM-010d", "title": "合成无秘密工具任务与兜底边界", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-010b", "PAM-010c"],
          "next_action": "现有授权下验证一个可用Responses和一个Pi协议路径，含实际工具结果/原会话续接/产物回读；新凭据/费用问owner，不上传完整记忆，不切模型重放unknown"}
@@ -949,8 +975,9 @@
     }
   ],
   "current_work": {
-    "phase": "owner status/research/goal-plan-task handoff: a4c412a two-host1612 and CI success, candidate not production; production3198c87 and A2A connected, ClawBot still VPS-only, generic/campus egress and Chat/official Cloud unjoined; prioritize carrier HA, real egress and Codex/Pi providers in parallel; native goal full roundtrip pending and old unknowns preserved",
+    "phase": "parallel implementation integrated: actual owned laptop→VPS HTTPS transport, Codex/Pi explicit private providers, read-only channel audit checkpoint; focused tests pass, freeze/two-host full-suite/CI next. Unchanged production3198c87; no channel HA, campus, Chat native or official Cloud job; no third-party model calls; old unknowns preserved",
     "runtime_changed_this_status_turn": false,
+    "production_runtime_changed_this_implementation_slice": false,
     "goal_status": "active",
     "whole_goal_completed": false
   }

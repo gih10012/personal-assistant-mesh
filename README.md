@@ -35,6 +35,9 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 - 模型选择能力/路径后的事务型共享容量预留、provider 接收/启动/未知/结算回执；可选独立 provider 运行器承接宿主安装的版本化工具和持久执行 journal。已有跨宿主只读 SHA 工具真实执行验收；这不是自主最佳调度或性能验收。只有受管 Mesh 合同受此管控，不接管原生工具，见 [共享容量与回执合同](docs/MANAGED-ALLOCATIONS.md)。
 - 可选本地 `tool-release`：模型通过原生工具编写/测试后，离线保留源码快照、一次性认证发布、独立激活及新 epoch 回滚；执行账本不重置。独立只读 observer 核对实际输出、owner 参考答案、结算及容量释放，不能把安装或自测冒充验证。见 [工具生命周期](docs/TOOL-LIFECYCLE.md)。
 - 可选只读 `network-inventory`：本地接口/默认路由/代理变量名及有期限的出口候选；不自动注册、不改变联网，不假报互联网/性能已验证。异构 OS 使用明确适配器，见 [网络发现合同](docs/NETWORK-INVENTORY.md)。
+- 可选 [VPS SOCKS5h 出口](docs/EGRESS-PATH.md)：独立 owned SSH、远端 DNS、仅指定子调用；已实测一次 laptop→VPS→公开 HTTPS，未安装统一常驻能力或验认证推理。
+- 显式 [Codex Responses](docs/CODEX-PROVIDERS.md)/[Pi 多协议](docs/PI-PROVIDERS.md) 配置候选：私有 profile/成本合同/原会话保护，默认订阅不变；非第三方推理或无限免费保证。
+- [私有通道 checkpoint](docs/CHANNEL-CHECKPOINT.md)：只读一致导出与完整 task/未知状态保留，格式强制不可直接迁移；ClawBot 多节点接管仍未实现。
 - 统一的 `mesh(action, arguments)` 额外工具入口；旧 `mesh_*` 保留，连续旧线程不重建。见 [模型入口合同](docs/MESH-GATEWAY.md)。
 - 独立节点 authority/worker、断网本地任务、持续 native 子 agent、持久重连退避与去重维护任务。
 - 可选跨 authority 能力导出/只读投影：保留 issuer、mutation revision、撤销、游标与声明性时效；独立同步循环不阻断 native Worker/A2A，远端授权与容量仍由资源 owner 管理。见 [能力 Federation](docs/CAPABILITY-FEDERATION.md)。不是全局共识或完整 HA。

@@ -90,7 +90,19 @@ _NATIVE_FAILURES = frozenset((
         'thread_resume', 'thread_start', 'thread_goal_set', 'thread_goal_get',
         'thread_read', 'thread_loaded_list', 'thread_turns_list',
         'turn_start', 'turn_steer', 'turn_interrupt')) | frozenset(
-    'pi_rpc_failed_' + method for method in ('get_state', 'switch_session', 'prompt', 'steer'))
+    'pi_rpc_failed_' + method for method in ('get_state', 'switch_session', 'prompt', 'steer',
+                                           'get_available_models', 'set_model')) | frozenset((
+    'model_provider_cost_authorization_required', 'model_provider_free_contract_required',
+    'model_provider_free_contract_invalid', 'codex_builtin_provider_override_forbidden',
+    'codex_custom_provider_id_invalid', 'codex_custom_provider_model_required',
+    'codex_custom_provider_configuration_invalid', 'codex_custom_provider_endpoint_invalid',
+    'codex_custom_provider_environment_invalid', 'codex_custom_provider_credentials_required',
+    'codex_custom_provider_local_endpoint_required', 'codex_custom_provider_profile_required',
+    'codex_custom_provider_profile_unsafe', 'codex_provider_resume_identity_mismatch',
+    'pi_private_configuration_required', 'pi_models_file_location_invalid', 'pi_agent_dir_required',
+    'pi_model_configuration_required', 'pi_model_catalog_invalid',
+    'pi_model_selection_while_active', 'pi_model_selection_mismatch',
+    'pi_provider_selection_requires_config', 'pi_prompt_already_attempted'))
 
 
 def _runtime_failure_code(exc, phase):
@@ -99,7 +111,7 @@ def _runtime_failure_code(exc, phase):
     if ((phase == 'native_restore' and code in _RESTORE_FAILURES)
             or (phase == 'session_save' and code in _SESSION_FAILURES)
             or (phase in ('native_finish', 'native_yield_seal') and code in _HISTORY_FAILURES)
-            or (isinstance(exc, CodexError) and code in _NATIVE_FAILURES)):
+            or (isinstance(exc, ValueError) and code in _NATIVE_FAILURES)):
         return code
     return 'worker_unavailable'
 

@@ -70,3 +70,9 @@ Codex/Pi 多模型、PAM-006d/e Chat/官方 Cloud。PAM-007 原生 goal
 完整生命周期另验，但不能成为全部基础能力等待的串行闸门。
 风险相称测试和一次有边界实测后继续，不追求先写完所有环境/错误。
 当前没有全局 HA 或整体完成证据，见 [今日报告](STATUS-2026-10-10.md)。
+
+本次续接已实现有限源码：VPS owned SOCKS5h 路径并实测公开 HTTPS；
+Codex/Pi 显式 provider/私有配置与连续性保护；ClawBot 只读通道
+checkpoint。正式核心未替换，Chat/官方 Cloud、校园出口、ClawBot
+自动接管仍未验收。下一片优先出口统一能力/实际承载及沟通失权交接，
+保持本 goal active 与原任务身份；具体状态见 PLAN/TASKS，不缩小目标。

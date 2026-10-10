@@ -137,9 +137,12 @@ class ProtocolTests(unittest.TestCase):
 
     def test_pi_started_stream_enables_native_steering_gate(self):
         agent = Pi.__new__(Pi)
+        agent.config = {'cost_policy': 'local', 'provider': 'local', 'model': 'local-model'}
+        agent._run_state = 'idle'
         agent.serial = 2
         agent.on_activity = None
-        agent.rpc = mock.Mock(side_effect=[{'sessionId': 'session', 'sessionFile': '/private/pi.jsonl'},
+        agent.rpc = mock.Mock(side_effect=[{'sessionId': 'session', 'sessionFile': '/private/pi.jsonl',
+                                           'model': {'provider': 'local', 'id': 'local-model'}},
                                            {'disposition': 'started'}])
         state = agent.start('work')
         self.assertEqual('pi-stream-2', agent.turn_id)
