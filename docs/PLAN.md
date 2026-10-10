@@ -287,11 +287,13 @@ rendezvous symlink 被拒绝，未 initialize、更没有 model/thread/goal 调�
 Unix peer、先 gate/持久原 epoch intent ACK、一次 owned PID TERM、
 持续 heartbeat 的 admitted event pump。自然 completed/idle/0/reap/EOF
 只得出 drained_unverified，Worker 禁止 post-close RPC，保持原 guard。
-21 drain 与 6 Worker 新 fixture、原生近邻236项通过；新 adapter 的
+23 drain 与 6 Worker 新 fixture、原生近邻238项通过；新 adapter 的
 active 模型实测和独立 yielded seal 尚未验收，正式配置未启用。
 `PAM-007c-3` 的可选 frozen-file upload 前置亦已实现（33新fixture），
 默认保存行为不变；不把文件 SHA 当作原生 goal 迁移证明。下一步先
 冻结同一版本做两端完整回归/发布，再接独立 goal/history observer。
+首版 e229651 两端1508项通过但 opt-in idle 实机失败，不列成功；
+pre-start 全局通知/tracker 修正后的冻结回归与实机验收另外记录。
 下一切片按固定 task ID 推进：`007c-2` 一次持久 TERM intent + admitted
 drain event pump（持续 lease/tick，当前 turn 内收到 wait 就停止新 admission，
 不以阻塞 close/强杀冒充排空）；`007c-3` 自然回收后的独立同 goal/用量/

@@ -345,6 +345,23 @@ class NativeGoalDrainTests(unittest.TestCase):
                         Codex({'native_goal_drain': flag})
             process.assert_not_called()
 
+    def test_global_or_foreign_notifications_before_start_do_not_require_thread_state(self):
+        agent = Codex.__new__(Codex)
+        agent.config = {'native_goal_drain': True}
+        for params in ({}, {'threadId': None}, {'threadId': 'not-started-here'}):
+            value = {'method': 'thread/status/changed', 'params': dict(params, status={'type': 'idle'})}
+            agent._record_native_drain_event(value)
+            self.assertNotIn('_mesh_drain_observed', value)
+        self.assertFalse(hasattr(agent, '_native_started_turns'))
+
+    def test_host_request_before_known_thread_is_fixed_unknown_not_callback(self):
+        agent = self.runtime()
+        del agent.thread_id
+        agent.on_tool = mock.Mock()
+        with self.assertRaisesRegex(CodexError, 'codex_native_drain_request_invalid'):
+            agent._handle_host_request(self.request())
+        agent.on_tool.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

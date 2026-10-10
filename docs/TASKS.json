@@ -5,6 +5,19 @@
   "updated_at": "2026-10-10",
   "plan": "docs/PLAN.md",
   "status_source": "project coordination record; runtime evidence is separately identified, not invented",
+  "drain_candidate_previous_attempt": {
+    "code_commit": "e22965171dbbb65f2426dc79104cd7ffd6e46be3",
+    "archive_sha256": "ae2554a96b6173820a5d5f8a36f01bef36e793fcf95d16815785e345263408cc",
+    "local_full_suite_tests_passed": 1508,
+    "local_full_suite_duration_seconds": 141.354,
+    "vps_python36_full_suite_tests_passed": 1508,
+    "vps_python36_full_suite_duration_seconds": 142.894,
+    "actual_opt_in_idle_verified": false,
+    "actual_idle_failure": "pre-start global notification matched unknown thread and read uninitialized drain trackers; no model/thread/goal calls",
+    "production_deployed": false,
+    "original_unknown_replayed": false,
+    "correction_state": "source fixed; separate frozen two-host and opt-in idle verification pending"
+  },
   "latest_source_release": {
     "phase": "PAM-007c official Unix alias and owned peer adaptation; validated candidate, not production",
     "code_commit": "ee6f924c3d74346683f9750caee7ef06586606c7",
@@ -658,7 +671,7 @@
          "next_action": "007c-1源码ee6f924冻结两端1449项/CI与0.162/0.159.2零模型idle实际通过；下一步007c-2 drain event pump和007c-3独立yielded seal，再007c-4原父task/原thread/原goal等待唤醒roundtrip。私有原resume unknown不重放，生产lease/children交接未验收",
          "implementation_slices": [
            {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
-           {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "source_implemented_offline_verified_pending_frozen_two_host_suite", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "默认false、Unix owned-peer opt-in已实现；21 drain与6 Worker新fixture通过，原生近邻236通过，保持drained_unverified/false settled与原guard。冻结同一源码做两端完整回归和CI；active模型实测另验，不借旧私有probe；之后007c-3独立seal"},
+           {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "source_implemented_offline_verified_pending_corrected_frozen_two_host_suite", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "默认false、Unix owned-peer opt-in已实现；23 drain与6 Worker新fixture通过，原生近邻238通过，保持drained_unverified/false settled与原guard。e229651两端1508项通过但实机opt-in idle失败已保留；修正后的同一冻结源码做两端完整回归和CI/idle。active模型实测另验，不借旧私有probe；之后007c-3独立seal"},
            {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "planned_with_optional_frozen_file_upload_prerequisite", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "sessions.save可选expected_fingerprint严格三阶段同FD与实际压缩字节校验已实现，33新fixture通过，默认未启用；这不制造goal/history证据。接独立observer核对同goal/连续用量、closed turns与稳定原生历史，outcome yielded独立于terminal seal，证据+artifact commit齐全后才清guard"},
            {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "先受控specialist合同实测，再原Leader正式启用；按原task/thread/goal/counters续接，最后child唤醒原task；未知原trial不重放、不用新ID伪称修复"}
          ]},

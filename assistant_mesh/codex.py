@@ -100,6 +100,10 @@ class Codex:
             raise CodexError('invalid_native_goal_drain_flag')
         self.native_drain_active = False
         self._socket_owner_verified = False
+        self._native_started_turns = set()
+        self._native_completion_statuses = {}
+        self._native_host_receipts = {}
+        self._native_drain_idle = self._native_drain_eof = False
         self.transport_name = config.get('native_transport', 'stdio')
         if self.transport_name not in ('stdio', 'unix'):
             raise CodexError('invalid_native_transport')
@@ -315,7 +319,9 @@ class Codex:
         if getattr(self, 'config', {}).get('native_goal_drain') is True:
             params = value.get('params')
             identity = value.get('id')
-            if (not isinstance(params, dict) or params.get('threadId') != self.thread_id
+            thread = getattr(self, 'thread_id', None)
+            if (not isinstance(thread, str) or not thread
+                    or not isinstance(params, dict) or params.get('threadId') != thread
                     or not isinstance(params.get('turnId'), str) or not params['turnId']
                     or params.get('turnId') not in getattr(self, '_native_started_turns', set())
                     or params.get('turnId') in getattr(self, '_native_completion_statuses', {})
@@ -863,7 +869,9 @@ class Codex:
         if value.get('_mesh_drain_observed') is True:
             return  # The same queued notification is later consumed outside RPC.
         params = value.get('params')
-        if not isinstance(params, dict) or params.get('threadId') != getattr(self, 'thread_id', None):
+        thread = getattr(self, 'thread_id', None)
+        if (not isinstance(thread, str) or not thread
+                or not isinstance(params, dict) or params.get('threadId') != thread):
             return
         method = value.get('method')
         turn = params.get('turn')

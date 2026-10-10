@@ -127,8 +127,8 @@ draining、已发 TERM 或 drained 的运行器不能用新的 start 清除 gate
 tick、host callback、join 或最终 activity 返回后若已超时，不返回排空
 成功；原生 callback 仍可能阻塞，并不声称硬实时 deadline。当前 Worker
 在 drained 后不再调用 native_rollout/goal RPC，保持 settled/quiescent
-为 false。21 项新 drain fixture 和 6 项 Worker 边界 fixture 已通过；
-原生近邻合计 236 项通过。新 adapter 尚未进行 active 模型实测，
+为 false。23 项新 drain fixture 和 6 项 Worker 边界 fixture 已通过；
+原生近邻合计 238 项通过。新 adapter 尚未进行 active 模型实测，
 不能借用此前独立私有 probe 作为本版本执行证明，也未启用正式配置。
 
 `sessions.save(..., expected_fingerprint=...)` 为后续 seal 提供可选的
@@ -141,6 +141,14 @@ SHA-256，可带 mtime_ns/ctime_ns；绝对路径及所有祖先 nofollow。
 guard。33 项新 fixture 通过；并非原生 goal/history 独立 seal，不
 声称防同 UID 恶意并发写入或本地检查与远端 commit 的跨系统原子性。
 缺少 nofollow/openat 的平台只拒绝该严格实现，节点可按合同自行适配。
+
+首版 `e229651` 冻结源码虽在本机/VPS 各通过1508项，但开启 opt-in
+的零模型 idle 检查遇到 pre-start 全局通知，误把未定义 thread 当作
+本线程并访问未初始化 tracker。失败证据保留，不能作实机成功证明。
+现已在 constructor 初始化 trackers，并在任何 thread 尚未知时忽略
+全局/异线程通知；pre-start host 请求仍以固定 unknown 拒绝，不执行
+回调。修正后工作树的零模型连接/loaded list空/自然0/reap通过，
+最终冻结版本的两端完整回归及实机证据需单独记录。
 
 `PAM-007c-3`：新增独立 yielded seal，不放宽 terminal seal。原运行器
 回收后，新 observer 只 initialize/read goal/read thread/loaded list，
