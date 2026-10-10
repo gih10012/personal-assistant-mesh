@@ -2,7 +2,7 @@
   "schema": 1,
   "project": "personal-assistant-mesh",
   "goal_status": "active",
-  "updated_at": "2026-10-10",
+  "updated_at": "2026-10-11",
   "plan": "docs/PLAN.md",
   "effective_owner_goal": "docs/GOAL.md",
   "latest_owner_status": "docs/STATUS-2026-10-10.md",
@@ -1146,6 +1146,16 @@
     "runtime_changed_this_status_turn": true,
     "production_runtime_changed_this_implementation_slice": true,
     "production_change_scope": "additive standalone HTTPS capability service/registration/pool/observations, backed-up newer same-account native auth cache and reviewed strict-prefix native history refresh with scoped worker stop/start; formal core source and channel/node/old-provider services preserved",
+    "next_usability_slice": "same-owner thin discover/call/delegate/status/artifact: internally compose admission/reservation/original receipts, no per-URL owner configuration or host-native interception; reusable path evidence is not new-target content/authentication proof",
+    "owner_progress_notification": {
+      "request_id": "mesh-owner-progress-20261011-0001-v1",
+      "channel": "existing ClawBot remote channel to bound owner",
+      "status": "accepted",
+      "outcome_unknown": false,
+      "delivery_verified": false,
+      "automatic_retry": false,
+      "new_receiver_started": false
+    },
     "goal_status": "active",
     "whole_goal_completed": false
   }

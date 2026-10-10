@@ -1,6 +1,6 @@
 # 持续执行计划
 
-更新时间：2026-10-10。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-11（10日实施结果与次日通知读回）。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-10 报告](STATUS-2026-10-10.md)。
@@ -161,7 +161,9 @@ checkpoint只读导出/私有写入/读回也通过，仍非handoff。
 
 下一步并行优先：009c/d接真实Channel/API/Store的失权/完整状态交接，
 目前源码默认无verifier不grant，仍为VPS单收发，不称HA；004d完成
-上述原任务及便捷统一准入，002b把已验证的native SSH校内路径做成
+便捷统一准入：同owner常规请求由薄call封装做准入/预留/原ID回执，
+不要让本人每URL配置或让模型手拼全部账本；可复用的是路径/容量证据，
+不能把它伪装成新目标真实正文/认证成功。002b把已验证的native SSH校内路径做成
 选择性能力。随后006d补Chat网络MCP/OAuth/主账号调用，006e补官方
 Cloud published environment/真实job与task/epoch/lease/临时节点集成。
 不把普通Chat说成无限额度，不用VPS代官方Cloud，010真实第三方
