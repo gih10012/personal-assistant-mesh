@@ -1,6 +1,6 @@
 # 原生 goal 交接前置合同（PAM-007c）
 
-2026-10-10 源码候选。它补齐输入回执、可选传输和 scope 归属，**没有
+2026-10-10 源码候选。它补齐输入回执、可选传输、scope 归属和 opt-in drain，**没有
 启用正式 active goal yield**。运行期仍为冻结 `3198c87`。既有私有
 resume 失败的原 thread、active goal、历史与 unknown 均保留，不重放。
 
@@ -66,10 +66,12 @@ Unix 模式的 `executable` 应指向官方原生二进制或真正 `exec` 它�
 PID 发一次 TERM；超时清理若必须 KILL，或者 reader 强制关闭/退出码
 非零，不能通过 goal terminal seal。清理本身不证明协同 yield。
 
-**还没有**在 finish 内保持 heartbeat/请求响应的 admission drain，
-也没有独立不加载 thread 的原生 goal/history readback。当前 active
-goal 等子任务仍返回 `codex_goal_coordination_yield_unavailable`，保持
-原身份和 guard；不能因 socket 可连接就放行。
+`native_goal_drain` 默认为 false。显式 true 才允许以下排空流程，且必须
+已验证 owned Unix peer；stdio 不以 TERM 模拟成功。不加载 thread 的
+独立 goal/history readback 尚未实现。默认 active goal 等子任务仍返回
+`codex_goal_coordination_yield_unavailable`；opt-in 排空成功只记录
+`drained_unverified`，Worker 返回 `codex_native_yield_seal_required`，
+保留原身份和 guard，不能因本地退出成功就放行。
 
 ## 子任务与原 goal 的归属
 
@@ -104,9 +106,9 @@ thread、未 set goal，不重放旧 unknown；正式服务保持旧冻结 `3198
 长 RPC lease watchdog。之后再加载正式控制器与 3–5 天前沿检查。
 Chat 模型 tools/OAuth 与 Codex Cloud job/node 仍单列未接通。
 
-### 下一切片的最小实现边界（计划，未实现）
+### 排空切片与后续独立交接
 
-`PAM-007c-2`：`finish` 在当前 turn 内也检查 wait，先立本地 draining
+`PAM-007c-2` 已实现为默认禁用的源码候选：`finish` 在当前 turn 内也检查 wait，先立本地 draining
 gate，再强制 tick 持久原 task/epoch/runtime 的 TERM intent，成功 ACK
 之后才一次 PID-only TERM。Codex RPC 与 Worker optional steer 双侧
 停止本轮控制器主动追加工作；heartbeat/lease fence 和已 admitted host
@@ -120,6 +122,25 @@ gate，再强制 tick 持久原 task/epoch/runtime 的 TERM intent，成功 ACK
 failed 也计入的 completed ID 集合当证明。无未答请求/未结 RPC、实际
 idle、自然退出 0、wait/reap 与 reader EOF/join 缺一都保留 unknown；
 不以 `close()` 的阻塞等待、断连接或强杀替代。
+
+draining、已发 TERM 或 drained 的运行器不能用新的 start 清除 gate。
+tick、host callback、join 或最终 activity 返回后若已超时，不返回排空
+成功；原生 callback 仍可能阻塞，并不声称硬实时 deadline。当前 Worker
+在 drained 后不再调用 native_rollout/goal RPC，保持 settled/quiescent
+为 false。21 项新 drain fixture 和 6 项 Worker 边界 fixture 已通过；
+原生近邻合计 236 项通过。新 adapter 尚未进行 active 模型实测，
+不能借用此前独立私有 probe 作为本版本执行证明，也未启用正式配置。
+
+`sessions.save(..., expected_fingerprint=...)` 为后续 seal 提供可选的
+冻结文件上传合同。默认 None 路径保持原行为，未自动为现有 Worker
+启用严格模式。必需字段为 dev/ino/uid/S_IMODE mode/size/完整小写
+SHA-256，可带 mtime_ns/ctime_ns；绝对路径及所有祖先 nofollow。
+同一 unbuffered FD 在压缩前、压缩后、上传后完整核验，实际压缩输入
+另做 hash/size；持续 tick。内容、inode、权限、路径或祖先变化、租约
+失效都不得 commit，已上传未提交分块可保留，不重试、不删除、不清
+guard。33 项新 fixture 通过；并非原生 goal/history 独立 seal，不
+声称防同 UID 恶意并发写入或本地检查与远端 commit 的跨系统原子性。
+缺少 nofollow/openat 的平台只拒绝该严格实现，节点可按合同自行适配。
 
 `PAM-007c-3`：新增独立 yielded seal，不放宽 terminal seal。原运行器
 回收后，新 observer 只 initialize/read goal/read thread/loaded list，

@@ -17,7 +17,16 @@ def request(client, task, action, payload):
                                          'action': action, 'payload': payload})
 
 
-def save(client, task, node, harness, state, rollout=None, tick=None):
+def save(client, task, node, harness, state, rollout=None, tick=None, expected_fingerprint=None):
+    """Stream the native artifact; optionally require an unchanged frozen file.
+
+    Strict evidence uses dev/ino/uid/S_IMODE mode/size/lowercase sha256 plus
+    optional mtime_ns/ctime_ns. Failure never commits or retries uploaded parts;
+    it does not delete them, settle effects, or alter the caller's native state.
+    """
+    if expected_fingerprint is not None:
+        return _save_fingerprinted(client, task, node, harness, state, rollout, tick,
+                                   expected_fingerprint)
     parts = 0
     if rollout:
         # Streaming compression and bounded chunks avoid holding a long native
@@ -42,6 +51,157 @@ def save(client, task, node, harness, state, rollout=None, tick=None):
                 if tick:
                     tick()
     return request(client, task, 'commit', {'harness': harness, 'state': dict(state, codex_node=node), 'parts': parts})
+
+
+def _expected_fingerprint(value):
+    required = {'dev', 'ino', 'uid', 'mode', 'size', 'sha256'}
+    optional = {'mtime_ns', 'ctime_ns'}
+    if (not isinstance(value, dict) or not required <= set(value)
+            or set(value) - required - optional
+            or any(not isinstance(value[key], int) or isinstance(value[key], bool)
+                   or value[key] < 0 for key in set(value) - {'sha256'})
+            or value['mode'] > 0o7777
+            or not isinstance(value['sha256'], str)
+            or re.fullmatch('[0-9a-f]{64}', value['sha256']) is None):
+        raise ValueError('native_session_fingerprint_invalid')
+    return dict(value)  # A caller cannot mutate the expected evidence mid-save.
+
+
+def _fingerprint_metadata(metadata):
+    return {'dev': metadata.st_dev, 'ino': metadata.st_ino,
+            'uid': metadata.st_uid, 'mode': stat.S_IMODE(metadata.st_mode),
+            'size': metadata.st_size, 'mtime_ns': metadata.st_mtime_ns,
+            'ctime_ns': metadata.st_ctime_ns}
+
+
+def _open_fingerprint_source(path):
+    """Walk an absolute trusted path without following any symlink.
+
+    Directory identities exclude times: unrelated entries may change safely.
+    This does not lock out an owner-UID writer or make a remote commit atomic
+    with the final local check. It never chmods or rewrites the source file.
+    """
+    if (not hasattr(os, 'O_NOFOLLOW') or not hasattr(os, 'O_DIRECTORY')
+            or os.open not in getattr(os, 'supports_dir_fd', ())):
+        raise ValueError('native_session_fingerprint_unsupported')
+    directories, identities, descriptor = [], [], None
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, 'O_CLOEXEC', 0)
+    try:
+        directory = os.open(path.anchor, flags | os.O_DIRECTORY)
+        directories.append(directory)
+        for component in (None,) + path.parts[1:-1]:
+            if component is not None:
+                directory = os.open(component, flags | os.O_DIRECTORY, dir_fd=directory)
+                directories.append(directory)
+            metadata = os.fstat(directory)
+            if (not stat.S_ISDIR(metadata.st_mode)
+                    or metadata.st_uid not in (0, os.getuid())
+                    or (metadata.st_mode & 0o022 and not metadata.st_mode & stat.S_ISVTX)):
+                raise ValueError('native_session_fingerprint_path_unsafe')
+            identities.append((metadata.st_dev, metadata.st_ino, metadata.st_uid,
+                               stat.S_IMODE(metadata.st_mode)))
+        # NONBLOCK avoids hanging on a substituted FIFO before the fstat check.
+        descriptor = os.open(path.name, flags | getattr(os, 'O_NONBLOCK', 0), dir_fd=directory)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
+            raise ValueError('native_session_fingerprint_path_unsafe')
+        # Re-verification must read the actual descriptor, not cached bytes
+        # retained by a BufferedReader across seeks and external in-place writes.
+        source = os.fdopen(descriptor, 'rb', buffering=0)
+        descriptor = None
+        return source, tuple(identities)
+    except OSError:
+        raise ValueError('native_session_fingerprint_path_unsafe') from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        for directory in reversed(directories):
+            os.close(directory)
+
+
+def _check_fingerprint_identity(path, source, expected, ancestors, initial):
+    # Walk again as well as inspecting the original descriptor: a replaced
+    # path must not pass merely because its old inode remains open. Keep the
+    # ancestry from this exact walk, not a separate path stat.
+    opened, current_ancestors = _open_fingerprint_source(path)
+    with opened:
+        reopened = _fingerprint_metadata(os.fstat(opened.fileno()))
+    actual = _fingerprint_metadata(os.fstat(source.fileno()))
+    fields = set(expected) - {'sha256'}
+    if (current_ancestors != ancestors or actual != initial
+            or reopened != actual or any(actual[key] != expected[key] for key in fields)):
+        raise ValueError('native_session_fingerprint_changed')
+
+
+def _check_fingerprint_bytes(size, digest, expected):
+    if size != expected['size'] or digest.hexdigest() != expected['sha256']:
+        raise ValueError('native_session_fingerprint_changed')
+
+
+def _verify_fingerprint(path, source, expected, ancestors, initial, tick):
+    if tick:
+        tick()
+    _check_fingerprint_identity(path, source, expected, ancestors, initial)
+    source.seek(0)
+    digest, size = hashlib.sha256(), 0
+    while True:
+        block = source.read(65536)
+        if not block:
+            break
+        size += len(block)
+        if size > expected['size']:
+            raise ValueError('native_session_fingerprint_changed')
+        digest.update(block)
+        if tick:
+            tick()
+    _check_fingerprint_bytes(size, digest, expected)
+    _check_fingerprint_identity(path, source, expected, ancestors, initial)
+    source.seek(0)
+
+
+def _save_fingerprinted(client, task, node, harness, state, rollout, tick, value):
+    expected = _expected_fingerprint(value)
+    if not rollout:
+        raise ValueError('native_session_fingerprint_rollout_required')
+    path = Path(rollout)
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError('native_session_fingerprint_path_unsafe')
+    opened, ancestors = _open_fingerprint_source(path)
+    with opened as source, tempfile.TemporaryFile() as packed:
+        initial = _fingerprint_metadata(os.fstat(source.fileno()))
+        # Always retain time baselines, even when optional times were omitted.
+        _verify_fingerprint(path, source, expected, ancestors, initial, tick)
+        size, digest = 0, hashlib.sha256()
+        with gzip.GzipFile(fileobj=packed, mode='wb') as archive:
+            while True:
+                block = source.read(65536)
+                if not block:
+                    break
+                size += len(block)
+                if size > expected['size']:
+                    raise ValueError('native_session_fingerprint_changed')
+                digest.update(block)
+                archive.write(block)
+                if tick:
+                    tick()
+        _check_fingerprint_bytes(size, digest, expected)
+        _verify_fingerprint(path, source, expected, ancestors, initial, tick)
+        packed.seek(0)
+        parts = 0
+        while True:
+            block = packed.read(65536)
+            if not block:
+                break
+            request(client, task, 'upload', {'harness': harness, 'part': parts,
+                                            'data': base64.b64encode(block).decode()})
+            parts += 1
+            if tick:
+                tick()
+        # Already-uploaded but uncommitted parts are not deleted or replayed.
+        # This final complete read also detects same-size writes during upload.
+        _verify_fingerprint(path, source, expected, ancestors, initial, tick)
+        return request(client, task, 'commit', {'harness': harness,
+                       'state': dict(state, codex_node=node), 'parts': parts})
 
 
 def _selected_thread_id(task):

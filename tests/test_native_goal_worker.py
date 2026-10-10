@@ -208,6 +208,101 @@ class GoalWorkerTests(unittest.TestCase):
             'goal': {'threadId': 'foreign-thread', 'status': 'complete'}})
         self.assertNotIn('goal', self.task['checkpoint'])
 
+    def drain_state(self):
+        self.worker.current, self.worker.agent = self.task, self.agent
+        self.agent.native_drain_active = True
+        self.agent.process.pid = 424242
+        self.agent.native_lifecycle.update(outcome='draining', drain_intent={
+            'status': 'intent', 'thread_id': 'original-thread', 'turn_id': 'first-turn',
+            'pid': 424242, 'signal': 'SIGTERM'})
+        return copy.deepcopy(self.agent.native_lifecycle)
+
+    def test_drain_intent_ack_requires_current_epoch_durable_checkpoint(self):
+        lifecycle = self.drain_state()
+        ack = self.worker.on_activity('native_drain_intent', lifecycle)
+        self.assertEqual({'ok': True, 'thread_id': 'original-thread', 'pid': 424242}, ack)
+        intent = self.updates()[-1]['checkpoint']['native_drain_intent']
+        self.assertEqual('original-task', intent['task_id'])
+        self.assertEqual(4, intent['task_epoch'])
+        self.assertTrue(self.updates()[-1]['checkpoint']['side_effect_started'])
+        self.assertIn('/v1/heartbeat', [route for route, body in self.client.calls])
+        self.assertNotIn('/v1/steering', [route for route, body in self.client.calls])
+
+    def test_false_checkpoint_ack_or_lost_fence_never_authorizes_drain(self):
+        for failure in ('false_ack', 'lease_lost'):
+            with self.subTest(failure=failure):
+                lifecycle = self.drain_state()
+                request = self.client.request
+
+                def fail(route, body=None):
+                    if failure == 'lease_lost' and route == '/v1/heartbeat':
+                        raise ValueError('lease_lost')
+                    response = request(route, body)
+                    if failure == 'false_ack' and route == '/v1/task/update':
+                        return {'ok': False}
+                    return response
+
+                with patch.object(self.client, 'request', side_effect=fail):
+                    with self.assertRaises(ValueError):
+                        self.worker.on_activity('native_drain_intent', lifecycle)
+                self.assertTrue(self.task['checkpoint']['side_effect_started'])
+
+    def test_wait_children_suppresses_optional_steer_but_not_heartbeat(self):
+        self.worker.current, self.worker.agent = self.task, self.agent
+        self.worker.wait_children = True
+        self.agent.turn_id = 'current-turn'
+        self.worker.tick(force=True)
+        routes = [route for route, body in self.client.calls]
+        self.assertIn('/v1/heartbeat', routes)
+        self.assertNotIn('/v1/steering', routes)
+
+    def test_drained_unverified_never_sends_post_close_rpc_or_releases_guard(self):
+        def drained(**kwargs):
+            lifecycle = self.drain_state()
+            self.worker.on_activity('native_drain_intent', lifecycle)
+            self.agent.native_lifecycle.update(outcome='drained_unverified', runtime_closed=True,
+                                               settled=False, quiescent=False)
+            self.worker.on_activity('native_drained', self.agent.native_lifecycle)
+            return 'Local drain is not a yielded seal'
+
+        self.agent.finish.side_effect = drained
+        self.worker.run_once()
+        self.agent.native_rollout.assert_not_called()
+        self.agent.goal.assert_not_called()
+        self.agent.seal_native_lifecycle.assert_not_called()
+        self.assertEqual(1, self.saved.call_count)  # Initial guarded state only, no post-drain artifact.
+        self.assertTrue(self.task['checkpoint']['side_effect_started'])
+        self.assertEqual('waiting_backend', self.updates()[-1]['status'])
+        self.assertEqual('codex_native_yield_seal_required',
+                         self.updates()[-1]['checkpoint']['runtime_failure']['category'])
+        self.assertTrue(all(body['id'] == 'original-task' and body['epoch'] == 4
+                            for body in self.updates()))
+
+    def test_fingerprint_failure_has_only_fixed_phase_scoped_diagnostic(self):
+        from assistant_mesh.worker import _runtime_failure_code
+        for code in ('native_session_fingerprint_invalid', 'native_session_fingerprint_unsupported',
+                     'native_session_fingerprint_path_unsafe', 'native_session_fingerprint_changed',
+                     'native_session_fingerprint_rollout_required'):
+            self.assertEqual(code, _runtime_failure_code(ValueError(code), 'session_save'))
+            self.assertEqual('worker_unavailable', _runtime_failure_code(ValueError(code), 'turn_wait'))
+
+    def test_frozen_snapshot_failure_never_clears_guard_or_changes_task_identity(self):
+        calls = []
+
+        def save(*args):
+            calls.append(True)
+            if len(calls) == 1:
+                return self.save(*args)
+            raise ValueError('native_session_fingerprint_changed')
+
+        self.saved.side_effect = save
+        self.worker.run_once()
+        self.agent.seal_native_lifecycle.assert_called_once()
+        self.assertTrue(self.task['checkpoint']['side_effect_started'])
+        self.assertEqual('waiting_backend', self.updates()[-1]['status'])
+        self.assertEqual('native_session_fingerprint_changed',
+                         self.updates()[-1]['checkpoint']['runtime_failure']['category'])
+
 
 class GoalWaitingStoreTests(unittest.TestCase):
     def setUp(self):

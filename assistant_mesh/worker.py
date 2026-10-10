@@ -28,6 +28,10 @@ _RESTORE_FAILURES = frozenset((
     'native_session_sessions_directory_required', 'native_session_artifact_empty',
     'native_session_thread_mismatch', 'native_session_metadata_invalid',
     'native_session_destination_unsafe', 'native_session_destination_conflict'))
+_SESSION_FAILURES = frozenset((
+    'native_session_fingerprint_invalid', 'native_session_fingerprint_unsupported',
+    'native_session_fingerprint_path_unsafe', 'native_session_fingerprint_changed',
+    'native_session_fingerprint_rollout_required'))
 _NATIVE_FAILURES = frozenset((
     'codex_auth_required', 'pi_auth_required', 'codex_usage_limit_exceeded',
     'no_local_backend_available',
@@ -54,6 +58,12 @@ _NATIVE_FAILURES = frozenset((
     'codex_native_transport_path_unsafe', 'codex_native_transport_connect_failed',
     'codex_native_transport_write_unknown', 'codex_native_transport_read_failed',
     'codex_native_runtime_exit_unknown',
+    'invalid_native_goal_drain_flag', 'codex_native_drain_rpc_blocked',
+    'codex_native_drain_request_invalid', 'codex_native_drain_request_duplicate',
+    'codex_native_drain_intent_unconfirmed', 'codex_native_drain_turn_unsettled',
+    'codex_native_drain_transport_unverified', 'codex_native_drain_boundary_unknown',
+    'codex_native_drain_signal_unknown', 'codex_native_drain_timeout',
+    'codex_native_yield_seal_required',
     'pi_model_configuration_required', 'pi_mesh_grant_required', 'pi_timeout',
     'pi_disconnected', 'pi_resume_cancelled', 'pi_prompt_not_started',
     'pi_turn_failed', 'pi_turn_timeout')) | frozenset(
@@ -68,6 +78,7 @@ def _runtime_failure_code(exc, phase):
     """Only fixed local categories, never exception text or runtime paths."""
     code = str(exc)
     if ((phase == 'native_restore' and code in _RESTORE_FAILURES)
+            or (phase == 'session_save' and code in _SESSION_FAILURES)
             or (isinstance(exc, CodexError) and code in _NATIVE_FAILURES)):
         return code
     return 'worker_unavailable'
@@ -562,7 +573,33 @@ class Worker:
         raise CodexError('owner_response_pending')
 
     def on_activity(self, kind, value):
-        if kind == 'native_start_intent':
+        if kind in ('native_drain_intent', 'native_drain_signal', 'native_drained', 'native_host_intent'):
+            state = self.current['checkpoint']
+            thread = state.get('thread_id')
+            if self.harness != 'codex' or value.get('thread_id') != thread:
+                raise CodexError('codex_native_drain_intent_unconfirmed')
+            state['side_effect_started'] = True
+            if kind == 'native_host_intent':
+                state['native_host_intent'] = copy.deepcopy(value)
+            else:
+                state['native_lifecycle'] = copy.deepcopy(value)
+                intent = value.get('drain_intent')
+                if (not isinstance(intent, dict) or intent.get('thread_id') != thread
+                        or intent.get('pid') != getattr(getattr(self.agent, 'process', None), 'pid', None)
+                        or getattr(self.agent, 'native_drain_active', False) is not True):
+                    raise CodexError('codex_native_drain_intent_unconfirmed')
+                state['native_drain_intent'] = dict(copy.deepcopy(intent),
+                    task_id=self.current['id'], task_epoch=self.current['epoch'])
+            # Forced heartbeat/epoch fence precedes the effect. The checkpoint
+            # ACK, not a successful callback alone, authorizes one PID signal.
+            self.tick(force=True)
+            response = self.client.request('/v1/task/update', {
+                'id': self.current['id'], 'epoch': self.current['epoch'], 'checkpoint': state})
+            if not isinstance(response, dict) or response.get('ok') is not True:
+                raise CodexError('codex_native_drain_intent_unconfirmed')
+            return {'ok': True, 'thread_id': thread,
+                    'pid': (value.get('drain_intent') or {}).get('pid')}
+        elif kind == 'native_start_intent':
             # A resumed active goal can produce native work before turn/start.
             # Read-only is not a zero-effect guarantee for network or MCP.
             # This is a managed replay guard, not a native tool restriction.
@@ -662,6 +699,8 @@ class Worker:
             # handler is servicing another request. Heartbeat/fencing still run.
             rpc_depth = getattr(self.agent, 'rpc_depth', 0) if self.agent else 0
             if (self.current and self.agent and getattr(self.agent, 'turn_id', None)
+                    and not self.wait_children
+                    and getattr(self.agent, 'native_drain_active', False) is not True
                     and not self._native_starting and self._native_turn_live is not False
                     and not (isinstance(rpc_depth, int) and rpc_depth > 0)
                     and not self.polling_steering):
@@ -818,6 +857,12 @@ class Worker:
                     finish_options['yield_requested'] = lambda: self.wait_children
                 answer = agent.finish(**finish_options)
                 self._native_turn_live = False
+                lifecycle = getattr(agent, 'native_lifecycle', None)
+                if isinstance(lifecycle, dict) and lifecycle.get('outcome') == 'drained_unverified':
+                    # A natural local exit is not same-goal/history settlement.
+                    # Do not send native_rollout/goal RPC to a closed runtime or
+                    # release guard until the independent yielded seal exists.
+                    raise CodexError('codex_native_yield_seal_required')
                 phase = 'session_save'
                 state = dict(self.current['checkpoint'])
                 rollout = agent.native_rollout() if self.harness == 'codex' else state.get('pi_session_file')

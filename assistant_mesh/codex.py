@@ -96,6 +96,10 @@ class Codex:
         native_plan = config.get('native_plan_tool', True)
         if not isinstance(native_plan, bool):
             raise ValueError('invalid_native_plan_tool_flag')
+        if not isinstance(config.get('native_goal_drain', False), bool):
+            raise CodexError('invalid_native_goal_drain_flag')
+        self.native_drain_active = False
+        self._socket_owner_verified = False
         self.transport_name = config.get('native_transport', 'stdio')
         if self.transport_name not in ('stdio', 'unix'):
             raise CodexError('invalid_native_transport')
@@ -167,6 +171,7 @@ class Codex:
             raise
 
     def _connect_native_socket(self):
+        self._socket_owner_verified = False
         deadline = time.monotonic() + 10
         while not os.path.lexists(self._socket_path):
             if self.process.poll() is not None:
@@ -187,6 +192,7 @@ class Codex:
                 raise CodexError('codex_native_transport_path_unsafe')
             if self.process.poll() is not None:
                 raise CodexError('codex_native_transport_start_failed')
+            self._socket_owner_verified = True
         except (NativeSocketError, socket.timeout, EOFError):
             raise CodexError('codex_native_transport_connect_failed') from None
 
@@ -273,6 +279,8 @@ class Codex:
             self.events.put({'eof': True})
 
     def send(self, value):
+        if getattr(self, 'native_drain_active', False) is True and 'method' in value:
+            raise CodexError('codex_native_drain_rpc_blocked')
         if getattr(self, 'transport_name', 'stdio') == 'unix':
             try:
                 self._native_socket.send_json(value)
@@ -291,6 +299,7 @@ class Codex:
             raise CodexError('codex_disconnected')
         if value.get('transport_error'):
             raise CodexError('codex_native_transport_read_failed')
+        self._record_native_drain_event(value)
         if 'id' in value and 'method' in value:
             if getattr(self, '_hold_host_requests', False):
                 held = self._held_host_requests
@@ -302,6 +311,41 @@ class Codex:
         return value
 
     def _handle_host_request(self, value):
+        receipt = None
+        if getattr(self, 'config', {}).get('native_goal_drain') is True:
+            params = value.get('params')
+            identity = value.get('id')
+            if (not isinstance(params, dict) or params.get('threadId') != self.thread_id
+                    or not isinstance(params.get('turnId'), str) or not params['turnId']
+                    or params.get('turnId') not in getattr(self, '_native_started_turns', set())
+                    or params.get('turnId') in getattr(self, '_native_completion_statuses', {})
+                    or isinstance(identity, bool) or not isinstance(identity, (int, str))
+                    or (isinstance(identity, str) and (not identity or len(identity) > 1024))):
+                raise CodexError('codex_native_drain_request_invalid')
+            key = json.dumps(identity)
+            receipts = self._native_host_receipts
+            if key in receipts:
+                raise CodexError('codex_native_drain_request_duplicate')
+            # Reserve BEFORE a callback or its durable intent. Unknown callback
+            # or reply effects must never be invoked a second time.
+            receipt = receipts[key] = {'status': 'intent', 'thread_id': self.thread_id,
+                'turn_id': params['turnId'], 'request_sha256': hashlib.sha256(key.encode('utf8')).hexdigest()}
+            if getattr(self, 'native_drain_active', False) is True:
+                self._native_drain_idle = False
+            ack = self._activity('native_host_intent', receipt)
+            if not isinstance(ack, dict) or ack.get('ok') is not True:
+                receipt['status'] = 'unknown'
+                raise CodexError('codex_native_drain_intent_unconfirmed')
+            try:
+                self._respond_host_request(value)
+            except BaseException:
+                receipt['status'] = 'unknown'
+                raise
+            receipt['status'] = 'responded'
+            return
+        self._respond_host_request(value)
+
+    def _respond_host_request(self, value):
         if value['method'] == 'item/tool/call' and self.on_tool:
             result = self.on_tool(value['params'])
             self.send({'id': value['id'], 'result': result})
@@ -340,6 +384,8 @@ class Codex:
             self._handle_host_request(request)
 
     def rpc(self, method, params, timeout=30):
+        if getattr(self, 'native_drain_active', False) is True:
+            raise CodexError('codex_native_drain_rpc_blocked')
         self.serial += 1
         request_id = self.serial
         self.rpc_depth = getattr(self, 'rpc_depth', 0) + 1
@@ -417,6 +463,10 @@ class Codex:
         return {'status': 'available' if known and not stale else 'unknown'}
 
     def start(self, text, checkpoint=None):
+        if (getattr(self, 'native_drain_active', False) is True
+                or getattr(self, '_term_sent', False) is True
+                or (getattr(self, 'native_lifecycle', {}) or {}).get('outcome') == 'drained_unverified'):
+            raise CodexError('codex_native_drain_rpc_blocked')
         # Worker callbacks update the live task checkpoint synchronously.
         # Preserve the prior native authority before any such callback replaces
         # its lifecycle; otherwise a yielded goal can silently lose its guard.
@@ -434,6 +484,12 @@ class Codex:
         if mode not in ('plan', 'default'):
             raise CodexError('invalid_collaboration_mode')
         self.turn_id = None
+        self.native_drain_active = False
+        self._native_started_turns = set()
+        self._native_completion_statuses = {}
+        self._native_host_receipts = {}
+        self._native_drain_idle = False
+        self._native_drain_eof = False
         self.native_lifecycle = {'controller_enabled': True,
                                  'goal_managed': bool(requested_goal), 'settled': False,
                                  'quiescent': False, 'runtime_closed': False,
@@ -537,7 +593,7 @@ class Codex:
     def _activity(self, name, value):
         callback = getattr(self, 'on_activity', None)
         if callback:
-            callback(name, copy.deepcopy(value))
+            return callback(name, copy.deepcopy(value))
 
     def _start_state(self, mode):
         return {'thread_id': self.thread_id, 'turn_id': self.turn_id, 'mode': mode,
@@ -778,6 +834,7 @@ class Codex:
         return True
 
     def _consume_finish_event(self, value, replies):
+        self._record_native_drain_event(value)
         if not self._observe_native_event(value):
             return False
         method, params = value.get('method'), value['params']
@@ -798,6 +855,146 @@ class Codex:
                     raise CodexError('codex_turn_failed')
             return True
         return False
+
+    def _record_native_drain_event(self, value):
+        """Local admission evidence only; never callback/RPC inside rpc waits."""
+        if getattr(self, 'config', {}).get('native_goal_drain') is not True:
+            return
+        if value.get('_mesh_drain_observed') is True:
+            return  # The same queued notification is later consumed outside RPC.
+        params = value.get('params')
+        if not isinstance(params, dict) or params.get('threadId') != getattr(self, 'thread_id', None):
+            return
+        method = value.get('method')
+        turn = params.get('turn')
+        started = self._native_started_turns
+        if method == 'turn/started':
+            identity = turn.get('id') if isinstance(turn, dict) else None
+            if (not isinstance(identity, str) or not identity or turn.get('status') != 'inProgress'
+                    or identity in self._native_completion_statuses):
+                raise CodexError('codex_native_drain_turn_unsettled')
+            started.add(identity)
+            self._native_drain_idle = False
+        elif method == 'turn/completed':
+            identity = turn.get('id') if isinstance(turn, dict) else None
+            if not isinstance(identity, str) or not identity or identity not in started:
+                raise CodexError('codex_native_drain_turn_unsettled')
+            status = turn.get('status')
+            prior = self._native_completion_statuses.get(identity)
+            if prior is not None and prior != status:
+                raise CodexError('codex_native_drain_turn_unsettled')
+            self._native_completion_statuses[identity] = status
+        elif method == 'item/started':
+            if (not isinstance(params.get('turnId'), str) or not params['turnId']
+                    or params['turnId'] not in started
+                    or params.get('turnId') in self._native_completion_statuses):
+                raise CodexError('codex_native_drain_turn_unsettled')
+            self._native_drain_idle = False
+        elif method == 'thread/status/changed':
+            status = params.get('status')
+            if not isinstance(status, dict) or status.get('type') not in ('idle', 'active', 'notLoaded', 'systemError'):
+                raise CodexError('codex_native_thread_status_invalid')
+            self._native_drain_idle = status['type'] == 'idle'
+        value['_mesh_drain_observed'] = True
+
+    def _begin_native_goal_drain(self):
+        if self.config.get('native_goal_drain') is not True:
+            raise CodexError('codex_goal_coordination_yield_unavailable')
+        if (getattr(self, 'transport_name', 'stdio') != 'unix'
+                or getattr(self, '_socket_owner_verified', False) is not True):
+            raise CodexError('codex_native_drain_transport_unverified')
+        if (getattr(self, 'native_drain_active', False) is True or self._term_sent
+                or getattr(self, 'rpc_depth', 0) or getattr(self, '_rpc_pending', set())
+                or getattr(self, '_pending_goal_input', None) is not None
+                or getattr(self, '_held_host_requests', [])
+                or any(receipt['status'] != 'responded' for receipt in self._native_host_receipts.values())):
+            raise CodexError('codex_native_drain_boundary_unknown')
+        if self.process.poll() is not None:
+            raise CodexError('codex_native_runtime_exit_unknown')
+        self.native_drain_active = True  # Gate optional steer BEFORE the forced tick.
+        intent = {'status': 'intent', 'pid': self.process.pid, 'thread_id': self.thread_id,
+                  'turn_id': self.turn_id, 'signal': 'SIGTERM'}
+        lifecycle = self.native_lifecycle
+        lifecycle.update(drain_intent=intent, settled=False, quiescent=False, outcome='draining')
+        ack = self._activity('native_drain_intent', lifecycle)
+        if (not isinstance(ack, dict) or ack.get('ok') is not True
+                or ack.get('pid') != self.process.pid or ack.get('thread_id') != self.thread_id):
+            intent['status'] = 'unknown'
+            raise CodexError('codex_native_drain_intent_unconfirmed')
+        if self.process.poll() is not None:
+            intent['status'] = 'unknown'
+            raise CodexError('codex_native_runtime_exit_unknown')
+        self._term_sent = True  # Ambiguous delivery cannot cause a second signal.
+        try:
+            os.kill(self.process.pid, signal.SIGTERM)
+        except OSError:
+            intent['status'] = 'unknown'
+            raise CodexError('codex_native_drain_signal_unknown') from None
+        intent['status'] = 'sent'
+        self._activity('native_drain_signal', lifecycle)
+
+    def _pump_native_goal_drain(self, replies, tick, deadline):
+        """Drain admitted native work; this is NOT an independent yielded seal."""
+        while time.monotonic() < deadline:
+            if tick:
+                tick()
+            if time.monotonic() >= deadline:
+                raise CodexError('codex_native_drain_timeout')
+            try:
+                value = self.deferred.pop(0) if self.deferred else self.events.get(
+                    timeout=min(.25, max(.01, deadline - time.monotonic())))
+            except queue.Empty:
+                value = None
+            if value is not None:
+                if not isinstance(value, dict) or value.get('transport_error'):
+                    raise CodexError('codex_native_transport_read_failed')
+                if value.get('eof'):
+                    if self._native_drain_eof:
+                        raise CodexError('codex_native_drain_boundary_unknown')
+                    self._native_drain_eof = True
+                elif self._native_drain_eof:
+                    raise CodexError('codex_native_drain_boundary_unknown')
+                elif 'id' in value:
+                    if 'method' not in value:
+                        raise CodexError('codex_native_drain_boundary_unknown')
+                    self._handle_host_request(value)
+                else:
+                    self._consume_finish_event(value, replies)
+            # Callbacks still heartbeat while running, but are not hard real-
+            # time bounded. Never grant proof after their deadline has passed.
+            if time.monotonic() >= deadline:
+                raise CodexError('codex_native_drain_timeout')
+            completions = self._native_completion_statuses
+            if any(status != 'completed' for status in completions.values()):
+                raise CodexError('codex_native_drain_turn_unsettled')
+            if self._native_drain_eof and not self.deferred and self.events.empty():
+                code = self.process.poll()
+                if code is None:
+                    continue
+                if (code != 0 or self._native_cleanup_forced or self._reader_forced_close
+                        or not self._native_drain_idle or not self._native_started_turns
+                        or set(completions) != self._native_started_turns
+                        or any(receipt['status'] != 'responded' for receipt in self._native_host_receipts.values())
+                        or getattr(self, '_rpc_pending', set())):
+                    raise CodexError('codex_native_drain_boundary_unknown')
+                self.process.wait(timeout=0)  # poll observed a terminal owned child.
+                self.reader.join(timeout=.1)
+                if time.monotonic() >= deadline:
+                    raise CodexError('codex_native_drain_timeout')
+                if self.reader.is_alive():
+                    continue
+                self.native_lifecycle.update(runtime_closed=True, settled=False, quiescent=False,
+                    outcome='drained_unverified', drain_evidence={
+                        'pid': self.process.pid, 'natural_exit_code': code, 'reader_eof': True,
+                        'started_turn_ids': sorted(self._native_started_turns),
+                        'natural_completion_statuses': copy.deepcopy(completions),
+                        'host_request_count': len(self._native_host_receipts),
+                        'idle_observed': True})
+                self._activity('native_drained', self.native_lifecycle)
+                if time.monotonic() >= deadline:
+                    raise CodexError('codex_native_drain_timeout')
+                return '\n\n'.join(replies) or '原运行器已自然排空；仍需独立核验原目标与历史。'
+        raise CodexError('codex_native_drain_timeout')
 
     def _drain_finish_events(self, replies):
         """Consume already-arrived messages outside RPC waits, in wire order."""
@@ -852,15 +1049,13 @@ class Codex:
             self.native_lifecycle = lifecycle = {'controller_enabled': False,
                                                  'goal_managed': False, 'settled': False}
         while time.monotonic() < deadline:
+            if (lifecycle['goal_managed'] and yield_requested and yield_requested()
+                    and (lifecycle.get('goal') or {}).get('status') == 'active'):
+                self._begin_native_goal_drain()
+                return self._pump_native_goal_drain(replies, tick, deadline)
             if tick:
                 tick()
             if lifecycle['goal_managed'] and (self.turn_id is None or self.turn_id in self._completed_turns):
-                if (self.turn_id is not None and yield_requested and yield_requested()
-                        and (lifecycle.get('goal') or {}).get('status') == 'active'):
-                    # Safe cooperative handoff of an active native goal is a
-                    # separate contract. Do not fake settlement, pause the
-                    # owner's goal, or monopolize the worker needed by children.
-                    raise CodexError('codex_goal_coordination_yield_unavailable')
                 if self._goal_quiescence_barrier(replies):
                     return '\n\n'.join(replies) or '原生目标已停止本轮工作；状态以实际 goal 快照为准。'
             try:

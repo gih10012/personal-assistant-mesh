@@ -217,6 +217,7 @@ class NativeAliasAdapterTests(unittest.TestCase):
             self.assertEqual(target, connect.call_args[0][0])
             self.assertEqual(424242, connect.call_args[1]['expected_peer_pid'])
             self.assertEqual(os.geteuid(), connect.call_args[1]['expected_peer_uid'])
+            self.assertIs(True, agent._socket_owner_verified)
             chmod.assert_not_called()
 
     def test_wrong_alias_payload_never_connects_or_changes_target_permissions(self):
