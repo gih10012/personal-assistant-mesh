@@ -340,6 +340,18 @@ Python3.6及CI Python3.8有一个HTTPError空fp测试cleanup错误，修正为
 行未变，仍不冒称Worker完整terminal交接。下一步核对官方原生goal
 模型工具开放，新能力合同另验；正式服务不加载候选、不强设complete。
 
+夹具修正后 `d8c603d` 冻结双端各1610项完整通过（146.256s/145.782s），
+CI38045193255实际success。并行源码核对排除了goal功能默认关闭，确认
+真实get/create/update工具及Code Mode的tools.get_goal/tools.update_goal
+名称；模型tool_mode差异不能靠直接schema猜测。新实际目录模型sol
+无active只读get_goal通过，另一个独立合同的原生get/update/同goal
+complete和普通saved artifact核对通过；私有客户端漏最后children查询，
+完整Worker task未通过并保持unknown，不重跑。不同模型/合同的局部
+证据不能拼成C4完整往返。DEFAULT等待布尔及WORKING_CONTRACT原生工具
+提示已同步，两个新fixture/151项近邻通过。冻结后下一步使用完整真实
+API客户端验父子同goal合同，而非不断手写不完整的私有假客户端；正式
+环境、所有旧失败身份与guard保持，Chat/Cloud仍未真正入网。
+
 正式 laptop worker/node 原先直接以开发仓库为工作目录，重启可能误载
 候选。已保留一致账本与单位配置，改为私有冻结 `3198c87` 版本目录；
 实际两进程 working directory 已核对，原行、配置字节与两条 guard 未变，

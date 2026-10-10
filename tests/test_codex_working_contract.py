@@ -118,6 +118,25 @@ class CodexWorkingContractTests(unittest.TestCase):
         marker_only = '[personal-assistant-mesh 持续工作合同 v1]'
         self.assertEqual(marker_only + '\n\n' + WORKING_CONTRACT, working_instructions(marker_only))
 
+    def test_default_wait_instructions_follow_actual_ready_receipt(self):
+        self.assertIn('continue_after_children=true', DEFAULT_INSTRUCTIONS)
+        self.assertIn('返回 false 时使用实际 tasks 结果继续当前工作', DEFAULT_INSTRUCTIONS)
+        self.assertNotIn('调用 mesh_wait_children 后结束本轮', DEFAULT_INSTRUCTIONS)
+
+    def test_native_goal_tool_hint_does_not_change_model_permissions_or_goal_state(self):
+        agent = self.runtime(instructions='keep owner context')
+        agent.start('ordinary work')
+        instructions = agent.calls[0][1]['developerInstructions']
+        self.assertIn('tools.get_goal({})', instructions)
+        self.assertIn('tools.update_goal({status:"complete"})', instructions)
+        self.assertIn('只有完整目标确实实现才完成 goal', instructions)
+        self.assertIn('这些提示不是原生能力门禁', instructions)
+        self.assertNotIn('tools.update_goal.enabled', instructions)
+        self.assertEqual(['thread/start', 'turn/start'], [method for method, params in agent.calls])
+        self.assertNotIn('model', agent.calls[0][1])
+        self.assertNotIn('sandbox', agent.calls[0][1])
+        self.assertNotIn('approvalPolicy', agent.calls[0][1])
+
     def test_empty_and_none_owner_prefix_still_receive_contract_without_invented_default(self):
         for value in ('', None):
             with self.subTest(value=value):

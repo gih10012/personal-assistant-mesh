@@ -21,6 +21,27 @@
     "correction_state": "superseded by separately frozen 58fac34 two-host 1510/CI and opt-in idle verification; original failed attempt retained"
   },
   "latest_source_release": {
+    "phase": "managed wait readiness; corrected older-Python fixture, isolated candidate not production",
+    "code_commit": "d8c603da6e8b286151857c96f8d27fbbe516fb52",
+    "archive_sha256": "e7d4ed447c1ca2225e68d6c5c9ff00d2e46c8f7bf47410a05c411250450b963e",
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38045193255",
+    "ci_verified_success": true,
+    "source_public": true,
+    "local_full_suite_tests_passed": 1610,
+    "local_full_suite_duration_seconds": 146.256,
+    "vps_python36_full_suite_tests_passed": 1610,
+    "vps_python36_full_suite_duration_seconds": 145.782,
+    "native_goal_drain_default_enabled": false,
+    "native_goal_yield_default_enabled": false,
+    "production_core_loaded": false,
+    "production_runtime_and_configuration_changed": false,
+    "original_unknown_replayed": false,
+    "private_new_model_get_goal_verified": true,
+    "private_new_model_update_goal_and_ordinary_artifact_verified": true,
+    "private_new_model_verified": "gpt-6.1-sol from actual native catalog; capability observation, not permanent ranking",
+    "private_new_native_goal_scope": "fresh controlled goal, original objective/createdAt/budget and cumulative usage preserved; native get/update and independently observed complete, natural runtime 0 and ordinary saved history SHA match; private client missed final children query so original task remains unknown/guarded and full Worker completion unverified"
+  },
+  "previous_seal_source_release": {
     "phase": "PAM-007c-3 independent native seal and strict Worker handoff; isolated candidate, not production",
     "code_commit": "85f961120d373eb80c02b6472ff65bbaef187a99",
     "archive_sha256": "13f3f6038662bf13699e172dd097ceeb1644a9718ace637636a339343af164ac",
@@ -627,7 +648,7 @@
       "state": "in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "85f9611两端1591/CI和隔离drain/seal通过；79d8931原父epoch3实际wait False journal/原child/native final marker已核验，但goal仍active导致64自动turn后超时unknown，原guard保留不再resume。修正Python3.6/CI3.8夹具并核对官方原生goal模型工具配置；新功能合同另验，不为旧unknown换ID。正式3198c87，Chat/Cloud仍未入网",
+      "next_action": "d8c603d冻结双端1610/CI通过，原Luna epoch3 marker已核验但unknown保留不resume。官方goal默认开启，原生code-mode工具名称已核清；新gpt-6.1-sol实际get/update goal、独立complete及普通artifact SHA通过，但私有client缺最终children查询，整task仍unknown。补默认wait布尔/原生工具提示两新fixture后冻结；后续真实完整API客户端/同父子合同验收，不为unknown换ID修复。正式3198c87，Chat/Cloud仍未入网",
       "evidence": {
         "coordination_tasks_created": true,
         "plan": "docs/PLAN.md",
@@ -677,7 +698,17 @@
         "native_goal_private_epoch3_actual_ready_receipt_and_native_final_marker_verified": true,
         "native_goal_private_epoch3_full_worker_terminal_handoff_verified": false,
         "native_goal_private_epoch3_outcome": "codex_turn_timeout_unknown_guard_preserved_no_resume",
-        "native_goal_model_completion_tool_availability_verified": false,
+        "native_goal_model_completion_tool_availability_verified": true,
+        "native_goal_model_completion_tool_availability_scope": "fresh native0.162 gpt-6.1-sol actual get_goal/update_goal in code mode and independent same-goal complete; not original Luna context, not full Worker finalization",
+        "native_goal_tools_official_pinned_commit": "c1382380de69521303b416720a52f42d51af6248",
+        "native_goal_tools_default_enabled_official_source_verified": true,
+        "native_goal_tools_per_tool_toml_enable_flag_exists": false,
+        "native_goal_new_model_ordinary_terminal_artifact_hash_verified": true,
+        "native_goal_new_model_private_client_missing_children_route_retained": true,
+        "native_goal_new_model_full_worker_task_finalization_verified": false,
+        "native_goal_new_model_unknown_replayed": false,
+        "native_goal_default_wait_and_code_mode_prompt_fixture_tests_passed": 2,
+        "native_goal_prompt_related_fixture_tests_passed": 151,
         "native_goal_wait_children_ready_contract_implemented": true,
         "native_goal_wait_children_ready_new_fixture_tests_passed": 19,
         "native_goal_wait_children_ready_related_fixture_tests_passed": 107,
@@ -751,12 +782,12 @@
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
         {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "isolated_seal_wake_and_ready_marker_verified_native_goal_terminal_handoff_pending",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "79d8931已公开，本机冻结1610通过；VPS和CI3.8有一个HTTPError空fp cleanup夹具错误，已用BytesIO修正。原父epoch3实际wait False和native final marker已核验，但goalactive/64自然turn后timeout unknown，不再resume。下一片核对官方原生goal模型工具开放并新合同验收，不host强设complete/reset、不换ID修旧unknown。默认禁用未部署，Chat/Cloud仍未入网",
+         "next_action": "d8c603d双端1610/CI通过；原Luna epoch3 actual marker/False已验但timeout unknown保留。新实际sol原生get/update goal+独立complete+普通artifact通过，私有client缺最后children query所以task仍unknown，不resume。修正默认wait布尔和native code-mode名字提示，两新fixture/151近邻通过；冻结后以完整实际API合同再验父子交接，不能用新ID修旧unknown或host强设complete/reset",
          "implementation_slices": [
            {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
            {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "isolated_actual_active_drain_verified_not_production", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "85f9611两端1591项/CI，新tool-field合同实际active drain自然0/EOF、一个admitted turn完成；默认false未部署。原e229651 idle失败、最早resume unknown及私有错误callback unknown均保留不重放"},
            {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "isolated_actual_active_goal_seal_and_artifact_commit_verified_not_production", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "85f9611双端1591项/CI通过；新隔离实际active goal/usage不reset，独立observer自然0且原thread前后notLoaded、turn自然完成/完整历史/strict artifact ACK通过。第一epoch不是full Worker；保留原unknown。正式默认false，跨节点及任意外部副作用另验"},
-           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "epoch3_actual_child_marker_verified_native_goal_terminal_handoff_unknown_no_replay", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "epoch2实际full Worker同thread/goal resume+steer/strict reseal通过；epoch3受管wait False/实际child在持久journal和原生final均核验，但goal未complete且timeout unknown/guardtrue，保留原行不resume。核对原生goal工具并新能力合同验收；自然terminal普通artifact SHA不得称strict-fingerprint commit，正式不部署"}
+           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "actual_ready_marker_and_separate_native_goal_control_verified_full_roundtrip_pending", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "原父epoch2 strict reseal与epoch3实际marker已验，epoch3 unknown不resume；新sol get/update/独立complete及普通artifact已验，私有client缺最后children query的task保持unknown。后续完整实际API客户端与原生工具合同父子往返，不能拆证据拼成一次完整roundtrip；DEFAULT等待描述与WORKING_CONTRACT原生code-mode提示已改，两新fixture/151近邻通过，冻结后继续"}
          ]},
         {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
@@ -784,7 +815,7 @@
     }
   ],
   "current_work": {
-    "phase": "79d8931 published: local frozen1610 passed, VPS/CI old Python HTTPError fixture cleanup failed and corrected; actual epoch3 immutable ready-False/exact-child/native final marker verified but native goal stays active and timeout unknown retained, no resume; inspect native goal tool availability next; production unchanged and Chat/Cloud not joined",
+    "phase": "d8c603d two-host1610/CI verified; ready False/native marker and separate sol native get/update/independent complete/ordinary artifact verified, failed task identities/guards retained and full child roundtrip unverified; default wait/native-code-mode instruction fix has 2 new/151 related fixtures, freeze next; production unchanged and Chat/Cloud not joined",
     "whole_goal_completed": false
   }
 }

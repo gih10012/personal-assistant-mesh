@@ -263,3 +263,37 @@ turn，原authority行未变；这不是Worker settlement或terminal artifact
 commit，不能用审计通过强行完成旧工作。下一片核对原生goal模型工具
 真实名称/配置和可访问性，新的能力合同另验，不host set complete或
 reset用量、不以新ID修复这条unknown。
+
+修正夹具后的 `d8c603d` 同一冻结归档
+`e7d4ed447c1ca2225e68d6c5c9ff00d2e46c8f7bf47410a05c411250450b963e`
+两端完整1610项通过（本机146.256s、VPS Python3.6.8 145.782s），
+[CI实际success](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38045193255)。
+没有部署或修改正式配置；上份夹具失败和原native unknown仍保留。
+
+## Native goal tools and model evidence
+
+官方0.159.2/0.162的`features.goals`均默认开启，真实工具为
+`get_goal/create_goal/update_goal`；没有`tools.update_goal.enabled`
+TOML项。Code Mode可调用`tools.get_goal({})`及
+`tools.update_goal({status:"complete"})`，不是Mesh代理工具。
+模型tool_mode可优先于feature选择暴露方式；只数直接schema或顶层
+request.tools不能证明工具缺失。原生Shell/其他工具继续可用。
+[工具定义](https://github.com/openai/codex/blob/c1382380de69521303b416720a52f42d51af6248/codex-rs/ext/goal/src/spec.rs#L9)、
+[模型tool mode](https://github.com/openai/codex/blob/c1382380de69521303b416720a52f42d51af6248/codex-rs/core/src/tools/mod.rs#L75)、
+[Code Mode名称](https://github.com/openai/codex/blob/c1382380de69521303b416720a52f42d51af6248/codex-rs/tools/src/code_mode.rs#L261)。
+
+新鲜无active goal的实际目录模型gpt-6.1-sol会话通过code-mode调用
+真实get_goal并自然0/reader回收；私有结果JSON将PosixPath直接序列化
+失败，保留原部分字节，离线从实际native call/output/同cwd唯一线程/
+自然turn审计，不重新执行。新独立native goal-control合同随后实际
+调用get/update goal，原目标/createdAt/预算和累计usage保留；只读
+observer确认同goal complete、自然0/完整历史及普通saved artifact SHA
+匹配。私有StoreClient却漏接Worker最后自动children查询，整task仍
+unknown/guardtrue；原native session已settled与artifact保留。不能以
+这份能力审计完成原task，不恢复或重跑它。这也没有证明原Luna上下文
+的工具不可见/模型缺陷，模型、任务和提示差异尚未归因。
+
+DEFAULT_INSTRUCTIONS同步按wait布尔交付结果，WORKING_CONTRACT增加
+实际原生goal工具及Code Mode名字提示，不新增模型固定排名、goal写入、
+权限门禁或native feature开关。两项新fixture/151项近邻通过；完整
+父子roundtrip需同一次实际完整API合同证据，不能拼接以上不同试验。
