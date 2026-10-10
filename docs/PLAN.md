@@ -251,8 +251,14 @@ authority 等子任务不再制造零效果。`ef647c80253740b1ac2e43b3e8e41df88
 当前 active goal 请求等子任务仍显式报告未支持并保留 unknown；途中
 跨节点记忆复制与强实时 lease watchdog 未完成。Chat 原生 MCP/OAuth
 未接通，Cloud 本项目环境仍为空且无实际 job/node。
-官方 socket graceful drain 是 007c 的下一项隔离实验，不是已实现能力；
-stdio 不支持这一排空，unsubscribe 不阻止 goal 自动续跑。
+官方 socket graceful drain 的私有阶段一已实际通过：真实测试 turn 自然
+结束、运行器退出码 0，同 goal 仍 active、原生字节前缀保留。阶段二
+同线程 resume 没有重设 goal/turn/start，但未进入新输入握手，随后
+强杀专用 PID；实际 6 started/5 completed，末轮保留 unknown，不重放。
+这是新的实现依据而非正式 Worker yield 验收；下一片需显式一次性交付
+新 task 输入、失败先 drain 与独立 yielded outcome。stdio 不支持这一
+排空，unsubscribe 不阻止 goal 自动续跑，不能借新线程绕过失败。
+详见 [原生socket实测](NATIVE-SOCKET-DRAIN-TRIAL.md)。
 详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。
 
 正式 laptop worker/node 原先直接以开发仓库为工作目录，重启可能误载

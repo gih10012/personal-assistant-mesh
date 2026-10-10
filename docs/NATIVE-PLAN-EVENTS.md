@@ -105,7 +105,7 @@ laptop 完整 1328 项通过（145.661 秒）、VPS Python 3.6 完整 1328 项
 不为这些缺项 fork 新 Leader、不重放 unknown；原生 Shell、联网、文件、
 MCP 和自主排障继续可用。
 
-## active goal 让出运行：下一项隔离实验
+## active goal 让出运行：研究与独立试验
 
 已读实际 VPS 0.159.2 对应官方源码。取消订阅不是让出：订阅删除后
 goal 自动续跑仍不依赖订阅人数；`deferGoalContinuation` 仅在 fork 暴露，
@@ -120,9 +120,13 @@ graceful drain。当前 `close()` 的进程组终止不能直接当作该合同�
 [drain 实现](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server/src/lib.rs#L248)，
 [stdio 排除条件](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server/src/lib.rs#L775)。
 
-最小下一步是专用私有 socket、独立 specialist 测试线程：保留原 goal/
+研究确定最小试验为专用私有 socket、独立 specialist 测试线程：保留原 goal/
 usage/history，向运行器 PID 单独发一次 drain 信号，继续接收所有已准入
 turn 的事件直到完整落盘/回收；之后仅用不加载线程的实际 read/get 核对
-相同目标仍 active、用量未重置和完整原生历史，再试同线程续接。研究
-不是验收；正式 Leader 未做此试验，也未打开长期 goal。若通过再设计
-明确 yielded outcome，不能复用要求 nonactive goal 的 terminal seal。
+相同目标仍 active、用量未重置和完整原生历史，再试同线程续接。
+现已实际完成阶段一：1 个真实 turn 自然结束、退出码 0、active goal
+和原生字节前缀保留，未强杀；同线程 resume 阶段二未进入新输入握手，
+退出前出现未终结自动 turn，原结果保留 unknown，未重放。完整范围
+见 [socket 独立实测](NATIVE-SOCKET-DRAIN-TRIAL.md)。正式 Leader 未做
+此试验，也未打开长期 goal；生产 yielded outcome 仍未实现，不能
+复用要求 nonactive goal 的 terminal seal。
