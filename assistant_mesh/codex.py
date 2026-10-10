@@ -82,6 +82,9 @@ class Codex:
         memories = config.get('native_memories', True)
         if not isinstance(memories, bool):
             raise ValueError('invalid_native_memories_flag')
+        native_plan = config.get('native_plan_tool', True)
+        if not isinstance(native_plan, bool):
+            raise ValueError('invalid_native_plan_tool_flag')
         root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
         env = os.environ.copy()
         if config.get('network_env_file'):
@@ -105,6 +108,11 @@ class Codex:
         command += ['-c', 'features.memories=' + enabled,
                     '-c', 'memories.generate_memories=' + enabled,
                     '-c', 'memories.use_memories=' + enabled]
+        # Codex 0.159.2/0.162 register update_plan only when this native config
+        # is enabled. Expose the genuine native checklist, not an application
+        # generated event. Owner opt-out overrides only this child too; no
+        # global profile edit, new goal, permission ceiling or model choice.
+        command += ['-c', 'tools.update_plan.enabled=' + ('true' if native_plan else 'false')]
         command += ['app-server', '--stdio']
         self.auth_home = root
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,

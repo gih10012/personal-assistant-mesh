@@ -498,7 +498,12 @@
         "native_notification_capture_local_full_suite_tests_passed": 1279,
         "latest_native_executor_trial_plan_still_null": true,
         "latest_native_executor_trial_model_reported_update_plan_unavailable": true,
-        "native_update_plan_tool_availability_independently_verified": false
+        "native_update_plan_tool_availability_independently_verified": false,
+        "native_update_plan_default_disabled_official_source_verified": true,
+        "actual_cloud_native_codex_version": "0.159.2",
+        "native_update_plan_child_configuration_implemented": true,
+        "native_update_plan_child_configuration_fixture_tests_passed": 3,
+        "native_update_plan_child_configuration_production_loaded": false
       },
       "acceptance": "计划/任务可续接；目录驱动模型判断；升级有真实证据和回退；未创建定时任务不声称已运行"
     },
