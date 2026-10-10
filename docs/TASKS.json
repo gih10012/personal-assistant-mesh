@@ -43,6 +43,10 @@
     "laptop_worker_and_node_pinned_to_frozen_private_release": true,
     "laptop_runtime_isolation_original_rows_and_configurations_preserved": true,
     "laptop_runtime_isolation_other_services_restarted": false,
+    "laptop_new_firefox_and_codex_mcp_entrances_pinned_to_frozen_release": true,
+    "laptop_entrance_original_request_and_approved_result_readback_unchanged": true,
+    "laptop_entrance_client_grant_and_manifest_bytes_preserved": true,
+    "laptop_existing_mcp_process_restarted": false,
     "all_runtime_entrypoints_release_isolated": false,
     "runtime_release_boundary": "docs/RUNTIME-RELEASE-BOUNDARY.md",
     "owner_terminal_result_readback_verified": true,
@@ -581,7 +585,7 @@
          "next_action": "保留3–5天检查与实时目录选择的原owner要求，配置实际周期入口并核验触发/记录，不靠排序假称模型选择"},
         {"id": "PAM-007f", "title": "源码候选与正式运行入口的版本边界", "state": "partially_verified",
          "owner": "root", "depends_on": [],
-         "next_action": "laptop worker/node已在一致备份后固定到私有冻结3198版本，原行/配置/guard保留；native-recovery与其他MCP/CLI入口仍需逐项隔离，Linux路径只是本机例子，协议不限制节点自适配"}
+         "next_action": "laptop worker/node与新启动的Firefox/Codex MCP入口已固定到冻结3198；入口原request/task/publication/status/result及client/grant/manifest保留，没有新task/model。存活MCP进程未重启，native-recovery与其他入口/模板仍需逐项隔离，不把本机Linux路径固化成协议"}
       ]
     },
     {

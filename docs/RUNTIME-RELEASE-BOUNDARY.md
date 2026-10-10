@@ -24,8 +24,17 @@ laptop 的 worker/node 原先以开发仓库为 WorkingDirectory。已在空闲
 VPS 核心本来就在私有发布目录；独立 managed provider 进程在本次
 操作前后保持相同 PID、active、NRestarts=0，没有新增受管执行。
 
-**未完成：** laptop native-recovery 保持旧进程且仍指向开发目录；其他
-MCP/CLI/服务入口也需分别核对。不能把两个核心入口固定说成所有
+随后也保留 Firefox host、Codex MCP settings 与既有 profile 原配置，
+只改三处源码路径：host import root、MCP launcher、私有 runtime_root。
+新启动的两个入口已使用同一冻结正式版本；真实读取原 request 的
+status/result，task、publication、完整批准投影与切换前一致。client、
+grant/token、Firefox manifest 字节保留；没有提交新 task、调用模型、
+重启既有进程或改变权限。验证是独立协议客户端，不是 Chat 模型 tools
+或实际浏览器 UI 新一轮调用。
+
+**未完成：** laptop native-recovery 保持旧进程且仍指向开发目录；已
+存活的 MCP 进程没有重启，公开单位模板仍使用仓库目录。其他入口
+需分别完成切换及实际进程核验。不能把已核对的启动入口固定说成所有
 进程、动态导入或整机都已经版本隔离。续接 task 为 PAM-007f；逐项
 选择静止边界、保留原状态和恢复配置，再核对实际运行来源。
 

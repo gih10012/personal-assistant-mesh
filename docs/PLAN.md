@@ -261,6 +261,10 @@ stdio 不支持这一排空，unsubscribe 不阻止 goal 自动续跑。
 未加载新 goal 控制器、未启用目标，也未恢复 DB/history。独立 provider
 未重启。native-recovery 仍在旧进程/开发目录，其他 CLI/MCP 入口尚未
 全部隔离，不把两个核心单位的切换说成全面版本隔离。
+随后已备份并固定 Firefox host 与既有 Codex MCP 的新启动路径；实际
+原请求 status/result、task/publication 及完整批准投影保持，身份配置
+不变，没有新 task/model 或既有进程重启。存活旧 MCP/恢复进程和模板
+仍单列，协议客户端的读回不等于 Chat 模型或浏览器 UI 新验收。
 续接 PAM-007f 的 [运行发布边界](RUNTIME-RELEASE-BOUNDARY.md)。
 Cloud 本项目环境连接/发布条件单列，不以此缺项阻断 004b 中层真实出口。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。
