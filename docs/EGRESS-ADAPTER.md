@@ -189,5 +189,48 @@ config/SHA/origin/TTL limits, owner-only transport selection, explicit inherited
 proxy bypass, fake direct connectivity rejection, immutable unknown identities,
 and the actual local allocation→runtime→artifact→settlement/capacity-release chain.
 The latter uses a network capture fixture, not public HTTPS/model execution.
-Production installation, real cross-node invocation/readback and authenticated
-model usefulness are separate Root-owned checks; this source is not their proof.
+Those fixtures are not proof of production installation, public networking,
+real cross-node invocation/readback or authenticated model usefulness.
+
+## Actual installation and bounded Leader trial (2026-10-10)
+
+Frozen `dd5ae77` was independently tested on laptop and VPS Python 3.6.8
+(1761 tests each); [CI 38063838338](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38063838338)
+completed successfully on Python 3.8/3.12/3.14. The existing production core
+remains `3198c87`. A **separate**, enabled VPS provider service now imports this
+frozen source, renews its fixed capability/request-pool leases, and does not
+replace the Leader or ClawBot receiver. Actual laptop authority projection sees
+`ali-vps-public-https-v1` epoch 1. The private fixed owner contract expires at
+2026-10-17 23:59 Asia/Shanghai; pool capacity is one managed request, not a
+measurement of physical network bandwidth.
+
+Root independently fetched two distinct public document scopes, checked their
+bytes against local frozen Git content, and registered the actual observations.
+The original Leader then selected one under the stable task
+`PAM-004d-generic-https-handoff-20261010-v1`, epoch 16, retaining its original
+native thread. It reserved and linked
+`PAM-004d-generic-https-get-20261010-v1`; Root did not reserve or invoke the
+callback on its behalf. The standing provider automatically executed GET:
+HTTP 200, TLS verification 0, 6294 bytes, body SHA-256
+`8fc55daa7d508de4c4a2829a188e1ac3b8f354ea66fbc50b9093c42ab151ac1f`.
+Readonly private artifact readback independently matched that Git oracle;
+artifact SHA-256 is
+`db18fc3035f22d31cf686f0b2107ac2feb8f675b6adb929987fbe69be34d9b3b`.
+The original provider journal is `settled`, authority operation `completed`,
+and pool held quantity zero. The original native task completed in that same
+thread, with all three native plan steps completed. Readonly routing-ledger
+checks matched its two-candidate choice, immutable body SHA and original
+operation link. This bounded task completion is not completion of the Mesh goal.
+
+Earlier quota/auth/preflight and native-restore failures are retained. Recovery
+reused the authorized newer **same-account** cache with backup, and only refreshed
+a verified strict old history prefix after full-byte/consistent-ledger backups
+and quiescence checks. Authority task/native rows were unchanged during that
+maintenance; no old DB restore, thread reset, unknown replay or native-tool block.
+An initial backup process exited 137 before publish; the worker was restored and
+streaming backup completed the reviewed maintenance.
+
+This proves one generic public scope was genuinely selected/executed/read back,
+not arbitrary authenticated Chat/model traffic, physical-host attestation, a
+global proxy, another independent egress candidate, or seamless everyday
+cross-node standing admission. Those remain PAM-002a/004d; campus is separate.

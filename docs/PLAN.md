@@ -138,13 +138,34 @@ checkpoint只读导出/私有写入/读回也通过，仍非handoff。
 实现单一指定witness的候选/任期/派发intent，旧holder停止及完整账本
 闭合未证不转任。共享能力的失联防重放，不变成阻断节点native自主性。
 
-上述源码现已可集成：[通用HTTPS](EGRESS-ADAPTER.md)20新/101相关fixtures，
-[通道fence](CHANNEL-CARRIER.md)34新/114相关fixtures。后者仍未接真实
-Channel/API/Store边界，默认无verifier不grant，不称自动接管。Root先冻结
-风险相称验证，另加VPS独立HTTPS承载，不替换现有正式goal核心或收发器。
-Chat文档重新实读确认Chat与Work均支持插件；补网络MCP/OAuth/主账号
-真实调用，官方Cloud补published environment/真实job与节点权限映射，
-不用旧Work-only推断永久限制，亦不把普通Chat说成无限额度。
+随后已冻结上述[通用HTTPS](EGRESS-ADAPTER.md)20新/101相关fixtures和
+[通道fence](CHANNEL-CARRIER.md)34新/114相关fixtures源码为dd5ae77。
+同归档本机/VPS Python3.6.8均1761项通过（142.845s/147.151s），
+[CI38063838338](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38063838338)
+三版本实际success，不替换正式3198c87核心/goal实验开关或收发器。
+
+**新增实际安装**：ali-vps独立公开HTTPS provider service，固定owner
+配置/包装器/epoch，能力和1个managed request容量池登记、60s续租，
+截止2026-10-17 23:59；本机真实laptop authority投影可见。两条公开
+文档目标GET200/TLS0/正文SHA与独立Git oracle一致，scope观测已登记。
+这不是认证Chat/API代理，不是物理带宽证明；统一日常准入仍需简化。
+原Leader稳定task/operation已提交，Root未代reserve/execute；先卡
+账户quota/auth，备份同步同账号较新缓存后零模型account/quota通过，
+再卡旧native历史restore冲突。核验严格旧前缀和终结turn、保留全部
+旧字节与一致账本备份后原子刷新，维护前后authority行一致；首轮
+全量备份进程exit137发生在publish之前，已恢复Worker、改为流式
+备份且成功。原task epoch16/原thread已实际选路、reserve/link，
+服务自动GET200/TLS0/6294B，Root只读独立产物与Git oracle SHA相同，
+原journal settled/容量held0。原native task同thread已completed、plan三步完成；两候选routing选择/body SHA/原operation link已核对。不是
+把Root前置探测当成模型执行，也不是完整通用认证出口验收。
+
+下一步并行优先：009c/d接真实Channel/API/Store的失权/完整状态交接，
+目前源码默认无verifier不grant，仍为VPS单收发，不称HA；004d完成
+上述原任务及便捷统一准入，002b把已验证的native SSH校内路径做成
+选择性能力。随后006d补Chat网络MCP/OAuth/主账号调用，006e补官方
+Cloud published environment/真实job与task/epoch/lease/临时节点集成。
+不把普通Chat说成无限额度，不用VPS代官方Cloud，010真实第三方
+工具/续接与007原goal/周期检查另继续，所有native能力保持可用。
 
 ## Leader 持续工作合同
 

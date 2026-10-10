@@ -78,7 +78,17 @@ checkpoint。正式核心未替换，Chat/官方 Cloud、校园出口、ClawBot
 保持本 goal active 与原任务身份；具体状态见 PLAN/TASKS，不缩小目标。
 冻结d8bfeda双端1707项与公开CI已通过，Codex两版本真实配置读回和
 正式VPS只读通道快照已实测；这不是第三方推理或ClawBot接管完成。
-下一片已有通用HTTPS callback和单一指定witness的候选/once-only fence
-源码，待冻结/集成与真实承载；校园新增本机和VPS经native SSH借本机
-校内HTTP200证据，未登记通用代理。普通Chat官方插件路线已重新确认，
-实际HTTP/OAuth/账号工具与官方Cloud job仍推进，不改成本机VPS冒充。
+随后通用HTTPS callback和单一指定witness的候选/once-only fence源码
+已冻结为dd5ae77：同归档双端1761项及公开CI通过。已新增独立VPS
+公开HTTPS承载、能力/容量登记和续租，本机实际能力投影可见；两条
+公开目标独立GET/TLS/正文SHA核验通过。原Leader通用调用task已经
+提交，原task epoch16/原thread已实际选路/预留，独立服务自动GET/
+结算，6294字节产物正文SHA与Git oracle相同、容量归还；native
+task已同thread自然completed、native plan三步完成，不是整体联网/认证模型/多候选性能验收。
+同账号较新native认证已备份同步，零模型account/quota核验通过，
+严格旧前缀历史已保留完整备份并同路径原子刷新，权威行未变；
+仍不换原task/thread、不清历史或重放旧unknown。ClawBot fence还未
+接入真实Channel/API/Store，仍是VPS唯一收发器，不冒称多节点HA。
+校园新增本机和VPS经native SSH借本机校内HTTP200证据，未登记通用
+校园代理。普通Chat官方插件路线已重新确认，实际HTTP/OAuth/账号
+工具与官方Cloud job仍推进，不改成本机VPS冒充。
