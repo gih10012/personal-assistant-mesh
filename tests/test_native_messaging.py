@@ -5,6 +5,7 @@ import os
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -349,8 +350,9 @@ class NativeDeploymentTests(unittest.TestCase):
     def test_unsigned_package_exact_allowlist_no_config_test_launcher_or_overwrite(self):
         output = self.directory / 'offline-development.xpi'
         script = ROOT / 'browser/firefox-mesh/build.py'
-        completed = subprocess.run(['python', str(script), str(output)], capture_output=True,
-                                   text=True, timeout=10)
+        completed = subprocess.run([sys.executable, str(script), str(output)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   universal_newlines=True, timeout=10)
         self.assertEqual(0, completed.returncode, completed.stderr)
         receipt = json.loads(completed.stdout)
         self.assertFalse(receipt['signed'])
@@ -362,15 +364,17 @@ class NativeDeploymentTests(unittest.TestCase):
             for name in expected - {'LICENSE'}:
                 self.assertEqual((ROOT / 'browser/firefox-mesh' / name).read_bytes(), archive.read(name))
         before = output.read_bytes()
-        duplicate = subprocess.run(['python', str(script), str(output)], capture_output=True,
-                                   text=True, timeout=10)
+        duplicate = subprocess.run([sys.executable, str(script), str(output)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   universal_newlines=True, timeout=10)
         self.assertEqual(1, duplicate.returncode)
         self.assertEqual(before, output.read_bytes())
 
     @unittest.skipUnless(shutil.which('node'), 'Node unavailable; offline JS test remains in package')
     def test_offline_mock_firefox_state_permission_and_lost_reply_contracts(self):
         result = subprocess.run(['node', str(ROOT / 'browser/firefox-mesh/test_background.js')],
-                                cwd=ROOT, capture_output=True, text=True, timeout=30)
+                                cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                universal_newlines=True, timeout=30)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn('offline contracts passed', result.stdout)
 

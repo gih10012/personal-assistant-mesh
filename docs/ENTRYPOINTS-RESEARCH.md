@@ -49,15 +49,22 @@ DB 未恢复，仅该 worker stop/start。原 task 随后在同原 thread 的 tu
 review 后发布 `PAM-006b-firefox-result-20261010-v1` 审查摘要，没有转发
 原 native result；Firefox 真正查到 completed 并读回 approved result，
 publication/task/request 精确匹配，手动全往返已验证。成果 execution/
-artifact-content/account verified 均仍 false；能力目录/remote projection
-仍为空、004b 工具仅 stage。下一步继续 MCP 入口与 004b 实际出口，
+artifact-content/account verified 均仍 false；这份成果是当时目录为空、
+004b 仅 stage 的快照。之后 004b 已发布/激活安装绑定、配置 owner 容量
+并取得新独立 probe，第一轮模型仍等待证据、未预留或执行。下一步继续实际出口，
 不是据这一桥接声称原生 Chat tools/Cloud 节点或整体 goal 完成。
 
-新增 Firefox/Cloud/Codex MCP 候选代码本机完整 1240 项测试通过，包含
+新增 Firefox/Cloud/Codex MCP 源码已以 `7fb001a` 公开发布，CI
+[37960801403](https://github.com/gih10012/personal-assistant-mesh/actions/runs/37960801403)
+实际 completed/success。本机完整 1240 项测试通过，包含
 28 项 native-host、32 项 Cloud、32 项 MCP 测试及 19 个 JS 离线 cases；
-尚未 commit/发布或正式两端部署。生产仍是 cf308b3，两端/公开 CI 各
-1148 项证据；原生 Codex 薄 MCP 当前仅实现/离线通过，尚未安装或实际
-调用。不要用绿色候选测试替代 browser 全链路、官方 Chat connector
+正式核心服务仍是 cf308b3，两端/公开 CI 各 1148 项证据。VPS 隔离运行
+7fb001a 的 1240 项时，两处测试使用了 Python 3.6 不支持的 subprocess
+参数；修正为当前解释器/兼容参数后隔离 1240 项通过，不修改系统 Python。
+原生 Codex 已在本机一个既有 profile 安装 stdio MCP，实际工具发现、
+submit/status/result 调用及原 Leader completed/批准摘要读回均通过，详见
+[MCP 验收](MCP-ENTRYPOINT.md)。验证客户端没有模型 turn，不把实际
+客户端调用说成模型自主调用。不要用绿色测试替代 browser 全链路、官方 Chat connector
 或 Cloud 入网证据。
 
 原生 Codex 可用 `thread/resume` 继续实际保存的 thread；恢复不需要为了

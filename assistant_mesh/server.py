@@ -116,6 +116,10 @@ class API:
             if role != 'operator' or self.ingress_results is None or method != 'POST' or query:
                 raise PermissionError('ingress_result_publish_not_authorized')
             return self.ingress_results.publish(peer, payload)
+        if parsed.path == '/v1/task/continue':
+            if role != 'operator' or method != 'POST' or query or parsed.fragment:
+                raise PermissionError('task_continuation_not_authorized')
+            return self.store.continue_task(payload)
         can_discover = role in ('operator', 'viewer') or bool(node)
         mesh_member = role in ('operator', 'viewer') or (role in ('worker', 'agent_peer') and bool(node))
         if parsed.path in ('/v1/routing/action', '/v1/routing/decisions'):

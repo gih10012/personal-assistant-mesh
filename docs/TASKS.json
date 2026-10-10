@@ -5,6 +5,16 @@
   "updated_at": "2026-10-10",
   "plan": "docs/PLAN.md",
   "status_source": "project coordination record; runtime evidence is separately identified, not invented",
+  "latest_source_release": {
+    "code_commit": "7fb001a3ee398d59caa367177055dacbb4b418d9",
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/37960801403",
+    "ci_verified_success": true,
+    "source_public": true,
+    "local_full_suite_tests_passed": 1240,
+    "production_core_loaded": false,
+    "vps_python36_original_suite_errors": 2,
+    "vps_python36_test_compatibility_fix_isolated_tests_passed": 1240
+  },
   "latest_release": {
     "phase": "PAM-006a + bounded results + runtime diagnostics",
     "code_commit": "cf308b32057327d4e87106456ff639f0bcbb6151",
@@ -93,6 +103,9 @@
         "production_nodes_loaded": true,
         "production_bidirectional_get_loops_verified": true,
         "production_registered_capabilities": 0,
+        "current_cloud_capabilities_registered": 1,
+        "current_nonempty_cloud_capability_projected_on_laptop_verified": true,
+        "remote_execution_or_global_ha_verified": false,
         "pre_restart_ledger_and_native_sessions_preserved": true,
         "external_unknown_effect_execution_verified": false
       },
@@ -185,7 +198,7 @@
           "depends_on": [
             "PAM-004a"
           ],
-          "next_action": "独立probe、同身份认证/严格前缀完整历史恢复已核验；原Leader原线程已完成工具编写与11项离线测试，工具已stage。配置独立新观测和owner容量，再原Leader选择并真实执行，不把stage当启用",
+          "next_action": "工具已published/安装manifest activated，owner池/binding/新独立probe已登记。原SELECT同thread completed waiting_evidence且无allocation；补真实安装证据、旧thread可用task-bound CLI和owner原task continuation CAS，再同operation选择/执行/核验结算，保留旧决定和结果",
           "evidence": {
             "author_task_id": "PAM-004b-egress-author-20261009T134300Z",
             "target": "owner public repository README at fixed commit 796a1b3",
@@ -205,7 +218,28 @@
             "native_authored_offline_tests_passed": 11,
             "native_authored_source_sha256": "982cf1027248a1682ee84eefcdd4798deddcbabdfe29b3e79088374a52b5dec8",
             "tool_staged": true,
-            "tool_activated": false,
+            "tool_published": true,
+            "tool_activated": true,
+            "installed_manifest_binding_verified": true,
+            "runtime_loaded_verified": false,
+            "owner_managed_capacity_pool_bound": true,
+            "existing_operator_independent_verifier_bound": true,
+            "fresh_independent_observation_id": "PAM-004b-egress-probe-20261010T1700-review-v1",
+            "fresh_independent_observation_sample_time": 1791589410.2001119,
+            "model_selection_review_task_id": "PAM-004b-egress-select-20261009T134300Z",
+            "model_selection_review_task_state": "completed",
+            "model_selection_review_task_epoch": 1,
+            "model_selection_decision_id": "PAM-004b-canary-evidence-review-v1",
+            "model_selection_decision_state": "waiting_evidence",
+            "managed_allocation_created": false,
+            "provider_execution_journal_created": false,
+            "task_bound_cli_implemented": true,
+            "task_bound_cli_new_tests_passed": 10,
+            "task_bound_cli_production_loaded": false,
+            "owner_task_continuation_implementation_state": "frozen_for_full_verification",
+            "owner_task_continuation_new_tests_passed": 16,
+            "owner_task_continuation_related_tests_passed": 183,
+            "owner_task_continuation_production_loaded": false,
             "spare_profile_same_identity_auth_sync_verified": true,
             "spare_profile_account_and_quota_available_verified": true,
             "native_history_stale_prefix_verified": true,
@@ -234,7 +268,7 @@
       "state": "implementation_in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "006a两端1148项、公开CI/正式加载及owner-terminal全链路已完成；Firefox原request原thread completed epoch16，Root独立review/受限摘要发布及原browser批准成果回查精确绑定通过，手动全往返已验证。继续候选1240项源码发布、Codex MCP真实安装/调用和004b freshprobe/ownercapacity/准入/同operation执行结算；不将browser桥接当Chat原生tools或Cloud入网。Cloud项目环境HTTP200空数组，连接/发布单列，尚无job/临时节点",
+      "next_action": "Firefox与本机Codex MCP任务/原Leader处理/批准成果读回均实际通过；7fb001a源码公开且CI成功，核心生产仍cf308b3。继续004b原task续接/CLI小片发布加载和原operation执行结算；Chat原生tools/OAuth与Cloud项目环境连接单列，尚无Cloud job/node",
       "evidence": {
         "research": "docs/ENTRYPOINTS-RESEARCH.md",
         "connector_installed": false,
@@ -319,12 +353,24 @@
         "native_cloud_repo_matching_environments": 0,
         "native_codex_mcp_implemented": true,
         "native_codex_mcp_offline_tests_passed": 32,
-        "native_codex_mcp_installed": false,
-        "native_codex_mcp_actual_tool_call_verified": false,
+        "native_codex_mcp_installed": true,
+        "native_codex_mcp_install_scope": "one existing local Codex profile; direct stdio registration, not portable marketplace installation",
+        "native_codex_mcp_tools_discovered": true,
+        "native_codex_mcp_actual_tool_call_verified": true,
+        "native_codex_mcp_model_selected_tool_call_verified": false,
+        "native_codex_mcp_runtime_request_id": "PAM-006c-codex-local-handoff-20261010-v1",
+        "native_codex_mcp_runtime_task_id": "ingress-3f71e67afbec250b8230d9e826f15393b9541ba92c6ab7812c47685d0027c821",
+        "native_codex_mcp_runtime_task_epoch": 1,
+        "native_codex_mcp_same_original_leader_thread_verified": true,
+        "native_codex_mcp_reviewed_result_publication_id": "PAM-006c-codex-local-result-20261010-v1",
+        "native_codex_mcp_approved_result_readback_verified": true,
+        "native_codex_mcp_business_roundtrip_verified": true,
+        "native_codex_mcp_empty_client_no_rollout_reconciled": true,
+        "native_codex_mcp_verification_client_model_turn_requested": false,
         "candidate_full_suite_local_tests_passed": 1240,
         "candidate_full_suite_local_duration_seconds": 149.351,
-        "candidate_code_committed": false,
-        "candidate_code_published": false,
+        "candidate_code_committed": true,
+        "candidate_code_published": true,
         "candidate_code_production_loaded": false,
         "cloud_node_enrolled": false,
         "chat_model_native_mesh_tools_verified": false
@@ -346,7 +392,7 @@
           "depends_on": [
             "PAM-006a"
           ],
-          "next_action": "Firefox临时桥接真实单次提交/原thread completed epoch16/独立review受限摘要发布/原request批准成果读取已验证，history维护保留原字节/authority/effect。继续候选1240项源码发布及Codex MCP入口，004b实际出口另行推进；Chat模型原生tools/OAuth仍未接通，Cloud adapter32项离线通过但无job/node，项目环境HTTP200空数组，连接/发布单列，不传operator bearer"
+          "next_action": "Firefox临时桥接和本机Codex MCP的原请求/原Leader/批准成果全往返已核验，源码7fb001a已公开且CI成功；Chat模型原生tools/OAuth仍未接通，Cloud adapter32项离线通过但无job/node，项目环境HTTP200空数组，连接/发布单列，不传operator bearer"
         },
         {
           "id": "PAM-006c",
@@ -354,7 +400,7 @@
           "state": "implementation_in_progress",
           "owner": "root+mesh_mcp_entrypoint",
           "depends_on": ["PAM-006a"],
-          "next_action": "三个工具/闭合结果/固定私有client及codex0.162 legacy stdio合同已实现，32项离线测试通过；候选源码待发布，再实际安装/本机工具发现与任务回执。尚未安装，不把plugin清单或mock当实际调用成功"
+          "next_action": "源码已公开，实际本机一个既有profile配置/发现三工具/提交/原Leadercompleted/批准成果原MCP读回通过。未安装portable marketplace包，验证客户端没有模型turn；后续模型自主调用和其他host另验，不冒称Chat/Cloud已接通"
         }
       ]
     },

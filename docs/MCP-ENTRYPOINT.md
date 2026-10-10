@@ -100,7 +100,23 @@ unknown 不重放、无凭据反射、实际 stdio child 与 portable manifest�
 child 使用临时 dummy ingress config，只有 initialize/tools/list/ping；
 不能将其称为真实 Mesh task 回路或 Codex 插件已安装。
 
-下一步由 Root 审查与集成：在 owner 授权的实际入口配置、安装到支持的
-Codex host、看真实工具发现与安全调用；复用原 request 读取实际任务与
-已审核成果。普通 Chat/Work/@163 account、Codex Cloud enrollment 或
+2026-10-10 已按 owner 授权在本机一个既有 Codex profile 中通过官方
+`codex mcp add/get` 配置 stdio server；未上传或安装 portable 插件目录包。
+实际 native app-server 发现三个工具，随后真实调用提交、状态及批准成果，
+不是 mock，也不是另建 Leader。稳定请求
+`PAM-006c-codex-local-handoff-20261010-v1` 的任务 completed epoch 1；
+业务仍在原 Leader thread，Root 审查摘要以
+`PAM-006c-codex-local-result-20261010-v1` 发布，实际原生 MCP 读回
+task/request/publication 精确绑定的成果。没有请求验证客户端的模型 turn；
+因此也不把这个验收说成“模型已自主选择调用这三个 MCP 工具”。
+
+初次空验证线程退出后，实际 `thread/resume` 返回 no rollout found；
+没有模型 turn 的空线程尚无可恢复的 rollout。保留旧 ID/回执，并确认
+业务 submit 意图尚不存在后，显式改用一个在同一 app-server 连接中保持
+存活的 ephemeral transport，业务 request 不变；它不是 Leader、记忆迁移
+或未知效果重放。验证客户端随后正常关闭，持久业务与成果仍在 Mesh。
+[官方 app-server](https://learn.chatgpt.com/docs/app-server) 区分 stored session
+resume、in-memory ephemeral thread 和 `mcpServer/tool/call`。
+
+普通 Chat/Work/@163 account、Codex Cloud enrollment 或
 “无限推理”仍须分别实际核验，不能从本地 stdio 包推导。

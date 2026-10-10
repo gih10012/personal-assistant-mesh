@@ -152,9 +152,11 @@ result。Firefox 实际按原 request 查到 completed，再点击读取批准�
 
 成果的 `execution_verified=false`、`artifact_content_verified=false`、
 `account_verified=false` 保留；界面主账号核对不等于此成果的账户认证。
-审查结果仍显示能力目录/remote projection 为空，PAM-004b 工具仅 stage，
-实际出口 probe/容量准入/执行结算尚待推进。下一步接 Codex MCP 入口和
-这些中层能力，不把手动往返外推为 Chat 模型原生 tools、Cloud 入网或
+这份原成果发布时目录/remote projection 为空、004b 仅 stage；它是当时
+任务的快照，不随之后的安装更新。后续 Root 已实测 Codex MCP 三工具
+提交/完成/批准成果往返，004b 已发布和激活安装绑定、配置容量及新 probe；
+模型第一轮选择 waiting_evidence，尚未预留或执行。详见
+[MCP 入口](MCP-ENTRYPOINT.md) 和 [执行计划](PLAN.md)。不把手动往返外推为 Chat 模型原生 tools、Cloud 入网或
 整体 goal 完成。
 
 ## 安装方式与剩余验收
@@ -197,9 +199,10 @@ result。Firefox 实际按原 request 查到 completed，再点击读取批准�
 ## 离线测试与来源
 
 运行 `python -m unittest discover -s tests -p test_native_messaging.py -v`。
-28 项 Python 与 19 个 JS 离线 cases 已通过。它们包含在候选代码本机
-完整 1240 项回归通过的工作中，候选尚未 commit/发布或正式两端部署；
-既有生产 cf308b3 的两端/CI 1148 项证据独立保留。
+28 项 Python 与 19 个 JS 离线 cases 已通过。它们包含在入口源码本机
+完整 1240 项回归。入口源码已以 `7fb001a` 公开发布，CI 37960801403
+实际 success；正式核心服务仍为 cf308b3，两端/CI 1148 项证据独立保留。
+VPS Python 3.6 的两处测试参数兼容性修复后隔离 1240 项通过，未换系统 Python。
 Python 测试覆盖 framing/固定路由/身份注入/secret 错误投影/私有文件/闭合
 成果投影；有 Node 时再运行同包 `test_background.js` 的 mock 检查，覆盖
 主动选文、source sender/origin、先持久后发送、丢回复/重开、并行任务、

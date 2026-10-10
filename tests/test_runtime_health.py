@@ -322,6 +322,16 @@ class RuntimeHealthTests(unittest.TestCase):
                                 'arguments': {'action': 'children', 'arguments': {}}})
         worker.tick.assert_called_once_with(force=True)
 
+    def test_legacy_thread_allocation_cli_carries_current_runtime_metadata(self):
+        worker = Worker(self.config, client=Mock(), config_path=self.worker_path)
+        worker.current = {'id': 'original-task', 'epoch': 7}
+        reference = worker.resource_reference()['cli']
+        argv = reference['allocation_argv']
+        self.assertEqual(['allocation', '--task-id', 'original-task', '--epoch', '7'], argv[-5:])
+        self.assertEqual(str(self.worker_path), argv[4])
+        self.assertIn('authority', reference['allocation_usage'])
+        self.assertNotIn(str(self.auth), json.dumps(reference))
+
 
 if __name__ == '__main__':
     unittest.main()

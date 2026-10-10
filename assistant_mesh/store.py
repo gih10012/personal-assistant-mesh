@@ -51,6 +51,13 @@ class Store:
                     status TEXT NOT NULL, node TEXT, epoch INTEGER NOT NULL DEFAULT 0,
                     deadline REAL, checkpoint TEXT NOT NULL DEFAULT '{}', result TEXT,
                     created REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)''',
+                '''CREATE TABLE IF NOT EXISTS task_continuations(
+                    continuation_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+                    task_id TEXT NOT NULL, source_epoch INTEGER NOT NULL,
+                    request TEXT NOT NULL, previous_input TEXT NOT NULL,
+                    previous_checkpoint TEXT NOT NULL, previous_result TEXT NOT NULL,
+                    previous_native TEXT NOT NULL, receipt TEXT NOT NULL,
+                    created REAL NOT NULL)''',
                 '''CREATE TABLE IF NOT EXISTS nodes(
                     id TEXT PRIMARY KEY, capabilities TEXT NOT NULL, score REAL NOT NULL,
                     seen REAL NOT NULL, details TEXT NOT NULL)''',
@@ -525,6 +532,145 @@ class Store:
     def control_task(self, task_id, command):
         with self.transaction() as db:
             return self._control_task(db, task_id, command)
+
+    def continue_task(self, payload):
+        """Owner-authorized NEW work on a settled task, never retry an old turn.
+
+        The operator route owns authorization. This one authority transaction
+        retains original bytes and an immutable acceptance receipt before making
+        the SAME task pending. A lost receipt only reads the original journal;
+        it cannot reset a later attempt, clear effects, or change native history.
+        """
+        fields = {'continuation_id', 'task_id', 'expected_epoch',
+                  'task_result_sha256', 'instruction'}
+        if not isinstance(payload, dict) or set(payload) != fields:
+            raise ValueError('invalid_task_continuation')
+        for key in ('continuation_id', 'task_id'):
+            value = payload[key]
+            if (not isinstance(value, str) or not value.strip()
+                    or len(value.encode('utf8')) > 200
+                    or any(ord(char) < 32 for char in value)):
+                raise ValueError('invalid_continuation_identity')
+        epoch = payload['expected_epoch']
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or not 0 < epoch < (1 << 63):
+            raise ValueError('invalid_continuation_epoch')
+        result_hash, instruction = payload['task_result_sha256'], payload['instruction']
+        if (not isinstance(result_hash, str) or len(result_hash) != 64
+                or any(char not in '0123456789abcdef' for char in result_hash)):
+            raise ValueError('invalid_continuation_result_sha256')
+        if (not isinstance(instruction, str) or not instruction.strip()
+                or any(ord(char) < 32 and char not in '\n\t' for char in instruction)):
+            raise ValueError('invalid_continuation_instruction')
+        text = ('[owner 显式续接：以下仅为新增工作，不重放既有 turn 或 operation；'
+                '原任务身份、原生会话与效果账本保持。]\n' + instruction)
+        if len(text.encode('utf8')) > 65536:
+            raise ValueError('invalid_continuation_instruction')
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+        fingerprint = hashlib.sha256(encoded.encode('utf8')).hexdigest()
+        with self.transaction() as db:
+            previous = db.execute('SELECT * FROM task_continuations WHERE continuation_id=?',
+                                  (payload['continuation_id'],)).fetchone()
+            if previous:
+                if previous['fingerprint'] != fingerprint:
+                    raise Conflict('continuation_id_content_conflict')
+                return json.loads(previous['receipt'])
+            row = db.execute('SELECT * FROM tasks WHERE id=?', (payload['task_id'],)).fetchone()
+            if (not row or row['status'] != 'completed' or row['epoch'] != epoch
+                    or row['paused_status'] is not None or row['paused_deadline'] is not None):
+                raise Conflict('continuation_task_not_settled')
+            if (not isinstance(row['result'], str)
+                    or hashlib.sha256(row['result'].encode('utf8')).hexdigest() != result_hash):
+                raise Conflict('continuation_result_changed')
+            checkpoint = json.loads(row['checkpoint'])
+            if not isinstance(checkpoint, dict) or checkpoint.get('side_effect_started') is not False:
+                raise Conflict('continuation_effects_require_review')
+            context = json.loads(row['context'])
+            if context.get('remote_proxy'):
+                raise Conflict('remote_proxy_requires_remote_control_protocol')
+            busy = db.execute("SELECT * FROM tasks WHERE scope=? AND id<>? AND status<>'completed'",
+                              (row['scope'], row['id'])).fetchall()
+            if any((other['status'] == 'running' and other['deadline'] is not None
+                    and other['deadline'] > self.clock())
+                   or json.loads(other['checkpoint']).get('side_effect_started')
+                   for other in busy):
+                raise Conflict('continuation_scope_not_quiescent')
+            # A completed task with a false checkpoint can still own a managed
+            # hold. Check the original family AND all tasks in the shared native
+            # scope, including completed peers, without blocking unrelated scopes.
+            # UNION also terminates accidental parent cycles.
+            family = '''WITH RECURSIVE family(id) AS (
+                SELECT ? UNION SELECT t.id FROM tasks t JOIN family f ON t.parent_id=f.id) '''
+            children = db.execute(family + '''SELECT t.id,t.status,t.checkpoint FROM tasks t
+                JOIN family f ON f.id=t.id WHERE t.id<>?''', (row['id'], row['id'])).fetchall()
+            if any(child['status'] not in ('completed', 'failed')
+                   or json.loads(child['checkpoint']).get('side_effect_started') for child in children):
+                raise Conflict('continuation_children_not_settled')
+            linked = family + ''', linked(id) AS (
+                SELECT id FROM family UNION SELECT id FROM tasks WHERE scope=?) '''
+            linked_parameters = (row['id'], row['scope'])
+            tables = {item[0] for item in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'managed_allocations' in tables:
+                # Allocations settle as completed; stopped is a dispatch outcome
+                # with a provider-reported quiescence settlement, not a timeout.
+                if db.execute(linked + '''SELECT 1 FROM managed_allocations a JOIN linked l ON l.id=a.task_id
+                        WHERE a.state NOT IN ('completed','cancelled','expired') LIMIT 1''',
+                              linked_parameters).fetchone():
+                    raise Conflict('continuation_managed_effect_not_settled')
+                if ('managed_dispatch' in tables and db.execute(linked + '''SELECT 1 FROM managed_dispatch d
+                        JOIN managed_allocations a ON a.operation_id=d.operation_id
+                        JOIN linked l ON l.id=a.task_id
+                        WHERE (d.state NOT IN ('completed','stopped','cancelled','expired')
+                        OR (d.state IN ('completed','stopped') AND d.settlement IS NULL)) LIMIT 1''',
+                        linked_parameters).fetchone()):
+                    raise Conflict('continuation_managed_effect_not_settled')
+            if ('remote_delegations' in tables and db.execute(
+                    linked + '''SELECT 1 FROM remote_delegations d JOIN linked l ON l.id=d.parent_id
+                        WHERE d.terminal<>1 LIMIT 1''',
+                    linked_parameters).fetchone()):
+                raise Conflict('continuation_remote_child_not_settled')
+            if db.execute("SELECT 1 FROM steering WHERE task_id=? AND state<>'submitted' LIMIT 1",
+                          (row['id'],)).fetchone():
+                raise Conflict('continuation_steering_not_settled')
+            harness, thread = checkpoint.get('harness'), checkpoint.get('thread_id')
+            if (harness not in ('codex', 'pi') or not isinstance(thread, str)
+                    or not thread or len(thread.encode('utf8')) > 256):
+                raise Conflict('continuation_native_identity_required')
+            if harness == 'codex':
+                try:
+                    valid_thread = str(uuid.UUID(thread)) == thread
+                except (ValueError, AttributeError):
+                    valid_thread = False
+                if not valid_thread:
+                    raise Conflict('continuation_native_identity_required')
+            else:
+                # Pi's actual RPC switch_session takes sessionPath, not an ID.
+                # This route does not invent an import or a replacement session.
+                session_file = checkpoint.get('pi_session_file')
+                if (not isinstance(session_file, str) or not session_file
+                        or len(session_file.encode('utf8')) > 4096):
+                    raise Conflict('continuation_native_identity_required')
+            native = db.execute('SELECT * FROM native_sessions WHERE scope=? AND harness=?',
+                                (row['scope'], harness)).fetchone()
+            native_state = json.loads(native['state']) if native else None
+            if (not isinstance(native_state, dict) or native_state.get('thread_id') != thread
+                    or native_state.get('harness', harness) != harness
+                    or ('side_effect_started' in native_state
+                        and native_state['side_effect_started'] is not False)
+                    or (harness == 'pi' and native_state.get('pi_session_file') != session_file)):
+                raise Conflict('continuation_native_source_changed')
+            receipt = {'protocol': 'owner-task-continuation/1', 'continuation_id': payload['continuation_id'],
+                       'task_id': row['id'], 'source_epoch': epoch, 'task_result_sha256': result_hash,
+                       'accepted': True, 'task_state_at_acceptance': 'pending',
+                       'native': {'harness': harness, 'thread_id': thread},
+                       'native_turn_started': False, 'native_history_modified': False,
+                       'effect_markers_changed': False, 'native_tools_intercepted': False}
+            db.execute('INSERT INTO task_continuations VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                       (payload['continuation_id'], fingerprint, row['id'], epoch, encoded,
+                        row['input'], row['checkpoint'], row['result'], json.dumps(dict(native)),
+                        json.dumps(receipt), self.clock()))
+            db.execute("UPDATE tasks SET input=?,status='pending',node=NULL,deadline=NULL,result=NULL WHERE id=?",
+                       (text, row['id']))
+            return receipt
 
     def _control_task(self, db, task_id, command):
         """One control transition for owner chat and operator API.

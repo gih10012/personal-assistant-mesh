@@ -24,7 +24,7 @@ Leader。面板只是观察入口。原生 Shell、网络、文件和 MCP 不由
 | 去中心化恢复 | PAM-003 | 003a/b/c 已发布；003d 正式两端已备份加载，双向独立循环连续 `ok`；继续真实目录/故障域观察 | 单节点继续工作；旧消息/撤销/未知效果不因恢复重放；真实断连/重入网 |
 | 自主资源调度 | PAM-004 | 004a 两端 1053 项通过并加载，原 Leader 原线程实际提议/读回；推进 004b 真实出口 | 模型自行选路；底层核对授权/预留/回执；共享瓶颈不重复计容量 |
 | 异构节点适配 | PAM-005 | 定义 enrollment/运行期/能力/持久状态/适配报告合同，AI 按 OS 改装 | 先一个不同环境的真实接入；不要求先写完全部 Windows/手机功能 |
-| 多入口与临时节点 | PAM-006 | Firefox 手动提交/原 Leader completed/批准成果读回已实测；Codex MCP/Cloud adapter 已实现，待实际接通 | 从入口创建真实任务并读回结果；临时执行结束后持久状态仍在 Mesh |
+| 多入口与临时节点 | PAM-006 | Firefox 手动与本机 Codex 原生 MCP 的提交/原 Leader completed/批准成果读回已实测；Cloud adapter 已发布但无实际 job/node | 从入口创建真实任务并读回结果；临时执行结束后持久状态仍在 Mesh |
 | 持续先进性 | PAM-007 | 将下方合同接入 Leader；配置 3–5 天检查的持续任务 | 有实际计划/task/检查记录；新模型/版本的能力与访问实际验证 |
 | 上层项目委派 | PAM-008 | Live、通话、面板及其他应用作为后续 Mesh 项目 | 由 Mesh 自己建 task、分工和集成，不由当前 Root 先包办所有应用 |
 
@@ -34,8 +34,9 @@ PAM-002 两端采样已完成；正式原 Leader 又接到有稳定 ID 的网络
 PAM-003a/b/c 已发布，003c 隔离 SSH 断连/冷恢复/重联已验证；003d
 正式两端已加载 06474df（功能代码与 7e569cf 相同），双向循环连续 `ok`。
 重启前后原任务、原生会话、消息与执行账本指纹一致；没有新 receiver、
-执行 grant、付费资源或隧道。正式目录仍为空，不把空页同步外推为已登记
-出口或自主调度。PAM-004a 的 task-bound 证据/不可变决定/原执行身份
+执行 grant、付费资源或隧道。此前正式目录为空；本次已登记一个 cloud
+受管能力并在 laptop 认证 projection 实际读到它，但这仍不是 remote
+执行授权、业务执行或全局 HA。PAM-004a 的 task-bound 证据/不可变决定/原执行身份
 关联和薄模型/CLI 入口已实现，保留原 native thread。冻结代码两端
 1053 项完整通过并正式加载；PAM-004b 的受管真实出口仍未验证。PAM-006
 owner-bound ingress 提交/状态及受限成果 HTTP/CLI 合同已实现，入口/成果/
@@ -57,7 +58,9 @@ epoch 16，保留原 Leader thread；Root 独立审查、发布受限摘要，Fi
 成果 execution/artifact-content/account verified 均保留 false。Cloud 原生只读
 login/list 通过，官方本项目环境查询 HTTP 200 空数组；该查询未返回
 本项目环境，未提交 job。Codex 薄 MCP 已实现且 32 项离线测试通过，
-仍未安装；官方 Chat 模型 tools、MCP/OAuth/Cloud 连接未验收。
+已在本机一个既有 profile 安装，实际原生 MCP submit/status/approved-result
+闭环通过；验证客户端没有模型 turn，不声称模型已自主选择调用 MCP。
+官方 Chat 模型 tools、OAuth/Cloud 连接仍未验收。
 Root 负责发布、计划与集成。研究、实现、
 已安装、实际运行、独立核验分别记录。失败只改变相关 task 的下一步，
 不默默丢掉原目标、不新建 ID 绕过 unknown。
@@ -124,7 +127,8 @@ account-only 认证/额度通过。该 profile 的原 thread 历史是权威完�
 严格字节前缀；在原任务尚未进入 native turn 的静止边界保留完整旧字节
 及一致 DB 备份，原路径原子刷新为完整历史，没有新建 thread 或恢复旧 DB。
 原 Leader 原 ID 已在 epoch 28 completed，编写工具的 11 项离线测试通过；
-Root 独立复跑通过，工具已 stage，未 publish/activate/实际受管执行。
+Root 独立复跑通过，工具已 stage；随后已 publish、activate 安装绑定，
+配置一个 managed request 的 owner 容量和独立新观测，尚未实际受管执行。
 不把探测、认证恢复或 stage 替代模型选择和实际执行。
 原 laptop 维护 turn 确有只读诊断 Shell 回执，不能套零效果 quota 重放；
 保留 needs_review，后续使用显式效果对账合同。
@@ -135,10 +139,13 @@ Worker 失败阶段诊断新增 20 项测试，相关 98 项回归通过；仅�
 固定无本地后端错误被泛化的回归；已修复并保留原测试断言，旧归档未部署。
 当前并行片为 Firefox 手动入口（28 Python + 19 JS 离线合同）、Cloud
 持久单次 job adapter（32 离线测试）和薄原生 Codex MCP/plugin（32 离线
-测试，按已装 0.162 的 legacy stdio 协商）。集成候选源码本机完整 1240
-项测试通过（149.351 秒）；它尚未 commit/公开发布或正式两端部署，
-不能替换 cf308b3 两端/CI 1148 项的已发布证据。没有 Cloud 真实 job
-或临时节点握手，也没有原生 Codex MCP 安装/实际调用证据。
+测试，按已装 0.162 的 legacy stdio 协商）。源码 `7fb001a` 已公开发布，
+CI 37960801403 completed/success；本机完整 1240 项通过（149.351 秒）。
+VPS 隔离 1240 项初次因两处测试使用 Python 3.6 不支持的 subprocess
+参数失败，兼容性修复后完整 1240 项通过（140.831 秒），未改系统 Python。
+正式核心服务仍为 cf308b3，不用源码发布替代正式加载证据。
+Codex MCP 的实际安装/三工具发现、提交、原 Leader completed epoch 1、
+Root 审查摘要发布及原 request 批准成果读回已通过；Cloud 仍无实际 job/node。
 Firefox 的原 request
 `mesh-firefox-05d0bce8d4728cd553d831b9317529e3` 已绑定真实任务
 `ingress-c3d8bbe11285b26aab751c96b9dd8fe19229aea0bdb78900f6becf44c8799b76`；
@@ -154,7 +161,17 @@ completed epoch 16、turn `01a1217d-f3e4-7282-878b-5c4e44a15173`。
 Root 独立 review 后发布 `PAM-006b-firefox-result-20261010-v1`，未转发
 原 native result；Firefox 原 ID 状态及批准成果的真实回查、精确绑定已核验。
 该成果仍不证明能力执行或引用内容/账户认证。实际能力目录/remote projection
-为空，PAM-004b 工具仍仅 stage；下一步继续候选发布、Codex 本地 MCP
-入口，以及 004b 新 probe、owner 容量/准入和同 operation 的执行/结算。
+为空、PAM-004b 仅 stage 是这份原成果当时的快照。后续新观测与容量已登记，
+原 SELECT task completed epoch 1，写入/读回 `PAM-004b-canary-evidence-review-v1`
+waiting_evidence 决定，未预留原 operation。模型指出旧原生 thread 无新增
+allocation 动态工具，且将空 execution-candidate 段视为缺少 executor；该段
+实际是已有 allocation/delegation 关联，并非安装目录。保持旧决定和原 task，
+补当前 owner 安装证据、带当前任务 flags 的 CLI，以及 owner 显式 continuation
+CAS；之后再由原 Leader 同 task/thread 选择、等待原 operation 执行和结算。
+当前 CLI/worker 参考小片和 owner continuation 已完成并冻结；CLI 10 项、
+continuation 16 项及相关回归通过，正在完整测试与发布准备，尚未正式加载。
+continuation 保留旧完整字节和同 native source，以 operator/result/epoch CAS
+仅追加新 instruction；子孙 hold/unknown 不因续接释放。
+不以清效果、新 task/thread 或修改旧决定绕过此缺项。
 Cloud 本项目环境连接/发布条件单列，不以此缺项阻断 004b 中层真实出口。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。

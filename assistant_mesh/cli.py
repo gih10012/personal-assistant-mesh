@@ -279,6 +279,29 @@ def resource_payload(path, action=None):
     return payload
 
 
+def allocation_payload(path, action=None, task_id=None, epoch=None):
+    """Bind an explicit reserve request to caller-supplied task metadata.
+
+    The flags are a convenience for a native worker's current task, not an
+    authenticated token or proof of a live lease. The authority still checks
+    the authenticated worker/node and task fence. No flags retains the legacy
+    JSON contract; other actions validate the pair but receive no extra fields.
+    """
+    task_bound = task_id is not None or epoch is not None
+    if task_bound and (not isinstance(task_id, str) or not task_id.strip()
+                       or type(epoch) is not int or epoch <= 0):
+        raise ValueError('allocation_requires_nonempty_task_id_and_positive_epoch_pair')
+    payload = resource_payload(path, action)
+    if task_bound and payload['action'] == 'reserve':
+        arguments = payload.get('arguments', {})
+        if {'task_id', 'task_epoch'} & set(arguments):
+            # Reject even matching assertions: there is exactly one explicit
+            # source of task metadata in this mode, never a silent overwrite.
+            raise ValueError('allocation_task_metadata_must_not_be_in_payload_with_flags')
+        payload = dict(payload, arguments=dict(arguments, task_id=task_id, task_epoch=epoch))
+    return payload
+
+
 def main():
     os.umask(0o077)
     parser = _CLIParser(description='Durable personal-assistant mesh')
@@ -296,8 +319,8 @@ def main():
     parser.add_argument('--limit', type=int)
     parser.add_argument('--after', type=int)
     parser.add_argument('--id', help='A2A message ID for an owner-bound task read')
-    parser.add_argument('--task-id')
-    parser.add_argument('--epoch', type=int)
+    parser.add_argument('--task-id', help='Task metadata; allocation reserve pairs with --epoch and rejects JSON task fields; not authentication or lease proof')
+    parser.add_argument('--epoch', type=int, help='Task epoch; allocation requires a positive paired --task-id; other allocation actions do not receive these fields')
     parser.add_argument('--call-id')
     parser.add_argument('--owner-config', help='Explicit owned private provider manifest; never model source/payload')
     parser.add_argument('--max-cycles', help='Optional positive finite serve count; provider serve only')
@@ -419,7 +442,10 @@ def main():
             if args.principal is not None:
                 parser.error('--principal is a discovery filter, not a resource actor override')
             try:
-                payload = resource_payload(args.payload_file, args.action)
+                if args.command == 'allocation':
+                    payload = allocation_payload(args.payload_file, args.action, args.task_id, args.epoch)
+                else:
+                    payload = resource_payload(args.payload_file, args.action)
             except ValueError as exc:
                 parser.error(str(exc))
             value = client.request('/v1/' + args.command + '/action', payload)

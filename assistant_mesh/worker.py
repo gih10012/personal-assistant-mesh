@@ -393,10 +393,17 @@ class Worker:
                 'resource_usage': '把 arguments JSON 写入 git 仓库之外本人所有的 0600 私有文件；'
                                   '把 resources 换成 resource --action NAME --payload-file /private/args.json。'
                                   '配置/token 保持在受保护文件中，不要读取或输出 token 值。',
-                'allocation_usage': 'allocation --action NAME --payload-file /private/args.json；reserve需当前task_id/task_epoch，优先mesh allocation入口自动绑定。',
+                'allocation_usage': 'allocation --action NAME --payload-file /private/args.json；沿用下方当前任务 allocation_argv。'
+                                    'reserve 的 JSON 不含 task_id/task_epoch，由成对运行期 flags 注入；'
+                                    'flags 是本次调用元数据，authority 仍核对认证 worker/node 和真实 task lease。'
+                                    '旧 thread 没有新 dynamicTools 时可直接使用原生 Shell 调用此 CLI，不新建 Leader。',
                 'routing_usage': 'routing --task-id CURRENT_TASK --epoch CURRENT_EPOCH --action context/propose/inspect/list/link --payload-file /private/args.json；'
                                  'worker凭据及当前lease必需，JSON仅arguments。route-decisions --id DECISION或--task-id TASK是operator/viewer只读历史。',
                 'routing_task_binding': {'task_id': self.current['id'], 'epoch': self.current['epoch']} if self.current else None}
+            if self.current:
+                reference['cli']['allocation_argv'] = [sys.executable, '-m', 'assistant_mesh.cli',
+                    '--config', self.config_path, 'allocation', '--task-id', self.current['id'],
+                    '--epoch', str(self.current['epoch'])]
             reference['a2a'] = {'fresh_thread_tool': 'mesh(action="remote_delegate",arguments={peer,input,project_id,agent_id})',
                 'legacy_tool': 'mesh_remote_delegate(peer,input,project_id,agent_id)',
                 'payload_shape': {'peer': 'owner-enrolled-peer', 'arguments': {'input': 'model-selected task',

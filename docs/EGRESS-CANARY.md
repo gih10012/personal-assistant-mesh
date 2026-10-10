@@ -1,6 +1,6 @@
 # PAM-004b：真实出口的第一条能力链
 
-2026-10-09，状态是**独立目标探测通过，工具/模型选择执行仍在推进**。
+2026-10-10，状态是**安装绑定、容量与新独立观测已登记，模型选择执行仍在推进**。
 这不是固定网络评分器，也不是 agent 原生联网的准入门禁。
 
 ## 实际证据
@@ -44,8 +44,25 @@ Leader thread；模型写出的工具及 11 项离线测试已由 Root 独立复
 源码 SHA-256 为
 `982cf1027248a1682ee84eefcdd4798deddcbabdfe29b3e79088374a52b5dec8`。
 
-工具现为 `staged`，使用 stage 回读的新 descriptor；publication、
-activation、runtime-loaded 和实际受管 callback 执行均未核验。
+工具曾为 `staged`，使用 stage 回读的新 descriptor。后续同 release
+实际 publish 和 manifest activation 已通过，安装绑定当前一致；runtime-loaded
+和实际受管 callback 执行仍未核验。owner 配置一个 `managed_gets` 容量、
+绑定同 capability epoch 1，并把已有 operator 作为独立 verifier；未共享
+operator bearer、未加跨主体执行 grant。新一次单目标 probe 原始 body 与
+独立 Git oracle 匹配、子进程已 reap，观测 ID 为
+`PAM-004b-egress-probe-20261010T1700-review-v1`，实际 sample time
+为 `1791589410.2001119`；它仍按采样时间失效，不因本文续期。
+
+原 SELECT task 同 thread completed epoch 1，真实提议并读回
+`PAM-004b-canary-evidence-review-v1`，选择 waiting_evidence，没有 allocation
+或 provider execution journal。旧 thread 无新增 allocation dynamic tool；
+模型还把空 `managed_execution_candidates` 视为未加载 executor，而该段实际
+只列已有 allocation 关联，不是安装目录。下一步给出当前确切 owner 安装
+证据与 task-bound CLI、显式同 task continuation 后再由模型决策；不改
+旧 proposal 或借新 effect/thread ID 重做。旧原生权限持续开放。
+
+实际 laptop 认证 projection 查询已看到 cloud 的这一能力且 `available=true`；
+这证明非空目录传播，不等于跨主体 grant、远端执行或全局一致性。
 原生工具创建已发生，不把认证恢复、测试或 stage 当作模型选择/
 业务执行。诊断与保留完整历史的恢复边界见
 [NATIVE-HISTORY-RECOVERY](NATIVE-HISTORY-RECOVERY.md)。
