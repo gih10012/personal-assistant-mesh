@@ -244,3 +244,22 @@ true；下一次真实模型调用读取新快照。Worker只认显式False，�
 之后迟到False也不得撤销原wait proof；true后的早完成竞态继续通过
 最终Store事务唤醒同一个parent row。19项新增Store/Worker fixtures及
 107项近邻通过，冻结双端/CI和原安全pending任务的消费验收另记。
+
+第一份wait-ready冻结 `79d8931` 已公开；归档SHA-256
+`b81200fee2186e9e22cf9d4a7fc2bc1b00169e71c0d6ebeaec94b94643624452`。
+本机冻结完整1610项通过（151.994s）；VPS Python3.6.8完整1610项
+有1个夹具cleanup错误（144.394s），
+[CI Python3.8同类失败](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38044663844)。
+原因是HTTPError测试空fp=None的旧Python close行为；改为空BytesIO保留
+close和所有fence/guard断言，生产代码不改。不能列为双端/CI通过。
+
+同一原父task安全pending后只续接一次到epoch3：实际managed wait返回
+False，immutable action journal精确包含原child ID/status/result，原生
+final确实回显真实child marker；但原goal未complete，自动重复回答直到
+180秒专用canary超时。原runtime自然0、无强杀；原authority为
+waiting_backend/unknown，guard仍true，不再resume或清账本。新的只读
+observer/history审计验证同goal仍active、原完整prefix及64个自然完成
+turn，原authority行未变；这不是Worker settlement或terminal artifact
+commit，不能用审计通过强行完成旧工作。下一片核对原生goal模型工具
+真实名称/配置和可访问性，新的能力合同另验，不host set complete或
+reset用量、不以新ID修复这条unknown。

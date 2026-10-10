@@ -67,6 +67,29 @@
     "original_unknown_replayed": false,
     "active_goal_cooperative_yield_verified": false
   },
+  "wait_ready_source_first_attempt": {
+    "code_commit": "79d8931f686f27a1773668aa302cc4c053efcf47",
+    "archive_sha256": "b81200fee2186e9e22cf9d4a7fc2bc1b00169e71c0d6ebeaec94b94643624452",
+    "local_frozen_full_suite_tests_passed": 1610,
+    "local_frozen_full_suite_duration_seconds": 151.994,
+    "vps_python36_full_suite_tests_run": 1610,
+    "vps_python36_full_suite_errors": 1,
+    "vps_python36_full_suite_duration_seconds": 144.394,
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38044663844",
+    "ci_verified_success": false,
+    "ci_failure_verified": true,
+    "failure": "HTTPError fixture fp=None cleanup raises tempfile KeyError(file) in Python 3.6 and CI Python 3.8; empty BytesIO correction preserves all assertions",
+    "production_deployed": false,
+    "actual_private_epoch3_ready_tool_journal_and_native_marker_verified": true,
+    "actual_private_epoch3_goal_completion_verified": false,
+    "actual_private_epoch3_worker_outcome": "codex_turn_timeout_unknown",
+    "actual_private_epoch3_original_guard_preserved": true,
+    "actual_private_epoch3_replayed": false,
+    "actual_readonly_audit_natural_turns_verified": 64,
+    "actual_readonly_audit_original_authority_row_unchanged": true,
+    "actual_readonly_audit_scope": "original goal still active, marker in actual native final, exact child in immutable wait False journal, complete original prefix/history and naturally completed turns; not Worker settlement/terminal artifact commit",
+    "production_runtime_and_configuration_changed": false
+  },
   "previous_alias_source_release": {
     "phase": "PAM-007c official Unix alias and owned peer adaptation; validated candidate, not production",
     "code_commit": "ee6f924c3d74346683f9750caee7ef06586606c7",
@@ -604,7 +627,7 @@
       "state": "in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "85f9611冻结两端1591项/CI与owned idle通过；新的隔离active goal drain/independent seal通过，同原父epoch2 resume/steer/再次seal真实Worker通过但未证明模型消费child结果。修正受管wait readiness/实际结果返回后以原安全pending任务继续验收，不重跑unknown。正式仍3198c87，默认禁用；Chat/Cloud/入口隔离及3–5天schedule单列",
+      "next_action": "85f9611两端1591/CI和隔离drain/seal通过；79d8931原父epoch3实际wait False journal/原child/native final marker已核验，但goal仍active导致64自动turn后超时unknown，原guard保留不再resume。修正Python3.6/CI3.8夹具并核对官方原生goal模型工具配置；新功能合同另验，不为旧unknown换ID。正式3198c87，Chat/Cloud仍未入网",
       "evidence": {
         "coordination_tasks_created": true,
         "plan": "docs/PLAN.md",
@@ -651,6 +674,10 @@
         "native_goal_safe_active_cooperative_yield_production_verified": false,
         "native_goal_private_worker_wake_same_task_thread_goal_input_receipt_verified": true,
         "native_goal_private_worker_wake_child_result_consumed_verified": false,
+        "native_goal_private_epoch3_actual_ready_receipt_and_native_final_marker_verified": true,
+        "native_goal_private_epoch3_full_worker_terminal_handoff_verified": false,
+        "native_goal_private_epoch3_outcome": "codex_turn_timeout_unknown_guard_preserved_no_resume",
+        "native_goal_model_completion_tool_availability_verified": false,
         "native_goal_wait_children_ready_contract_implemented": true,
         "native_goal_wait_children_ready_new_fixture_tests_passed": 19,
         "native_goal_wait_children_ready_related_fixture_tests_passed": 107,
@@ -722,14 +749,14 @@
         {"id": "PAM-007b", "title": "同任务租约绑定的原生goal多turn控制器", "state": "source_candidate_validated",
          "owner": "root+native_goal_adapter", "depends_on": ["PAM-007a"],
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
-        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "isolated_seal_and_wake_verified_child_consumption_pending",
+        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "isolated_seal_wake_and_ready_marker_verified_native_goal_terminal_handoff_pending",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "85f9611双端1591项/CI、隔离真实active drain/independent seal与epoch2原task/thread/goal resume/steer/reseal通过；模型未消费child marker又等待。修正wait_children按实际终态返回False/tasks及原生旧thread入口参考，19新fixture/107回归通过；冻结双端/CI后原安全pending task续接验消费。不重放unknown、不部署；Chat/Cloud仍未入网",
+         "next_action": "79d8931已公开，本机冻结1610通过；VPS和CI3.8有一个HTTPError空fp cleanup夹具错误，已用BytesIO修正。原父epoch3实际wait False和native final marker已核验，但goalactive/64自然turn后timeout unknown，不再resume。下一片核对官方原生goal模型工具开放并新合同验收，不host强设complete/reset、不换ID修旧unknown。默认禁用未部署，Chat/Cloud仍未入网",
          "implementation_slices": [
            {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
            {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "isolated_actual_active_drain_verified_not_production", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "85f9611两端1591项/CI，新tool-field合同实际active drain自然0/EOF、一个admitted turn完成；默认false未部署。原e229651 idle失败、最早resume unknown及私有错误callback unknown均保留不重放"},
            {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "isolated_actual_active_goal_seal_and_artifact_commit_verified_not_production", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "85f9611双端1591项/CI通过；新隔离实际active goal/usage不reset，独立observer自然0且原thread前后notLoaded、turn自然完成/完整历史/strict artifact ACK通过。第一epoch不是full Worker；保留原unknown。正式默认false，跨节点及任意外部副作用另验"},
-           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "same_task_epoch2_native_input_and_reseal_verified_child_consumption_pending", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "实际full Worker原父epoch2同thread/goal resume+steer一次、natural0/严格commit/reseal通过，当前安全pending且guard false；未输出child marker。修正受管wait_children已结束返回False/真实tasks，19新fixture及107回归通过；冻结双端/CI后在同原安全pending task续接验证模型消费，不清账本/goal、不重跑unknown"}
+           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "epoch3_actual_child_marker_verified_native_goal_terminal_handoff_unknown_no_replay", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "epoch2实际full Worker同thread/goal resume+steer/strict reseal通过；epoch3受管wait False/实际child在持久journal和原生final均核验，但goal未complete且timeout unknown/guardtrue，保留原行不resume。核对原生goal工具并新能力合同验收；自然terminal普通artifact SHA不得称strict-fingerprint commit，正式不部署"}
          ]},
         {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
@@ -757,7 +784,7 @@
     }
   ],
   "current_work": {
-    "phase": "85f9611 two-host 1591/CI and isolated native active drain/seal plus same-task epoch2 wake/input/reseal verified; managed wait-ready contract fixed with 19 new/107 related fixtures; freeze and actual same pending-task child consumption next; production unchanged and Chat/Cloud not joined",
+    "phase": "79d8931 published: local frozen1610 passed, VPS/CI old Python HTTPError fixture cleanup failed and corrected; actual epoch3 immutable ready-False/exact-child/native final marker verified but native goal stays active and timeout unknown retained, no resume; inspect native goal tool availability next; production unchanged and Chat/Cloud not joined",
     "whole_goal_completed": false
   }
 }

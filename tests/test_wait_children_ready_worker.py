@@ -1,5 +1,6 @@
 """Actual task authority and fake native boundaries; no accounts or processes."""
 import copy
+import io
 import json
 import tempfile
 import unittest
@@ -259,7 +260,7 @@ class WaitChildrenReadyWorkerTests(unittest.TestCase):
 
     def test_409_wait_with_lost_original_fence_raises_without_local_ready(self):
         request = self.client.request
-        error = urllib.error.HTTPError('https://fixture', 409, 'conflict', {}, None)
+        error = urllib.error.HTTPError('https://fixture', 409, 'conflict', {}, io.BytesIO())
         self.addCleanup(error.close)
         def conflict(route, body=None):
             if route == '/v1/agent/action':

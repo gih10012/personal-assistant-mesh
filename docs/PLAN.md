@@ -331,6 +331,15 @@ steer一次并再次严格seal，自然0且guard最终false；模型再次等待
 已接纳等待；19项新fixtures与107项回归通过。冻结验证后只续接这条
 安全pending原任务，不重放任何unknown。正式服务仍为3198c87。
 
+随后wait-ready源码 `79d8931` 已公开，本机冻结1610项完整通过；VPS
+Python3.6及CI Python3.8有一个HTTPError空fp测试cleanup错误，修正为
+空BytesIO且原断言不变。原父epoch3的实际False回执/原child结果在
+持久journal和原生final均已独立核对，模型确实消费；但goal未终结，
+自动重复直到专用canary timeout。原guard/unknown保留，不能再次续接。
+只读审计确认同active goal、完整原prefix与64个自然完成turn，原authority
+行未变，仍不冒称Worker完整terminal交接。下一步核对官方原生goal
+模型工具开放，新能力合同另验；正式服务不加载候选、不强设complete。
+
 正式 laptop worker/node 原先直接以开发仓库为工作目录，重启可能误载
 候选。已保留一致账本与单位配置，改为私有冻结 `3198c87` 版本目录；
 实际两进程 working directory 已核对，原行、配置字节与两条 guard 未变，
