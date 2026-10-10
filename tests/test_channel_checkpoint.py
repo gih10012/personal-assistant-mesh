@@ -340,6 +340,7 @@ class ChannelCheckpointTests(unittest.TestCase):
         checkpoint = self.export()
         directory = self.root / 'public'
         directory.mkdir(mode=0o755)
+        directory.chmod(0o755)  # A preceding test may set process-wide umask 077.
         with self.assertRaisesRegex(CheckpointError, '^checkpoint_private_path_required$'):
             write_checkpoint(checkpoint, directory / 'out.json', 'cloud', self.binding, checkpoint['sha256'])
         linked = self.root / 'out.json'
