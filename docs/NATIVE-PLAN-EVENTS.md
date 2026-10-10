@@ -81,6 +81,14 @@ authority 擅自制造 False。嵌套 RPC 保留外层回复，RPC 等待时仅�
 34 项原生 lifecycle 和 12 项 Worker/Store 新 fixtures 已通过；当前
 105 项原生相关测试通过。独立审查发现并复测了旧通知覆盖新快照的
 时序漏洞，已修正。它们是离线合同，不是实际长期模型 goal 的验收。
+当前源码 `ef647c80253740b1ac2e43b3e8e41df88e75afaa` 的同一冻结归档
+SHA-256 `dcc479462be8a07cb9d33590621a247bda34422832c69e1a4a746befb6635e64`
+laptop 完整 1328 项通过（145.661 秒）、VPS Python 3.6 完整 1328 项
+通过（142.574 秒），[CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38022301906)
+实际 success。前一份 `59bf944` 两端各有 5 个旧 mock/断言错误，
+[CI 失败](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38022115062)，
+未部署；更新的是旧 fixture 的 actual goal/get 和恢复断言，没有放松
+运行期严格读取，也没有从 checkpoint set goal 的退路。
 此候选尚未正式加载；正式运行器仍为上述 plan 已实测的 `3198c87`。
 
 以下为明确的后续任务，不宣称完整 HA 或全天候自主已实现：
@@ -96,3 +104,25 @@ authority 擅自制造 False。嵌套 RPC 保留外层回复，RPC 等待时仅�
 
 不为这些缺项 fork 新 Leader、不重放 unknown；原生 Shell、联网、文件、
 MCP 和自主排障继续可用。
+
+## active goal 让出运行：下一项隔离实验
+
+已读实际 VPS 0.159.2 对应官方源码。取消订阅不是让出：订阅删除后
+goal 自动续跑仍不依赖订阅人数；`deferGoalContinuation` 仅在 fork 暴露，
+不能为此换原 Leader。内部 suspend-turn 也不是 completed-turn yield RPC。
+[unsubscribe 与卸载](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server/src/request_processors/thread_lifecycle.rs#L56)，
+[goal 自动调度](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/ext/goal/src/runtime.rs#L425)，
+[精确 thread 协议](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L354)。
+
+官方 socket 模式的单次 SIGTERM/SIGINT/SIGHUP 会先关闭新 turn admission，
+等已准入/运行中的 turn 自然终结，再关闭与落盘；stdio 明确排除此
+graceful drain。当前 `close()` 的进程组终止不能直接当作该合同。
+[drain 实现](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server/src/lib.rs#L248)，
+[stdio 排除条件](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server/src/lib.rs#L775)。
+
+最小下一步是专用私有 socket、独立 specialist 测试线程：保留原 goal/
+usage/history，向运行器 PID 单独发一次 drain 信号，继续接收所有已准入
+turn 的事件直到完整落盘/回收；之后仅用不加载线程的实际 read/get 核对
+相同目标仍 active、用量未重置和完整原生历史，再试同线程续接。研究
+不是验收；正式 Leader 未做此试验，也未打开长期 goal。若通过再设计
+明确 yielded outcome，不能复用要求 nonactive goal 的 terminal seal。

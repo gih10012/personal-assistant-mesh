@@ -240,11 +240,27 @@ runtime_failure 为 null，完整结果 SHA-256 为
 生命周期源码候选，34 项 adapter 与 12 项 Worker/Store 新 fixtures、
 105 项 native 相关回归通过；尚未正式加载或在原 Leader 启用长期 goal。
 停止/回收运行器后才清标记并上传原生历史，未知/迟到工作不重放，
-authority 等子任务不再制造零效果。next task 为 PAM-007b 冻结两端完整
-回归/CI，007c 安全 active 协同 yield，007d 连续原生 rollout checkpoint，
+authority 等子任务不再制造零效果。`ef647c80253740b1ac2e43b3e8e41df88e75afaa`
+同一冻结归档 `dcc479462be8a07cb9d33590621a247bda34422832c69e1a4a746befb6635e64`
+两端完整 1328 项通过（laptop 145.661 秒，VPS Python 3.6 142.574 秒），
+[CI 38022301906](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38022301906)
+实际 success；候选未正式加载。上一份 `59bf944` 两端均有 5 个旧 fixture
+错误、CI 失败，未部署；仅更新其旧 mock/断言以符合 actual goal 读取，
+没有放松运行期检查。next task 为 007c 安全 active 协同 yield，007d 连续原生 rollout checkpoint，
 007e 实际周期与模型选择；这些是协调 task，不冒称已提交 runtime。
 当前 active goal 请求等子任务仍显式报告未支持并保留 unknown；途中
 跨节点记忆复制与强实时 lease watchdog 未完成。Chat 原生 MCP/OAuth
 未接通，Cloud 本项目环境仍为空且无实际 job/node。
+官方 socket graceful drain 是 007c 的下一项隔离实验，不是已实现能力；
+stdio 不支持这一排空，unsubscribe 不阻止 goal 自动续跑。
+详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。
+
+正式 laptop worker/node 原先直接以开发仓库为工作目录，重启可能误载
+候选。已保留一致账本与单位配置，改为私有冻结 `3198c87` 版本目录；
+实际两进程 working directory 已核对，原行、配置字节与两条 guard 未变，
+未加载新 goal 控制器、未启用目标，也未恢复 DB/history。独立 provider
+未重启。native-recovery 仍在旧进程/开发目录，其他 CLI/MCP 入口尚未
+全部隔离，不把两个核心单位的切换说成全面版本隔离。
+续接 PAM-007f 的 [运行发布边界](RUNTIME-RELEASE-BOUNDARY.md)。
 Cloud 本项目环境连接/发布条件单列，不以此缺项阻断 004b 中层真实出口。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。
