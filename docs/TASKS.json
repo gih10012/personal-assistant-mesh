@@ -505,7 +505,7 @@
       "state": "in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "原Leader真实update_plan已验收；ef647c8 goal控制器候选两端1328项及CI通过但未部署。私有socket阶段一drain通过，resume输入握手未通过且末轮unknown，原ID不重放；下一片显式一次性交付任务输入与失败先drain、Worker yielded outcome和原生历史checkpoint。正式仍3198c87，剩余入口隔离/3–5天schedule单列，不直接启用正式长期goal",
+      "next_action": "原Leader真实update_plan已验收；ef647c8候选两端1328项及CI通过但未部署。007c输入回执/私有unix传输/子goal隔离/scope预留源码已补，正在冻结两端验证；私有原resume unknown保留不重放。随后接admission drain/event pump、独立yielded seal与原生历史checkpoint。正式仍3198c87，Chat/Cloud/剩余入口隔离及3–5天schedule单列，不直接启用正式长期goal",
       "evidence": {
         "coordination_tasks_created": true,
         "plan": "docs/PLAN.md",
@@ -548,6 +548,15 @@
         "native_goal_socket_trial_usage_after_resume_failure": 7671,
         "native_goal_socket_trial_failure_replayed": false,
         "native_goal_safe_active_cooperative_yield_implemented": false,
+        "native_goal_handoff_prerequisites_contract": "docs/NATIVE-INPUT-HANDOFF.md",
+        "native_goal_once_only_input_intent_and_turn_receipt_implemented": true,
+        "native_goal_resume_host_callback_barrier_implemented": true,
+        "native_goal_child_inheritance_isolation_implemented": true,
+        "native_goal_yielded_scope_reservation_prerequisite_implemented": true,
+        "native_goal_missing_migrated_state_reset_allowed": false,
+        "native_unix_socket_adapter_source_implemented": true,
+        "native_unix_socket_adapter_production_loaded": false,
+        "native_goal_new_input_actual_model_receipt_verified": false,
         "native_goal_continuous_cross_node_rollout_replication_implemented": false,
         "native_goal_strict_realtime_lease_watchdog_verified": false,
         "native_goal_reference": "https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex",
@@ -591,9 +600,9 @@
         {"id": "PAM-007b", "title": "同任务租约绑定的原生goal多turn控制器", "state": "source_candidate_validated",
          "owner": "root+native_goal_adapter", "depends_on": ["PAM-007a"],
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
-        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "bounded_drain_verified_resume_handoff_incomplete",
+        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "handoff_prerequisites_source_implemented_yield_incomplete",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "私有socket阶段一自然drain/原active goal与历史已实际通过；同thread resume阶段未得到新输入握手，6started/5completed并强杀专用PID，保留原unknown不重放。下一片实现显式一次性任务输入与失败时先drain，再设计Worker yielded outcome；生产lease/children交接尚未验收"},
+         "next_action": "私有原resume unknown不重放。源码已补可选unix传输、一次输入intent/hash/实际turnId回执、host请求握手边界、子task goal隔离、yielded scope预留及原生goal状态缺失/重置拒绝。先冻结两端测试与零模型握手，再接admission drain/event pump和独立yielded seal；真实生产lease/children交接未验收"},
         {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
          "next_action": "按原生字节/稳定前缀和压缩保留途中新上下文，不用应用摘要或旧artifact冒充完整恢复"},
@@ -620,7 +629,7 @@
     }
   ],
   "current_work": {
-    "phase": "PAM-007c isolated socket drain passed, original resume handoff unknown retained; implement once-only input/drain/yield and continuous native checkpoints, continue PAM-004c autonomy; PAM-006 Chat/Cloud connection remains separate",
+    "phase": "PAM-007c handoff input/transport/child scope prerequisites source implemented, frozen verification pending; original private resume unknown retained; next admission drain/yield seal and continuous native checkpoints; PAM-006 Chat/Cloud connection remains separate",
     "whole_goal_completed": false
   }
 }

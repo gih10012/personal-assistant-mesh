@@ -1,15 +1,21 @@
-"""Codex app-server JSON-RPC over stdio; auth stays under a discovered Codex home."""
+"""Native Codex JSON-RPC; stdio default, opt-in owner-private Unix socket."""
 import copy
+import hashlib
 import json
+import math
 import os
 import queue
 import signal
+import socket
+import stat
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 from .config import discover_codex_auth, private_json
+from .native_ws import NativeSocketError, UnixWebSocket
 
 
 class CodexError(ValueError):
@@ -90,6 +96,15 @@ class Codex:
         native_plan = config.get('native_plan_tool', True)
         if not isinstance(native_plan, bool):
             raise ValueError('invalid_native_plan_tool_flag')
+        self.transport_name = config.get('native_transport', 'stdio')
+        if self.transport_name not in ('stdio', 'unix'):
+            raise CodexError('invalid_native_transport')
+        if self.transport_name == 'unix' and (not hasattr(socket, 'AF_UNIX') or not hasattr(os, 'geteuid')):
+            raise CodexError('codex_native_transport_unsupported')
+        self._native_socket = None
+        self._socket_directory = None
+        self._socket_path = None
+        self._native_cleanup_forced = self._reader_forced_close = self._term_sent = False
         root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
         env = os.environ.copy()
         if config.get('network_env_file'):
@@ -118,18 +133,26 @@ class Codex:
         # generated event. Owner opt-out overrides only this child too; no
         # global profile edit, new goal, permission ceiling or model choice.
         command += ['-c', 'tools.update_plan.enabled=' + ('true' if native_plan else 'false')]
-        command += ['app-server', '--stdio']
+        if self.transport_name == 'unix':
+            self._socket_directory = tempfile.mkdtemp(prefix='pa-mesh-codex-')
+            self._socket_path = os.path.join(self._socket_directory, 'app.sock')
+            command += ['app-server', '--listen', 'unix://' + self._socket_path]
+        else:
+            command += ['app-server', '--stdio']
         self.auth_home = root
-        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.DEVNULL, env=env, universal_newlines=True,
-                                        start_new_session=True, bufsize=1)
         self.events = queue.Queue()
         self.serial = 0
         self.rpc_depth = 0
         self._rpc_pending, self._rpc_responses = set(), {}
-        self.reader = threading.Thread(target=self._read, daemon=True)
-        self.reader.start()
         try:
+            pipe = subprocess.PIPE if self.transport_name == 'stdio' else subprocess.DEVNULL
+            self.process = subprocess.Popen(command, stdin=pipe, stdout=pipe,
+                                            stderr=subprocess.DEVNULL, env=env, universal_newlines=True,
+                                            start_new_session=True, bufsize=1)
+            if self.transport_name == 'unix':
+                self._connect_native_socket()
+            self.reader = threading.Thread(target=self._read, daemon=True)
+            self.reader.start()
             self.rpc('initialize', {'clientInfo': {'name': 'personal_assistant_mesh', 'version': '0.2.0'},
                                     'capabilities': {'experimentalApi': True}})
             self.send({'method': 'initialized'})
@@ -137,8 +160,36 @@ class Codex:
             self.close()
             raise
 
+    def _connect_native_socket(self):
+        deadline = time.monotonic() + 10
+        while not os.path.lexists(self._socket_path):
+            if self.process.poll() is not None:
+                raise CodexError('codex_native_transport_start_failed')
+            if time.monotonic() >= deadline:
+                raise CodexError('codex_native_transport_start_timeout')
+            time.sleep(.05)
+        entry = os.lstat(self._socket_path)
+        if not stat.S_ISSOCK(entry.st_mode) or entry.st_uid != os.geteuid():
+            raise CodexError('codex_native_transport_path_unsafe')
+        # The newly spawned server may inherit a permissive umask. Tighten only
+        # its socket inside our 0700 directory; never the owner's global umask.
+        os.chmod(self._socket_path, 0o600)
+        current = os.lstat(self._socket_path)
+        if (entry.st_dev, entry.st_ino) != (current.st_dev, current.st_ino):
+            raise CodexError('codex_native_transport_path_unsafe')
+        try:
+            self._native_socket = UnixWebSocket(self._socket_path, timeout=max(.01, deadline - time.monotonic()))
+        except (NativeSocketError, socket.timeout, EOFError):
+            raise CodexError('codex_native_transport_connect_failed') from None
+
     def _read(self):
         try:
+            if getattr(self, 'transport_name', 'stdio') == 'unix':
+                while True:
+                    try:
+                        self.events.put(self._native_socket.recv_json(timeout=.25))
+                    except socket.timeout:
+                        continue
             for line in self.process.stdout:
                 try:
                     value = json.loads(line)
@@ -146,10 +197,20 @@ class Codex:
                         self.events.put(value)
                 except ValueError:
                     pass
+        except EOFError:
+            pass
+        except (NativeSocketError, OSError):
+            self.events.put({'transport_error': True})
         finally:
             self.events.put({'eof': True})
 
     def send(self, value):
+        if getattr(self, 'transport_name', 'stdio') == 'unix':
+            try:
+                self._native_socket.send_json(value)
+            except (NativeSocketError, socket.timeout, OSError):
+                raise CodexError('codex_native_transport_write_unknown') from None
+            return
         self.process.stdin.write(json.dumps(value) + '\n')
         self.process.stdin.flush()
 
@@ -160,24 +221,55 @@ class Codex:
             raise CodexError('codex_timeout') from None
         if value.get('eof'):
             raise CodexError('codex_disconnected')
+        if value.get('transport_error'):
+            raise CodexError('codex_native_transport_read_failed')
         if 'id' in value and 'method' in value:
-            if value['method'] == 'item/tool/call' and self.on_tool:
-                result = self.on_tool(value['params'])
-                self.send({'id': value['id'], 'result': result})
-            elif self.on_interaction and value['method'] in ('item/tool/requestUserInput',
-                    'item/commandExecution/requestApproval', 'item/fileChange/requestApproval'):
-                answer = self.on_interaction(value['method'], value.get('params', {}))
-                self.send({'id': value['id'], 'result': answer})
-            elif '/requestApproval' in value['method']:
-                if self.on_activity:
-                    self.on_activity('approval_required', value.get('params', {}))
-                # Permissions requests use a different response schema from
-                # command/file approvals. Grant nothing, without corrupting RPC.
-                denied = {'permissions': {}, 'scope': 'turn'} if value['method'] == 'item/permissions/requestApproval' else {'decision': 'decline'}
-                self.send({'id': value['id'], 'result': denied})
+            if getattr(self, '_hold_host_requests', False):
+                held = self._held_host_requests
+                if len(held) >= 128:
+                    raise CodexError('codex_native_resume_request_overflow')
+                held.append(value)
             else:
-                self.send({'id': value['id'], 'error': {'code': -32601, 'message': 'Host interaction unavailable; ask owner in reply.'}})
+                self._handle_host_request(value)
         return value
+
+    def _handle_host_request(self, value):
+        if value['method'] == 'item/tool/call' and self.on_tool:
+            result = self.on_tool(value['params'])
+            self.send({'id': value['id'], 'result': result})
+        elif self.on_interaction and value['method'] in ('item/tool/requestUserInput',
+                'item/commandExecution/requestApproval', 'item/fileChange/requestApproval'):
+            answer = self.on_interaction(value['method'], value.get('params', {}))
+            self.send({'id': value['id'], 'result': answer})
+        elif '/requestApproval' in value['method']:
+            if self.on_activity:
+                self.on_activity('approval_required', value.get('params', {}))
+            # Permissions requests use a different response schema from
+            # command/file approvals. Grant nothing, without corrupting RPC.
+            denied = {'permissions': {}, 'scope': 'turn'} if value['method'] == 'item/permissions/requestApproval' else {'decision': 'decline'}
+            self.send({'id': value['id'], 'result': denied})
+        else:
+            self.send({'id': value['id'], 'error': {'code': -32601, 'message': 'Host interaction unavailable; ask owner in reply.'}})
+
+    def _release_resume_requests(self):
+        held = getattr(self, '_held_host_requests', [])
+        if getattr(self, '_pending_goal_input', None) is not None:
+            if held:
+                raise CodexError('codex_native_resume_input_unconfirmed')
+            return
+        receipt = self.native_lifecycle.get('native_input')
+        if held and (not isinstance(receipt, dict) or receipt.get('status') != 'submitted'):
+            raise CodexError('codex_native_resume_unexpected_work')
+        self._hold_host_requests = False
+        # Remove each request before its callback; ambiguous execution is never
+        # retried. The current task fence is still held by the activity handler.
+        while held:
+            request = held.pop(0)
+            params = request.get('params')
+            if (not isinstance(params, dict) or params.get('threadId') != self.thread_id
+                    or params.get('turnId') != self.turn_id):
+                raise CodexError('codex_native_resume_unexpected_work')
+            self._handle_host_request(request)
 
     def rpc(self, method, params, timeout=30):
         self.serial += 1
@@ -257,7 +349,10 @@ class Codex:
         return {'status': 'available' if known and not stale else 'unknown'}
 
     def start(self, text, checkpoint=None):
-        checkpoint = checkpoint or {}
+        # Worker callbacks update the live task checkpoint synchronously.
+        # Preserve the prior native authority before any such callback replaces
+        # its lifecycle; otherwise a yielded goal can silently lose its guard.
+        checkpoint = copy.deepcopy(checkpoint or {})
         # Checkpoint goals are historical observations, never a command to
         # restore status/accounting or reactivate an owner's paused goal.
         requested_goal = self.config.get('goal') or None
@@ -280,6 +375,8 @@ class Codex:
                                  'goal': None, 'thread_status': None}
         self._completed_turns = set()
         self._pending_goal_input = None
+        self._hold_host_requests = bool(checkpoint.get('thread_id'))
+        self._held_host_requests = []
         self._native_final_replies = []
         root = self.config['workspace']
         parameters = {'cwd': root,
@@ -316,6 +413,8 @@ class Codex:
                 parameters['dynamicTools'] = self.tools
             value = self.rpc('thread/start', parameters)
         self.thread_id = value['thread']['id']
+        if checkpoint.get('thread_id') and self.thread_id != checkpoint['thread_id']:
+            raise CodexError('codex_native_resume_identity_mismatch')
         self.rollout_path = value['thread'].get('path')
         self.model = parameters.get('model') or value['thread'].get('model')
         self.native_lifecycle['thread_id'] = self.thread_id
@@ -326,7 +425,10 @@ class Codex:
         # which is why native_start_intent preceded even the resume RPC.
         self._activity('session_ready', {'thread_id': self.thread_id,
                                          'native_lifecycle': self.native_lifecycle})
-        actual_goal = self._read_goal_snapshot() if checkpoint.get('thread_id') else None
+        actual_goal = (self._read_goal_snapshot(resume_input=text, checkpoint=checkpoint)
+                       if checkpoint.get('thread_id') else None)
+        prior_lifecycle = checkpoint.get('native_lifecycle')
+        yielded = isinstance(prior_lifecycle, dict) and prior_lifecycle.get('outcome') == 'yielded'
         if requested_goal and actual_goal is not None:
             if actual_goal['objective'] != requested_goal['objective']:
                 raise CodexError('codex_native_goal_objective_conflict')
@@ -334,12 +436,12 @@ class Codex:
             # Never resume/re-set an existing goal from config or a checkpoint.
             # An active native goal owns its continuation scheduling. Preserve
             # owner/system pause, completion, block and budget states exactly.
-            if actual_goal['status'] == 'active':
-                self._pending_goal_input = text
+            self._release_resume_requests()
             return self._start_state(mode)
-        if actual_goal is not None and actual_goal['status'] == 'active':
-            self._pending_goal_input = text
+        if actual_goal is not None and (actual_goal['status'] == 'active' or yielded):
+            self._release_resume_requests()
             return self._start_state(mode)
+        self._release_resume_requests()
         turn = {'threadId': self.thread_id, 'input': [{'type': 'text', 'text': text}]}
         if self.model:
             turn['collaborationMode'] = {'mode': mode, 'settings': {
@@ -404,14 +506,42 @@ class Codex:
         for value in prior:
             self._consume_finish_event(value, replies)
 
-    def _read_goal_snapshot(self):
+    def _read_goal_snapshot(self, resume_input=None, checkpoint=None):
         response = self.rpc('thread/goal/get', {'threadId': self.thread_id})
         if not isinstance(response, dict) or 'goal' not in response:
             # A malformed response is not proof that an active goal vanished.
             raise CodexError('codex_native_goal_snapshot_invalid')
         self._validate_goal_snapshot(response['goal'])
+        goal = response['goal']
+        expected = self.native_lifecycle.get('expected_goal_objective')
+        if goal is not None and expected is not None and goal['objective'] != expected:
+            raise CodexError('codex_native_goal_objective_conflict')
+        prior_lifecycle = (checkpoint or {}).get('native_lifecycle')
+        if isinstance(prior_lifecycle, dict) and prior_lifecycle.get('outcome') == 'yielded':
+            prior = prior_lifecycle.get('goal')
+            if (goal is None or not isinstance(prior, dict)
+                    or prior_lifecycle.get('thread_id') != self.thread_id
+                    or prior_lifecycle.get('settled') is not True
+                    or prior_lifecycle.get('runtime_closed') is not True
+                    or prior.get('threadId') != self.thread_id
+                    or prior.get('objective') != goal['objective']
+                    or prior.get('createdAt') is None
+                    or prior['createdAt'] != goal.get('createdAt')):
+                raise CodexError('codex_native_goal_continuity_unverified')
+            for key in ('tokensUsed', 'timeUsedSeconds'):
+                old, current = prior.get(key), goal.get(key)
+                if (not isinstance(old, (int, float)) or isinstance(old, bool)
+                        or not isinstance(current, (int, float)) or isinstance(current, bool)
+                        or not math.isfinite(old) or not math.isfinite(current)
+                        or old < 0 or current < old):
+                    raise CodexError('codex_native_goal_continuity_unverified')
+            self.native_lifecycle['expected_goal_objective'] = prior['objective']
         if response['goal'] is not None:
             self.native_lifecycle['goal_managed'] = True
+        if resume_input is not None and goal is not None and goal['status'] == 'active':
+            # Before consuming earlier turn notifications or servicing any
+            # resumed host request, give this input a once-only native intent.
+            self._pending_goal_input = resume_input
         self._consume_prior_notifications()
         return self._store_goal_snapshot(response['goal'])
 
@@ -438,8 +568,32 @@ class Codex:
                         'turn_id': identity, 'native_lifecycle': lifecycle})
 
     def steer(self, text):
-        return self.rpc('turn/steer', {'threadId': self.thread_id, 'expectedTurnId': self.turn_id,
-                                      'input': [{'type': 'text', 'text': text}]})
+        turn_id = self.turn_id
+        response = self.rpc('turn/steer', {'threadId': self.thread_id, 'expectedTurnId': turn_id,
+                                         'input': [{'type': 'text', 'text': text}]})
+        if (not isinstance(turn_id, str) or not turn_id or not isinstance(response, dict)
+                or response.get('turnId') != turn_id):
+            raise CodexError('codex_native_input_receipt_invalid')
+        return response
+
+    def _submit_goal_input(self):
+        pending = self._pending_goal_input
+        self._pending_goal_input = None  # ambiguous submission never retries
+        intent = {'thread_id': self.thread_id, 'turn_id': self.turn_id,
+                  'method': 'turn/steer', 'status': 'intent',
+                  'sha256': hashlib.sha256(pending.encode('utf8')).hexdigest()}
+        self.native_lifecycle['native_input'] = intent
+        self._activity('native_start_intent', dict(intent, goal_managed=True,
+                                                 native_lifecycle=self.native_lifecycle))
+        try:
+            self.steer(pending)
+        except BaseException:
+            intent['status'] = 'unknown'
+            self._activity('native_input_receipt', self.native_lifecycle)
+            raise
+        intent['status'] = 'submitted'
+        self._activity('native_input_receipt', self.native_lifecycle)
+        self._release_resume_requests()
 
     def native_rollout(self):
         thread = self.rpc('thread/read', {'threadId': self.thread_id, 'includeTurns': False})['thread']
@@ -561,11 +715,7 @@ class Codex:
         method, params = value.get('method'), value['params']
         if (getattr(self, '_pending_goal_input', None) and self.turn_id is not None
                 and self.turn_id not in self._completed_turns):
-            pending = self._pending_goal_input
-            self._pending_goal_input = None  # ambiguous steer never retries
-            self._activity('native_start_intent', {'thread_id': self.thread_id,
-                           'turn_id': self.turn_id, 'method': 'turn/steer', 'goal_managed': True})
-            self.steer(pending)
+            self._submit_goal_input()
         if method == 'item/completed':
             item = params.get('item', {})
             if item.get('type') == 'agentMessage' and item.get('phase') != 'commentary':
@@ -612,6 +762,8 @@ class Codex:
         no_current_work = self.turn_id is None or self.turn_id in self._completed_turns
         terminal_goal = goal is None or goal.get('status') in GOAL_STATUSES - {'active'}
         if terminal_goal and no_current_work and lifecycle['thread_status'].get('type') == 'idle':
+            if getattr(self, '_pending_goal_input', None) is not None:
+                raise CodexError('codex_native_resume_input_unconfirmed')
             lifecycle['quiescent'] = True
             self._activity('native_quiescent', lifecycle)
             return True
@@ -676,6 +828,9 @@ class Codex:
         lifecycle = self.native_lifecycle
         if not lifecycle.get('goal_managed') or not lifecycle.get('quiescent'):
             raise CodexError('codex_native_not_quiescent')
+        if (getattr(self, '_held_host_requests', None)
+                or (lifecycle.get('native_input') or {}).get('status') in ('intent', 'unknown')):
+            raise CodexError('codex_native_resume_input_unconfirmed')
         lifecycle['settled'] = False
         self.close()
         reader = getattr(self, 'reader', None)
@@ -685,6 +840,9 @@ class Codex:
                 raise CodexError('codex_native_reader_unsettled')
         if self.process.poll() is None:
             raise CodexError('codex_native_runtime_not_reaped')
+        if getattr(self, 'transport_name', 'stdio') == 'unix' and (
+                self.process.poll() != 0 or self._native_cleanup_forced or self._reader_forced_close):
+            raise CodexError('codex_native_runtime_exit_unknown')
         lifecycle['runtime_closed'] = True
         pending = list(self.deferred)
         self.deferred[:] = []
@@ -694,6 +852,8 @@ class Codex:
             except queue.Empty:
                 break
         for value in pending:
+            if value.get('transport_error'):
+                raise CodexError('codex_native_transport_read_failed')
             if value.get('eof'):
                 continue
             params = value.get('params', {})
@@ -730,6 +890,41 @@ class Codex:
                 pass
 
     def close(self):
+        if getattr(self, 'transport_name', 'stdio') == 'unix':
+            process = getattr(self, 'process', None)
+            if process is not None and process.poll() is None:
+                try:
+                    if not self._term_sent:
+                        self._term_sent = True
+                        os.kill(process.pid, signal.SIGTERM)  # Only our app-server PID.
+                    process.wait(timeout=5)
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    if process.poll() is None:
+                        self._native_cleanup_forced = True
+                        os.kill(process.pid, signal.SIGKILL)
+                        process.wait()
+            reader = getattr(self, 'reader', None)
+            if reader is not None:
+                reader.join(timeout=1)
+                if reader.is_alive():
+                    self._reader_forced_close = True
+            if self._native_socket is not None:
+                self._native_socket.close()
+            # Retain unknown cleanup's private path. Ordinary cleanup removes
+            # only our exact socket and otherwise-empty temporary directory.
+            if not self._native_cleanup_forced and not self._reader_forced_close:
+                try:
+                    if self._socket_path and os.path.lexists(self._socket_path):
+                        entry = os.lstat(self._socket_path)
+                        if stat.S_ISSOCK(entry.st_mode) and entry.st_uid == os.geteuid():
+                            os.unlink(self._socket_path)
+                    if self._socket_directory:
+                        os.rmdir(self._socket_directory)
+                except OSError:
+                    pass
+            return
+        if getattr(self, 'process', None) is None:
+            return
         if self.process.poll() is None:
             try:
                 os.killpg(self.process.pid, signal.SIGTERM)

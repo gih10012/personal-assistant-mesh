@@ -32,6 +32,8 @@ class ProtocolTests(unittest.TestCase):
                 return {'goal': None}
             if method == 'thread/goal/set':
                 return {'goal': dict(params)}
+            if method == 'turn/steer':
+                return {'turnId': params['expectedTurnId']}
             return {}
 
         agent.rpc = rpc

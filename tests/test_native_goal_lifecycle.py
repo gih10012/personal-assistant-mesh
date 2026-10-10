@@ -61,6 +61,8 @@ class NativeGoalLifecycleTests(unittest.TestCase):
                 response = {'goal': copy.deepcopy(agent.actual_goal)}
             elif method == 'thread/read':
                 response = {'thread': {'id': self.thread, 'status': copy.deepcopy(agent.actual_status)}}
+            elif method == 'turn/steer':
+                response = {'turnId': params['expectedTurnId']}
             else:
                 response = {}
             for value in agent.after_reply.pop(method, []):

@@ -357,6 +357,47 @@ class Store:
             self._set(db, 'last_poll', self.clock())
         return accepted
 
+    @staticmethod
+    def _yielded_active_goal_checkpoint(checkpoint):
+        """Validate recorded worker settlement, not a native process attestation.
+
+        An active goal can release its execution guard only through the
+        separately sealed yielded outcome. The task and lifecycle must name
+        the same original native thread and the same actual goal snapshot.
+        This does not enable yield, inspect a process, restore accounting or
+        manufacture settlement from a coordination status.
+        """
+        if not isinstance(checkpoint, dict):
+            return False
+        lifecycle = checkpoint.get('native_lifecycle')
+        goal = checkpoint.get('goal')
+        thread = checkpoint.get('thread_id')
+        if (checkpoint.get('side_effect_started') is not False
+                or checkpoint.get('harness') != 'codex'
+                or not isinstance(thread, str) or not thread
+                or not isinstance(lifecycle, dict)
+                or lifecycle.get('outcome') != 'yielded'
+                or any(lifecycle.get(key) is not True for key in
+                       ('controller_enabled', 'goal_managed', 'settled', 'runtime_closed'))
+                or lifecycle.get('thread_id') != thread
+                or not isinstance(goal, dict) or goal.get('threadId') != thread
+                or goal.get('status') != 'active'
+                or not isinstance(goal.get('objective'), str)
+                or not goal['objective'].strip() or len(goal['objective']) > 4000
+                or lifecycle.get('goal') != goal
+                or lifecycle.get('expected_goal_objective') != goal['objective']):
+            return False
+        return True
+
+    @classmethod
+    def _yielded_goal_reserves_scope(cls, status, checkpoint):
+        # Keep the original goal owner while children run, across their wake
+        # boundary and during a failed preflight's existing backend/auth wait.
+        # Such a wait did not start a new native turn and must not lose the
+        # old safely yielded goal. Ordinary waiting/stopped tasks are unchanged.
+        return (status in ('waiting_children', 'pending', 'waiting_backend', 'waiting_auth')
+                and cls._yielded_active_goal_checkpoint(checkpoint))
+
     def claim(self, node):
         self.elect()
         with self.transaction() as db:
@@ -378,10 +419,13 @@ class Store:
                     db.execute("UPDATE tasks SET status='needs_review',node=NULL,deadline=NULL WHERE id=?", (row['id'],))
                     self._enqueue(db, 'review-' + row['id'], '任务 ' + row['id'][:8] + ' 执行中断，可能已产生外部效果，等待核对后续接。')
                     continue
-                unsettled = db.execute("SELECT checkpoint FROM tasks WHERE scope=? AND id<>? AND status<>'completed'", (row['scope'], row['id']))
-                if any(json.loads(other['checkpoint']).get('side_effect_started') for other in unsettled):
+                unsettled = db.execute("SELECT status,checkpoint FROM tasks WHERE scope=? AND id<>? AND status<>'completed'", (row['scope'], row['id']))
+                if any((json.loads(other['checkpoint']).get('side_effect_started')
+                        or self._yielded_goal_reserves_scope(other['status'], json.loads(other['checkpoint'])))
+                       for other in unsettled):
                     # A new task must not sidestep review by resuming the same
-                    # native conversation under a different task ID or node.
+                    # native conversation under a different task ID or node,
+                    # nor take a safely yielded parent's still-active goal.
                     continue
                 db.execute("UPDATE tasks SET status='running',node=?,epoch=epoch+1,deadline=?,attempts=attempts+1,leader_epoch=? WHERE id=?",
                            (node, now + 90, leader['epoch'] if 'leader' in required else None, row['id']))
@@ -435,6 +479,17 @@ class Store:
             next_checkpoint = json.loads(row['checkpoint'])
             if checkpoint:
                 next_checkpoint.update(checkpoint)
+            lifecycle = next_checkpoint.get('native_lifecycle')
+            if (next_checkpoint.get('side_effect_started') is False
+                    and isinstance(lifecycle, dict) and lifecycle.get('outcome') == 'yielded'):
+                if not self._yielded_active_goal_checkpoint(next_checkpoint):
+                    # Reject a fake/partial seal before committing a false
+                    # guard. A status or truthy flag is never settlement.
+                    raise Conflict('native_goal_yield_unsettled')
+                if status not in (None, 'waiting_children', 'waiting_backend', 'waiting_auth'):
+                    # Preserve preflight backoff after a fresh claim, but do
+                    # not finalize a task whose actual goal remains active.
+                    raise Conflict('native_goal_yield_requires_child_wait')
             delay = 300 if status == 'waiting_auth' else 60 if status == 'waiting_backend' else 30 if status == 'continuing' else 90
             if status == 'waiting_children':
                 active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (task_id,)).fetchone()
@@ -489,6 +544,11 @@ class Store:
                     raise ValueError('invalid_query')
                 output = {'memories': [dict(r) for r in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) AND instr(lower(text),lower(?))>0 ORDER BY updated DESC LIMIT 100', (scope, shared_scope, query))]}
             elif action == 'delegate':
+                if {'goal', 'goal_mode'} & set(arguments):
+                    # The existing delegate API authorizes bounded child work,
+                    # not a new native goal or copied accounting/budget. An
+                    # explicit child-goal protocol is not implemented here.
+                    raise ValueError('child_native_goal_unsupported')
                 text, required = arguments['input'], arguments.get('required') or ['agent']
                 if not isinstance(text, str) or not text.strip() or len(text.encode()) > 65536 or not isinstance(required, list) or not all(isinstance(c, str) for c in required):
                     raise ValueError('invalid_child_task')
@@ -499,6 +559,8 @@ class Store:
                 required = sorted(set(required + fences))
                 child = hashlib.sha256(('child-' + action_id).encode()).hexdigest()
                 child_context = dict(context)
+                child_context.pop('goal', None)
+                child_context.pop('goal_mode', None)
                 child_context['role'] = arguments.get('role', 'specialist')
                 child_context['project_id'] = arguments.get('project_id', context.get('project_id', 'general'))
                 identity = str(arguments.get('agent_id', child_context['role']))

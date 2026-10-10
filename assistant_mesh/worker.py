@@ -46,6 +46,14 @@ _NATIVE_FAILURES = frozenset((
     'codex_native_late_request', 'codex_native_late_work',
     'codex_native_late_goal', 'codex_native_late_status',
     'codex_goal_coordination_yield_unavailable',
+    'codex_native_resume_request_overflow', 'codex_native_resume_input_unconfirmed',
+    'codex_native_resume_unexpected_work', 'codex_native_resume_identity_mismatch',
+    'codex_native_goal_continuity_unverified', 'codex_native_input_receipt_invalid',
+    'invalid_native_transport', 'codex_native_transport_unsupported',
+    'codex_native_transport_start_failed', 'codex_native_transport_start_timeout',
+    'codex_native_transport_path_unsafe', 'codex_native_transport_connect_failed',
+    'codex_native_transport_write_unknown', 'codex_native_transport_read_failed',
+    'codex_native_runtime_exit_unknown',
     'pi_model_configuration_required', 'pi_mesh_grant_required', 'pi_timeout',
     'pi_disconnected', 'pi_resume_cancelled', 'pi_prompt_not_started',
     'pi_turn_failed', 'pi_turn_timeout')) | frozenset(
@@ -485,9 +493,21 @@ class Worker:
                 config = dict(config)
                 if name == 'codex':
                     context = self.current.get('context', {})
+                    local_child = bool(self.current.get('parent_id'))
+                    origin = context.get('origin')
+                    remote_child = (isinstance(origin, dict) and origin.get('kind') == 'a2a'
+                                    and isinstance(origin.get('parent_ref'), str) and bool(origin['parent_ref']))
+                    if local_child or remote_child:
+                        # A node default belongs to its Leader, not every
+                        # bounded specialist. Actual model-created goals remain
+                        # native and are still observed on resume.
+                        config.pop('goal', None)
                     if context.get('mode'):
                         config['mode'] = context['mode']
-                    if context.get('goal'):
+                    if context.get('goal') and not local_child:
+                        # Local legacy child rows may contain an accidentally
+                        # inherited goal. Remote A2A /goal is an explicit,
+                        # already supported task instruction under its grant.
                         config['goal'] = dict(context['goal'])
                 agent = implementation(config, tools=TOOLS, on_tool=self.on_tool, on_activity=self.on_activity,
                                        on_interaction=self.on_interaction)
@@ -605,6 +625,14 @@ class Worker:
             lifecycle = getattr(self.agent, 'native_lifecycle', None)
             if isinstance(lifecycle, dict) and lifecycle.get('thread_id') == state.get('thread_id'):
                 state['native_lifecycle'] = copy.deepcopy(lifecycle)
+            self.tick(force=True)
+        elif kind == 'native_input_receipt':
+            state = self.current['checkpoint']
+            if value.get('thread_id') != state.get('thread_id'):
+                return
+            # A receipt is delivery evidence only; it never settles effects.
+            state['native_lifecycle'] = copy.deepcopy(value)
+            state['side_effect_started'] = True
             self.tick(force=True)
         elif kind == 'native_quiescent':
             self._native_turn_live = False

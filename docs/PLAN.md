@@ -259,6 +259,13 @@ authority 等子任务不再制造零效果。`ef647c80253740b1ac2e43b3e8e41df88
 新 task 输入、失败先 drain 与独立 yielded outcome。stdio 不支持这一
 排空，unsubscribe 不阻止 goal 自动续跑，不能借新线程绕过失败。
 详见 [原生socket实测](NATIVE-SOCKET-DRAIN-TRIAL.md)。
+下一片源码已补可选私有Unix WebSocket、resume输入的持久intent/hash
+与实际turnId回执、host回调握手边界、子task不继承父goal、yielded
+scope等待/唤醒/零native-start的auth/backend回退预留。缺少/重置的
+原生goal状态不从配置重新创建。当前仍未实现active yield的独立seal，
+也未启用正式目标；将继续两端冻结测试与零模型传输核验，之后补
+admission drain/event pump和真实父子续接。
+详见 [输入与归属前置合同](NATIVE-INPUT-HANDOFF.md)。
 详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。
 
 正式 laptop worker/node 原先直接以开发仓库为工作目录，重启可能误载
