@@ -343,7 +343,12 @@
         "arbitrary_model_api_call_verified": false,
         "generic_egress_installed_and_verified": false,
         "campus_remote_egress_installed_and_verified": false,
-        "campus_target_probed_this_turn": false
+        "campus_target_probed_this_turn": true,
+        "campus_local_direct_unauthenticated_http_status": 200,
+        "campus_vps_native_ssh_via_laptop_unauthenticated_http_status": 200,
+        "campus_probe_complete_body_verified": false,
+        "campus_probe_body_limit_exceeded": true,
+        "campus_generic_managed_proxy_claimed": false
       },
       "subtasks": [
         {
@@ -365,8 +370,22 @@
         },
         {
           "id": "PAM-002b", "title": "校园节点校内选择性网络出口",
-          "state": "planned", "owner": "root+mesh-leader", "depends_on": [],
-          "next_action": "重采当前Wi-Fi/校内可达性，选择实际校内目标与DNS路径，暴露选择性能力；不把SSID/默认路由或校园登录态当远端业务授权",
+          "state": "actual_local_and_vps_native_ssh_campus_reachability_verified_managed_capability_pending", "owner": "root+mesh-leader", "depends_on": [],
+          "next_action": "校园连接已重采；本机直连与VPS通过既有native SSH在本机执行固定无认证校内GET均HTTP200，正文超过64KiB上限故未验完整内容。下一步安装选择性校园能力/统一调用，不将原生SSH执行说成已登记通用代理或学校业务授权",
+          "evidence": {
+            "contract": "docs/CAMPUS-PATH.md",
+            "local_probe_sample_time": 1791645053.008005,
+            "vps_via_laptop_probe_sample_time": 1791645404.4834194,
+            "local_direct_http_status": 200,
+            "vps_native_ssh_via_laptop_http_status": 200,
+            "vps_via_laptop_duration_seconds": 0.029,
+            "body_limit_bytes": 65536,
+            "complete_body_or_business_content_verified": false,
+            "school_authentication_used": false,
+            "school_private_business_data_requested": false,
+            "global_network_or_sshd_changed": false,
+            "generic_managed_campus_capability_installed": false
+          },
           "acceptance": "远端通过该节点访问一个明确校内目标有真实结果；非校内流量不被错误导入，秘密不公告"
         }
       ],
@@ -594,9 +613,9 @@
         },
         {
           "id": "PAM-004d", "title": "统一能力入口和真实多候选出口调度",
-          "state": "planned", "owner": "root+mesh-leader",
+          "state": "implementation_in_progress", "owner": "root+egress_path_impl+mesh-leader",
           "depends_on": ["PAM-002a", "PAM-003c"],
-          "next_action": "在现有mesh入口上组合发现/调用/委派/状态/成果，模型选择真实VPS或其他当前可用路径；同owner日常复用授权，不加native白名单；校园能力002b就绪后独立接入",
+          "next_action": "通用network.https ProviderRuntime callback正在实现：由已准入scope选择URL/query，owner固定direct或owned SOCKS5h路径，私有有界产物/原ID不重放；Root下一步隔离验证后加独立承载与真实目录/执行，不替换实验goal核心。现有exact scope观测/grant仍需逐请求，统一易用准入继续004d，不伪称已如一台机器",
           "acceptance": "模型实际跨节点调用和结果回收，故障后选择其他新工作路径；旧unknown不重放，共享出口瓶颈不重复计容量"
         }
       ],
@@ -762,13 +781,13 @@
         {
           "id": "PAM-006d", "title": "主账号Chat原生Mesh工具与推理能力",
           "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
-          "next_action": "核对主账号当前官方插件/tools/OAuth能力，连接最薄Mesh入口并真实对话提交/结果回收；浏览器手动桥另记，不假设不限额度或可绕成万能API",
+          "next_action": "已重新实读官方Plugins确认Chat与Work支持MCP插件，修正旧Work-only推断；复用既有owner-bound三工具补HTTPS Streamable HTTP/OAuth sidecar，再核主账号安装/真实Chat调用。当前stdio/人工Firefox桥不是原生Chat，不承诺不限额度或万能API",
           "acceptance": "实际Chat模型工具回执/原任务/成果一致，身份范围与使用限制实核；连好后另验定时检查"
         },
         {
           "id": "PAM-006e", "title": "OpenAI官方Codex Cloud临时节点",
           "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
-          "next_action": "确认本项目官方环境与repo授权；有现有权限则单次job接入、领取/回传/终止后读回，缺授权问owner。node cloud始终是ali-vps，不拿该服务代替官方job",
+          "next_action": "此前repo-scoped官方环境GET200返回[]，不是全账号无权益；先实际published environment与repo访问，已有权限内单次job/diff/退出后读回。CloudJobs库仍需Mesh task/epoch/lease与HTTPS callback/临时限任务身份集成才称节点；缺具体授权问owner，node cloud仍ali-vps",
           "acceptance": "官方job身份、真实执行与成果回收、退出后持久状态分别核验；不给临时环境operator bearer或复制整个认证目录"
         }
       ]
@@ -955,6 +974,12 @@
         "automatic_laptop_takeover_implemented": false,
         "cross_carrier_channel_lease_implemented": false,
         "cross_carrier_checkpoint_handoff_verified": false,
+        "carrier_witness_and_once_only_fence_source_implemented": true,
+        "carrier_new_fixture_tests_passed": 34,
+        "carrier_related_fixture_tests_passed": 114,
+        "carrier_contract": "docs/CHANNEL-CARRIER.md",
+        "carrier_authenticated_api_or_channel_store_integration_implemented": false,
+        "carrier_production_deployed": false,
         "actual_failure_takeover_verified": false,
         "scope": "read-only checkpoint source plus current VPS-only deployment; not lease/import/handoff/HA",
         "checkpoint_contract": "docs/CHANNEL-CHECKPOINT.md",
@@ -975,15 +1000,15 @@
         "checkpoint_migration_ready": false
       },
       "subtasks": [
-        {"id": "PAM-009a", "title": "任意节点沟通承载候选能力", "state": "planned",
+        {"id": "PAM-009a", "title": "任意节点沟通承载候选能力", "state": "partial_source_candidate_not_integrated",
          "owner": "root+mesh-leader", "depends_on": [],
-         "next_action": "定义owner/account/runtime/private credential refs并核本机与VPS能力；候选/holder/Leader位置分离，探测不自动启动receiver"},
+         "next_action": "候选合同/指定witness源码已实现，与009c共34新/114相关fixtures；候选只是report，默认无verifier不grant。继续真实节点认证/API与私有运行能力核对，位置不绑定VPS/Leader，不自动启receiver"},
         {"id": "PAM-009b", "title": "版本化私有通道checkpoint交接", "state": "partial_audit_checkpoint_source_candidate_not_migration_ready",
          "owner": "root+clawbot_ha_capability_audit+mesh-leader", "depends_on": [],
          "next_action": "d8bfeda1707双端/CI成功；实际VPS只读export/validate/0600新file/读回通过，默认64MiB不足事实保留，显式128MiB/RSS20MiB。继续原执行/history引用闭合及009c/d失权/受控handoff，不把audit artifact直接导入或另开poller"},
-        {"id": "PAM-009c", "title": "通道任期和旧承载失权排他", "state": "planned",
+        {"id": "PAM-009c", "title": "通道任期和旧承载失权排他", "state": "partial_source_candidate_not_integrated",
          "owner": "root+mesh-leader", "depends_on": ["PAM-009a", "PAM-009b"],
-         "next_action": "account/holder/epoch/deadline/checkpoint revision独立于Leader lease；poll与send各边界fence、在途效果对账；明确两节点分区限制，选现有零费仲裁/可证明停止机制，不凭ping抢权"},
+         "next_action": "并行实现同一指定witness的候选/任期/CAS与poll/send一次派发intent；ACK丢失或已派发未对账阻止转任，不凭ping/期限或socket timeout证明旧进程停止。仍需认证node-bound API、实际Channel账本边界与可验证旧holder停止/完整checkpoint交接，本片不部署第二poller；共享仲裁失联不阻断native工作"},
         {"id": "PAM-009d", "title": "真实受控交接和故障回汇", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-009c"],
          "next_action": "隔离ACKloss/crash/partition/rejoin后实际单次handoff；旧holder失权、单条合成消息原task/原发送身份/回执核对；再开启同合同自动接管，不损坏当前入口"}
@@ -1036,7 +1061,7 @@
     }
   ],
   "current_work": {
-    "phase": "d8bfeda source public, same frozen archive1707 both hosts/CI success; actual owned laptop→VPS HTTPS transport, native custom provider config0.162.1/0.159.2 zero-model readback, formal VPS readonly channel checkpoint verified. Next thin egress capability/actual carrier and communication lease/handoff in parallel; production3198c87 unchanged, no HA/campus/Chat native/official Cloud job/third-party inference; old unknowns preserved",
+    "phase": "d8bfeda1707 two-host/CI foundation preserved. Next source now has generic direct/owned-SOCKS HTTPS callback20 new/101 related fixtures and designated single-witness carrier/fence34 new/114 related fixtures; freezing for integrated validation, Root prepares additive VPS HTTPS capability installation. Actual local and VPS→native SSH→laptop campus GET200 verified with bounded body overflow, not installed generic campus capability. Chat plugin official support rechecked, account/HTTP/OAuth and official Cloud job still pending. Production3198c87 and old unknowns preserved",
     "runtime_changed_this_status_turn": false,
     "production_runtime_changed_this_implementation_slice": false,
     "goal_status": "active",

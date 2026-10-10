@@ -10,7 +10,7 @@
 
 | Surface | 可作为入口 | 可作为 Mesh 工作节点 | 当前应采用的方式 |
 | --- | --- | --- | --- |
-| ChatGPT Chat | 普通 Chat 的自定义 MCP 能力须实际账号核验；Firefox 手动桥接是独立入口，不是模型原生工具 | 支持的对话/定时 run 可研究、选择工具、回传结果；不是常驻本机进程 | 先实测普通 Chat；官方 quickstart 的明确验收面是 Work，不能外推 |
+| ChatGPT Chat | 当前官方 Plugins 文档明确支持 Chat 与 Work；本人连接仍须实测；Firefox 手动桥不是模型原生工具 | 已连接工具的对话/定时 run 可研究、调用、回传；不是常驻本机进程 | 补 HTTPS Streamable HTTP 与 owner OAuth，再验主账号真实 Chat 工具调用 |
 | 原生 Codex | 原生聊天和终端均可提交/查询 Mesh 工作 | 可以在本人机器常驻或自主离线工作，保留原生 Shell/记忆 | 现有 app-server、持久 thread、Mesh 附加工具 |
 | Codex Cloud | 官方 CLI 可发起并观察 cloud task | 每个 hosted task 可作为有租约的临时 agent；不要假定永久 daemon | 发布 cloud environment + 显式 cloud job adapter |
 
@@ -31,8 +31,22 @@ restore 的旧前缀冲突曾令任务 `waiting_backend` epoch 5；epoch 15 完�
 Cloud 原生只读 list 成功，官方 repo-scoped 环境查询 HTTP 200 返回
 空数组；该查询未返回本项目环境，未提交 job/登记 Cloud node。见
 [Firefox 合同](FIREFOX-CHAT-ENTRYPOINT.md)、[Cloud 实施](CODEX-CLOUD-JOBS.md)。
-[Work quickstart](https://developers.openai.com/plugins/quickstart) 要求切换到
-Work；普通 Chat 是否支持 MCP 不能只看插件按钮或参考账号。
+2026-10-10再次实际读取[官方 Plugins](https://learn.chatgpt.com/docs/plugins)：
+文档明确插件支持 Chat 与 Work，以及已安装插件可带 MCP tools；每个
+chat/workspace 的权限和连接仍需验证。此前只由
+[Work quickstart](https://developers.openai.com/plugins/quickstart)推断普通
+Chat 支持不明确的措辞已修正，不能用旧推断当永久限制。
+本仓库目前只有 stdio MCP/人工 Firefox 桥，尚无已部署的 Chat HTTPS/
+OAuth 接口。下一步复用既有 owner-bound 三工具合同实现网络 sidecar，
+不是发全权 operator bearer 或复制本机认证目录到 Chat。
+
+官方[Pricing](https://learn.chatgpt.com/docs/pricing)明确 Work 与 Codex
+共享 usage，local/cloud 共享计划 allowance；不能因此推导普通 Chat
+无限额度，也不能把普通 Chat 全部计入相同额度。Cloud 需可访问的
+published environment，当前本项目查询空数组仅说明该查询未发现
+环境，不否定全账号权益。已有 CloudJobs 是持久 job intent/观察/diff
+库，不自带 Mesh task/epoch/lease 与临时节点握手，实际单次 job 后仍
+需 callback/限任务凭据等控制面集成。[Cloud环境](https://learn.chatgpt.com/docs/environments/cloud-environments)
 
 Firefox 原 request
 `mesh-firefox-05d0bce8d4728cd553d831b9317529e3` 保持不变，实际 task

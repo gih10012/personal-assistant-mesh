@@ -78,3 +78,7 @@ checkpoint。正式核心未替换，Chat/官方 Cloud、校园出口、ClawBot
 保持本 goal active 与原任务身份；具体状态见 PLAN/TASKS，不缩小目标。
 冻结d8bfeda双端1707项与公开CI已通过，Codex两版本真实配置读回和
 正式VPS只读通道快照已实测；这不是第三方推理或ClawBot接管完成。
+下一片已有通用HTTPS callback和单一指定witness的候选/once-only fence
+源码，待冻结/集成与真实承载；校园新增本机和VPS经native SSH借本机
+校内HTTP200证据，未登记通用代理。普通Chat官方插件路线已重新确认，
+实际HTTP/OAuth/账号工具与官方Cloud job仍推进，不改成本机VPS冒充。

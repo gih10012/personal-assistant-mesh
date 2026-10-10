@@ -131,6 +131,21 @@ checkpoint只读导出/私有写入/读回也通过，仍非handoff。
 另并行，Campus002b与Chat/官方Cloud仍独立任务。正式核心仍3198c87，不把
 开发文件/配置初始化/单路径GET外推为已安装的全网智能或HA。
 
+校园002b新增真实证据：[校园路径](CAMPUS-PATH.md)。本机无代理/无认证
+校内GET与VPS→既有native SSH→本机→同一校内入口均HTTP200；超过64KiB
+上限而停止，未验完整正文/业务。未改SSHD/路由/隧道，不是已登记的
+通用校园代理。004d在实现通用HTTPS callback与独立实际承载；009a/c在
+实现单一指定witness的候选/任期/派发intent，旧holder停止及完整账本
+闭合未证不转任。共享能力的失联防重放，不变成阻断节点native自主性。
+
+上述源码现已可集成：[通用HTTPS](EGRESS-ADAPTER.md)20新/101相关fixtures，
+[通道fence](CHANNEL-CARRIER.md)34新/114相关fixtures。后者仍未接真实
+Channel/API/Store边界，默认无verifier不grant，不称自动接管。Root先冻结
+风险相称验证，另加VPS独立HTTPS承载，不替换现有正式goal核心或收发器。
+Chat文档重新实读确认Chat与Work均支持插件；补网络MCP/OAuth/主账号
+真实调用，官方Cloud补published environment/真实job与节点权限映射，
+不用旧Work-only推断永久限制，亦不把普通Chat说成无限额度。
+
 ## Leader 持续工作合同
 
 1. 开始/续接先读当前 goal、plan、任务账本和各节点真实状态，保留同一
