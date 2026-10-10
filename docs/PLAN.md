@@ -273,8 +273,20 @@ rendezvous symlink 被拒绝，未 initialize、更没有 model/thread/goal 调�
 握手前核对 owned app-server PID/UID，不放松通用 symlink 校验。
 本机直接官方 native binary 的零模型初始化、空 loaded list 和自然
 退出已通过；npm 包装器 PID 不同则拒绝，不能猜子孙进程放宽。
-新候选继续两端冻结测试和 VPS idle 核验，之后补
-admission drain/event pump和真实父子续接。
+随后 `ee6f924c3d74346683f9750caee7ef06586606c7` 已公开，同一冻结归档
+`8fd8b9ab04d4e54e0009e6dc542e6d07d822870687ce21be02623f21d45b07f4`
+两端完整 1449 项通过（laptop 147.346 秒，VPS Python 3.6 142.501 秒），
+[CI 38030126126](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38030126126)
+实际 success。冻结代码在本机 native 0.162 和 VPS native 0.159.2 均
+实际 initialize、loaded list 空、自然退出码 0、reader 回收，无强杀，
+没有 model/goal/resume 调用。两端正式 core 的 PID/NRestarts/代码哈希
+仍是旧冻结版本，未部署候选、未改配置或恢复原失败工作。
+这完成 `PAM-007c-1` 源码候选验收，不是 active goal 交接已完成。
+下一切片按固定 task ID 推进：`007c-2` 一次持久 TERM intent + admitted
+drain event pump（持续 lease/tick，当前 turn 内收到 wait 就停止新 admission，
+不以阻塞 close/强杀冒充排空）；`007c-3` 自然回收后的独立同 goal/用量/
+turns/历史核验与独立 yielded seal；`007c-4` 原父 task 等待/唤醒、新 epoch
+同 thread/goal 输入真实往返。未核验不能清 guard，stdio 仍明确未支持。
 详见 [输入与归属前置合同](NATIVE-INPUT-HANDOFF.md)。
 详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。
 

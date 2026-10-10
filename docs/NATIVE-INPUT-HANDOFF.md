@@ -91,8 +91,48 @@ Store 为严格记录的 `outcome=yielded`、已回收/settled、同 thread 与
 
 ## 验收边界与下一步
 
-新增测试是离线协议/状态 fixtures，不是模型已收到输入的真实证明。
+`ee6f924` 同一冻结代码两端完整 1449 项及公共 CI 成功；本机 native
+0.162/VPS native 0.159.2 的零模型实际检查均 initialize 成功、没有
+loaded thread、自然退出码 0、reader 已回收，无强杀。未 start/resume
+thread、未 set goal，不重放旧 unknown；正式服务保持旧冻结 `3198c87`。
+原 `455430d` 虽两端 1424 项/CI 通过，其实机 alias 拒绝失败仍保留，
+不会把 fixture 通过说成实机成功。
+
+协议/状态 fixtures 和 idle 连接都不是模型已收到新输入的真实证明。
 继续推进：正式接入 drain event pump 与独立 yielded seal；原 task
 等待/唤醒/同 goal 输入的真实 roundtrip；连续原生历史 checkpoint 和
 长 RPC lease watchdog。之后再加载正式控制器与 3–5 天前沿检查。
 Chat 模型 tools/OAuth 与 Codex Cloud job/node 仍单列未接通。
+
+### 下一切片的最小实现边界（计划，未实现）
+
+`PAM-007c-2`：`finish` 在当前 turn 内也检查 wait，先立本地 draining
+gate，再强制 tick 持久原 task/epoch/runtime 的 TERM intent，成功 ACK
+之后才一次 PID-only TERM。Codex RPC 与 Worker optional steer 双侧
+停止本轮控制器主动追加工作；heartbeat/lease fence 和已 admitted host
+响应仍继续。这不是限制任何节点原生功能的全局白名单。
+
+独立 drain pump 先消费 deferred，再读 raw queue，每次短等待后 tick；
+不能直接复用 `event()` 先执行 host callback 的路径。先验证 request
+属于原 thread/实际 admitted turn，callback 前预留原 request ID，重复
+或回复不明不能重调。允许观察 TERM 前 admission race 的迟到 started，
+但每个实际 turn 必须有自然 `status=completed`，不能把 interrupted/
+failed 也计入的 completed ID 集合当证明。无未答请求/未结 RPC、实际
+idle、自然退出 0、wait/reap 与 reader EOF/join 缺一都保留 unknown；
+不以 `close()` 的阻塞等待、断连接或强杀替代。
+
+`PAM-007c-3`：新增独立 yielded seal，不放宽 terminal seal。原运行器
+回收后，新 observer 只 initialize/read goal/read thread/loaded list，
+不 start/resume/steer 或写 goal；前后核对原 thread 都未加载，注意
+notLoaded 不等于原进程 idle。核对同 objective/createdAt、预算与用量
+未重置、所有自然完成 turn 及稳定完整的 owned 原生历史；观察 RPC
+也需短等 + tick，避免 lease 饿死。通过后才写 outcome=yielded、
+runtime_closed/settled，原 goal 仍 active。若 goal 自然变成实际终态，
+尊重它并走原终态路径，不写回 active。
+
+`PAM-007c-4`：Worker 使用 seal 返回的冻结历史，不在 close 后调用
+`native_rollout()` 产生新 RPC。原 guard 持续为 true，直到独立核验和
+session/artifact commit 完成，才在原 task/epoch 的最终 update 中同时
+写完整 yielded seal、false guard 和 waiting_children。children 提前
+完成由既有 Store 唤醒原 row/new epoch，不另建 continuation task。
+旧私有 stage-two unknown 不作为这个新合同的可重启测试数据。
