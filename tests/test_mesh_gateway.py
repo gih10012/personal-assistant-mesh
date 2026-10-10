@@ -257,6 +257,7 @@ class MeshGatewayTests(unittest.TestCase):
         agent = Codex.__new__(Codex)
         agent.config = dict(self.worker_config['codex'])
         agent.tools, agent.on_activity = TOOLS, None
+        agent.deferred = []
         calls = []
         def rpc(method, parameters, **kwargs):
             calls.append((method, parameters))
@@ -264,6 +265,8 @@ class MeshGatewayTests(unittest.TestCase):
                 return {'thread': {'id': 'native-continuous-thread'}}
             if method == 'turn/start':
                 return {'turn': {'id': 'fixture-turn'}}
+            if method == 'thread/goal/get':
+                return {'goal': None}
             return {}
         agent.rpc = rpc
         agent.start('continue original native context', {'thread_id': 'native-continuous-thread'})

@@ -13,6 +13,7 @@ class CodexWorkingContractTests(unittest.TestCase):
         agent.tools = [{'name': 'mesh'}]
         agent.on_activity = None
         agent.calls = []
+        agent.deferred = []
         def rpc(method, parameters, **kwargs):
             agent.calls.append((method, copy.deepcopy(parameters)))
             if method in ('thread/start', 'thread/resume'):
@@ -22,6 +23,10 @@ class CodexWorkingContractTests(unittest.TestCase):
                 return {'turn': {'id': 'fixture-turn'}}
             if method == 'model/list':
                 return {'data': [{'id': 'fixture-catalog-model'}]}
+            if method == 'thread/goal/get':
+                return {'goal': None}
+            if method == 'thread/goal/set':
+                return {'goal': copy.deepcopy(parameters)}
             return {}
         agent.rpc = rpc
         return agent
@@ -50,7 +55,7 @@ class CodexWorkingContractTests(unittest.TestCase):
                 self.assertEqual(1, request['developerInstructions'].count(WORKING_CONTRACT))
                 self.assertNotIn(DEFAULT_INSTRUCTIONS, request['developerInstructions'])
 
-    def test_resume_payload_keeps_native_identity_rollout_tools_goal_and_plan_mode(self):
+    def test_resume_keeps_native_identity_tools_plan_mode_without_restoring_checkpoint_goal(self):
         goal = {'objective': 'Keep full owner objective', 'status': 'active', 'tokenBudget': 1234,
                 'tokensUsed': 900, 'timeUsedSeconds': 800}
         checkpoint = {'thread_id': 'continuous-owner-thread', 'native_rollout_path': '/private/selected.jsonl',
@@ -59,7 +64,7 @@ class CodexWorkingContractTests(unittest.TestCase):
         agent = self.runtime(instructions='owner custom', mode='plan')
         result = agent.start('continue without replacing history', checkpoint)
         methods = [method for method, request in agent.calls]
-        self.assertEqual(['thread/resume', 'thread/goal/set', 'turn/start'], methods)
+        self.assertEqual(['thread/resume', 'thread/goal/get', 'turn/start'], methods)
         resumed = agent.calls[0][1]
         self.assertEqual('continuous-owner-thread', resumed['threadId'])
         self.assertEqual('/private/selected.jsonl', resumed['path'])
@@ -67,8 +72,8 @@ class CodexWorkingContractTests(unittest.TestCase):
         self.assertNotIn('history', resumed)
         self.assertNotIn('dynamicTools', resumed)
         self.assertEqual('owner custom\n\n' + WORKING_CONTRACT, resumed['developerInstructions'])
-        self.assertEqual({'objective': goal['objective'], 'status': 'active', 'tokenBudget': 1234,
-                          'threadId': 'continuous-owner-thread'}, agent.calls[1][1])
+        self.assertEqual({'threadId': 'continuous-owner-thread'}, agent.calls[1][1])
+        self.assertNotIn('thread/goal/set', methods)
         turn = agent.calls[2][1]
         self.assertEqual('continuous-owner-thread', turn['threadId'])
         self.assertEqual('plan', turn['collaborationMode']['mode'])
@@ -87,7 +92,9 @@ class CodexWorkingContractTests(unittest.TestCase):
         self.assertEqual('dangerFullAccess', request['sandbox'])
         self.assertEqual('never', request['approvalPolicy'])
         self.assertFalse(any(method == 'model/list' for method, params in agent.calls))
-        self.assertEqual(dict(goal, threadId='fixture-thread'), agent.calls[1][1])
+        self.assertEqual('turn/start', agent.calls[1][0])
+        self.assertEqual('thread/goal/set', agent.calls[2][0])
+        self.assertEqual(dict(goal, threadId='fixture-thread'), agent.calls[2][1])
         self.assertEqual(goal, agent.config['goal'])
 
     def test_contract_does_not_create_goals_or_catalog_scheduler_calls_without_configuration(self):

@@ -160,6 +160,7 @@ class ResourceCLITests(unittest.TestCase):
         agent = Codex.__new__(Codex)
         agent.config = {'workspace': str(self.root)}
         agent.tools, agent.on_activity = TOOLS, None
+        agent.deferred = []
         calls = []
 
         def rpc(method, parameters, **kwargs):
@@ -168,6 +169,8 @@ class ResourceCLITests(unittest.TestCase):
                 return {'thread': {'id': 'continuous-thread'}}
             if method == 'turn/start':
                 return {'turn': {'id': 'turn'}}
+            if method == 'thread/goal/get':
+                return {'goal': None}
             return {}
 
         agent.rpc = rpc
