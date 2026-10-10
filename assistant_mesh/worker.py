@@ -1,4 +1,5 @@
 import json
+import copy
 import hashlib
 import http.client
 import io
@@ -35,6 +36,16 @@ _NATIVE_FAILURES = frozenset((
     'codex_timeout', 'codex_disconnected', 'codex_model_unavailable',
     'codex_rollout_unavailable', 'codex_rollout_not_owned', 'codex_rollout_identity_mismatch',
     'codex_turn_failed', 'codex_turn_timeout', 'pi_cost_authorization_required',
+    'codex_goal_lifecycle_unsettled', 'codex_goal_controller_required',
+    'invalid_native_goal_request', 'codex_native_goal_objective_conflict',
+    'codex_native_goal_snapshot_invalid', 'codex_native_turn_identity_invalid',
+    'codex_native_turn_replayed', 'codex_native_turn_overlap',
+    'codex_native_turn_state_invalid', 'codex_native_thread_status_invalid',
+    'codex_native_thread_snapshot_invalid', 'codex_native_not_quiescent',
+    'codex_native_reader_unsettled', 'codex_native_runtime_not_reaped',
+    'codex_native_late_request', 'codex_native_late_work',
+    'codex_native_late_goal', 'codex_native_late_status',
+    'codex_goal_coordination_yield_unavailable',
     'pi_model_configuration_required', 'pi_mesh_grant_required', 'pi_timeout',
     'pi_disconnected', 'pi_resume_cancelled', 'pi_prompt_not_started',
     'pi_turn_failed', 'pi_turn_timeout')) | frozenset(
@@ -177,6 +188,8 @@ class Worker:
         self.wait_children = False
         self.agent = None
         self.polling_steering = False
+        self._native_starting = False
+        self._native_turn_live = None
         self.config_path = None
         if config_path is not None:
             private_json(config_path)  # the handle is owned/0600, not task input
@@ -529,18 +542,78 @@ class Worker:
         raise CodexError('owner_response_pending')
 
     def on_activity(self, kind, value):
-        if kind == 'session_ready':
-            self.current['checkpoint'].update(value)
+        if kind == 'native_start_intent':
+            # A resumed active goal can produce native work before turn/start.
+            # Read-only is not a zero-effect guarantee for network or MCP.
+            # This is a managed replay guard, not a native tool restriction.
+            if value.get('method') != 'turn/steer':
+                self._native_starting = True
+                self._native_turn_live = False
+            self.current['checkpoint']['side_effect_started'] = True
+            self.current['checkpoint']['native_execution_intent'] = {
+                'task_id': self.current['id'], 'task_epoch': self.current['epoch'],
+                'harness': self.harness, 'thread_id': value.get('thread_id'),
+                'settled': False}
+            if isinstance(value.get('native_lifecycle'), dict):
+                self.current['checkpoint']['native_lifecycle'] = copy.deepcopy(value['native_lifecycle'])
+            self.tick(force=True)
+        elif kind == 'session_ready':
+            self.current['checkpoint'].update(copy.deepcopy(value))
             if self.harness == 'codex' and self.agent:
                 self.current['checkpoint']['codex_auth_home'] = self.agent.auth_home
             self.current['checkpoint']['codex_node'] = self.config.get('node_id')
             self.current['checkpoint']['harness'] = self.harness
+            # Persist the guard in both task and native state before any work.
+            self.current['checkpoint']['side_effect_started'] = True
             sessions.save(self.client, self.current, self.config.get('node_id'), self.harness,
                           self.current['checkpoint'])
-            # Reserve BEFORE turn/start: native effects can precede item/started.
-            if self.harness == 'pi' or self.config['codex'].get('sandbox') != 'read-only':
-                self.current['checkpoint']['side_effect_started'] = True
             self.tick(force=True)
+        elif kind in ('turn_started', 'native_turn_adopted', 'turn_completed'):
+            turn = value.get('turn')
+            identity = turn.get('id') if isinstance(turn, dict) else value.get('turn_id')
+            thread = value.get('threadId', value.get('thread_id'))
+            state = self.current['checkpoint']
+            if (thread != state.get('thread_id') or not isinstance(identity, str) or not identity):
+                return
+            if kind == 'turn_completed':
+                if identity != state.get('turn_id'):
+                    return
+                self._native_turn_live = False
+                state['native_turn_completed'] = copy.deepcopy(value)
+            else:
+                state['turn_id'] = identity
+                if (isinstance(state.get('plan'), dict)
+                        and state['plan'].get('turnId') != identity):
+                    state['plan'] = None  # Never present a previous turn's plan as current.
+                state['native_turn_started'] = copy.deepcopy(value)
+                state['side_effect_started'] = True
+                self._native_starting = False
+                self._native_turn_live = True
+            lifecycle = value.get('native_lifecycle', getattr(self.agent, 'native_lifecycle', None))
+            if isinstance(lifecycle, dict) and lifecycle.get('thread_id') == thread:
+                state['native_lifecycle'] = copy.deepcopy(lifecycle)
+            self.tick(force=True)
+        elif kind in ('goal_updated', 'goal_cleared', 'native_goal_snapshot'):
+            state = self.current['checkpoint']
+            if value.get('threadId', value.get('thread_id')) != state.get('thread_id'):
+                return
+            goal = None if kind == 'goal_cleared' else value.get('goal')
+            if goal is not None and (not isinstance(goal, dict)
+                                     or goal.get('threadId') != state.get('thread_id')):
+                return
+            state['goal'] = copy.deepcopy(goal)
+            lifecycle = getattr(self.agent, 'native_lifecycle', None)
+            if isinstance(lifecycle, dict) and lifecycle.get('thread_id') == state.get('thread_id'):
+                state['native_lifecycle'] = copy.deepcopy(lifecycle)
+            self.tick(force=True)
+        elif kind == 'native_quiescent':
+            self._native_turn_live = False
+            # Quiescent is provisional: only close/reap + drained events settles.
+            self.current['checkpoint']['native_quiescent'] = copy.deepcopy(value)
+            self.current['checkpoint']['native_lifecycle'] = copy.deepcopy(value)
+            self.tick(force=True)
+        elif kind == 'native_thread_status':
+            self.current['checkpoint']['native_thread_status'] = copy.deepcopy(value)
         elif kind == 'approval_required':
             self.current['checkpoint']['approval_required'] = True
             self.client.request('/v1/agent/action', {'task_id': self.current['id'], 'epoch': self.current['epoch'],
@@ -557,7 +630,13 @@ class Worker:
                 self.client.request('/v1/task/update', {'id': self.current['id'], 'epoch': self.current['epoch'],
                                                        'checkpoint': self.current['checkpoint']})
             self.last_tick = time.monotonic()
-            if self.current and self.agent and getattr(self.agent, 'turn_id', None) and not self.polling_steering:
+            # Optional steering must not nest a native RPC while a tool/question
+            # handler is servicing another request. Heartbeat/fencing still run.
+            rpc_depth = getattr(self.agent, 'rpc_depth', 0) if self.agent else 0
+            if (self.current and self.agent and getattr(self.agent, 'turn_id', None)
+                    and not self._native_starting and self._native_turn_live is not False
+                    and not (isinstance(rpc_depth, int) and rpc_depth > 0)
+                    and not self.polling_steering):
                 self.polling_steering = True
                 try:
                     body = {'task_id': self.current['id'], 'epoch': self.current['epoch']}
@@ -691,35 +770,76 @@ class Worker:
                 # start() can reach a native RPC before returning a checkpoint.
                 # Missing IDs/replies cannot prove that a turn had no effects.
                 native_start_attempted = True
+                self._native_starting = True
+                self._native_turn_live = False
                 checkpoint = agent.start(text, resume)
                 checkpoint['codex_node'] = self.config.get('node_id')
                 checkpoint['harness'] = self.harness
                 if self.harness == 'codex':
                     checkpoint['codex_auth_home'] = agent.auth_home
                 self.current['checkpoint'].update(checkpoint)
+                self._native_starting = False
+                self._native_turn_live = bool(checkpoint.get('turn_id'))
                 phase = 'coordination'
                 self.tick(force=True)
                 phase = 'native_finish'
-                answer = agent.finish(tick=self.tick, timeout=self.config.get('turn_timeout', 3600))
+                finish_options = {'tick': self.tick, 'timeout': self.config.get('turn_timeout', 3600)}
+                lifecycle = getattr(agent, 'native_lifecycle', None)
+                if (self.harness == 'codex' and isinstance(lifecycle, dict)
+                        and lifecycle.get('controller_enabled') is True):
+                    finish_options['yield_requested'] = lambda: self.wait_children
+                answer = agent.finish(**finish_options)
+                self._native_turn_live = False
                 phase = 'session_save'
                 state = dict(self.current['checkpoint'])
-                state['side_effect_started'] = False
                 rollout = agent.native_rollout() if self.harness == 'codex' else state.get('pi_session_file')
                 if self.harness == 'codex':
-                    state['goal'] = agent.goal()
+                    lifecycle = getattr(agent, 'native_lifecycle', None)
+                    if isinstance(lifecycle, dict) and lifecycle.get('goal_managed'):
+                        phase = 'native_settle'
+                        seal = getattr(agent, 'seal_native_lifecycle', None)
+                        if not callable(seal):
+                            raise CodexError('codex_goal_controller_required')
+                        seal()
+                        lifecycle = agent.native_lifecycle
+                        goal = lifecycle.get('goal')
+                        if (lifecycle.get('settled') is not True
+                                or lifecycle.get('runtime_closed') is not True
+                                or lifecycle.get('thread_id') != state.get('thread_id')
+                                or (goal is not None and (not isinstance(goal, dict)
+                                    or goal.get('threadId') != state.get('thread_id')
+                                    or goal.get('status') not in ('complete', 'paused', 'blocked',
+                                                                 'budgetLimited', 'usageLimited')))):
+                            raise CodexError('codex_goal_lifecycle_unsettled')
+                        state['native_lifecycle'] = copy.deepcopy(lifecycle)
+                        state['goal'] = copy.deepcopy(goal)
+                    else:
+                        state['goal'] = agent.goal()
+                        if isinstance(state['goal'], dict) and state['goal'].get('status') == 'active':
+                            raise CodexError('codex_goal_lifecycle_unsettled')
+                # Only after the native runtime's complete lifecycle is settled.
+                state['side_effect_started'] = False
+                if isinstance(state.get('native_execution_intent'), dict):
+                    state['native_execution_intent'] = dict(state['native_execution_intent'], settled=True)
+                phase = 'session_save'
                 sessions.save(self.client, task, self.config.get('node_id'), self.harness, state, rollout, self.tick)
                 phase = 'coordination'
                 coordination = self.client.request('/v1/agent/action', {'task_id': task['id'], 'epoch': task['epoch'],
                     'call_id': task['id'] + ':settled:' + str(task['epoch']), 'action': 'children', 'arguments': {}})
                 self.wait_children = self.wait_children or coordination.get('wait_requested', False)
-                goal_status = (state.get('goal') or {}).get('status') if task.get('context', {}).get('goal') else None
+                goal_status = (state.get('goal') or {}).get('status')
                 terminal = ('waiting_children' if self.wait_children else 'needs_review' if self.current['checkpoint'].get('approval_required')
-                            else 'continuing' if goal_status == 'active' else 'needs_review' if goal_status in ('blocked', 'budgetLimited', 'usageLimited', 'paused') else 'completed')
+                            else 'needs_review' if goal_status in ('blocked', 'budgetLimited', 'usageLimited', 'paused') else 'completed')
                 # WeChat bound: retain original in task checkpoint, notify with bounded text.
                 output = answer.encode('utf8')[:15000].decode('utf8', errors='ignore')
                 phase = 'task_finalize'
+                final_checkpoint = {'answer': answer, 'side_effect_started': False,
+                                    'goal': state.get('goal')}
+                for key in ('native_lifecycle', 'native_execution_intent'):
+                    if key in state:
+                        final_checkpoint[key] = state[key]
                 self.client.request('/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
-                    'checkpoint': {'answer': answer, 'side_effect_started': False, 'goal': state.get('goal')}, 'result': output,
+                    'checkpoint': final_checkpoint, 'result': output,
                     'status': terminal})
         except (ValueError, OSError, urllib.error.URLError) as exc:
             # Losing the authority must terminate the local runtime before takeover.
@@ -743,6 +863,8 @@ class Worker:
         finally:
             self.current = None
             self.agent = None
+            self._native_starting = False
+            self._native_turn_live = None
         return True
 
     def run(self):

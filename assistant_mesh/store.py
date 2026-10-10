@@ -440,7 +440,9 @@ class Store:
                 active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (task_id,)).fetchone()
                 if not active:
                     status = 'pending'  # children may finish before the parent yields
-                next_checkpoint['side_effect_started'] = False  # all native work has settled
+                # Coordination state cannot prove that native work settled.
+                # Only an explicit worker checkpoint after runtime teardown can
+                # clear this guard; waiting for children is not such evidence.
             db.execute('UPDATE tasks SET checkpoint=?,deadline=?,result=?,status=? WHERE id=?',
                        (json.dumps(next_checkpoint), now + delay, result, status or 'running', task_id))
             if status and not row['parent_id'] and status not in ('waiting_children', 'continuing', 'pending') and (status not in ('waiting_auth', 'waiting_backend') or not json.loads(row['checkpoint']).get('backend_wait_notified')):

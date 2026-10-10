@@ -25,7 +25,7 @@ Leader。面板只是观察入口。原生 Shell、网络、文件和 MCP 不由
 | 自主资源调度 | PAM-004 | 004b 固定目标的模型选择、执行、独立产物核对与结算已通过；004c 推进日常 Mesh executor | 模型自行选路；底层核对授权/预留/回执；共享瓶颈不重复计容量 |
 | 异构节点适配 | PAM-005 | 定义 enrollment/运行期/能力/持久状态/适配报告合同，AI 按 OS 改装 | 先一个不同环境的真实接入；不要求先写完全部 Windows/手机功能 |
 | 多入口与临时节点 | PAM-006 | Firefox 手动与本机 Codex 原生 MCP 的提交/原 Leader completed/批准成果读回已实测；Cloud adapter 已发布但无实际 job/node | 从入口创建真实任务并读回结果；临时执行结束后持久状态仍在 Mesh |
-| 持续先进性 | PAM-007 | 将下方合同接入 Leader；配置 3–5 天检查的持续任务 | 有实际计划/task/检查记录；新模型/版本的能力与访问实际验证 |
+| 持续先进性 | PAM-007 | 原 Leader 同 thread 的真实 native plan 已验收；继续 goal 多 turn 生命周期，再配置 3–5 天检查 | 有实际计划/task/检查记录；新模型/版本的能力与访问实际验证 |
 | 上层项目委派 | PAM-008 | Live、通话、面板及其他应用作为后续 Mesh 项目 | 由 Mesh 自己建 task、分工和集成，不由当前 Root 先包办所有应用 |
 
 PAM-002 两端采样已完成；正式原 Leader 又接到有稳定 ID 的网络盘点交接，
@@ -110,13 +110,13 @@ Root 负责发布、计划与集成。研究、实现、
 空闲边界一致备份、旧源码保留与正式两向目录加载；继续观察真实数据，
 不为测试破坏正在工作节点。PAM-002 的实际网络交接由原 Leader 和远端
 specialist 完成，父 task 原 ID/原 thread 自动续接并汇总真实回执；PAM-007
-新 worker 模块已加载。原生 plan checkpoint 未观察到，不假称已验收；
+新 worker 模块已加载。当时原生 plan checkpoint 未观察到，不假称已验收；
 3–5 天 schedule 与运行期原生 goal 配置仍需实际核对，不用协调文件代替。
 PAM-004a 已实现并正式加载，原 Leader 的实际试用 task 已 completed，
 保留原 thread，实际创建并读回 waiting_evidence 决定。当前目录空、
 两端旧采样过期，模型选择补 probe/executor 证据而非重复无效采样；
-无新增 child/执行关联，不冒称最佳出口或业务成功。原 native plan/goal
-checkpoint 仍未观察到，不把此 proposal 当替代。
+无新增 child/执行关联，不冒称最佳出口或业务成功。当时原 native plan/goal
+checkpoint 仍未观察到，不把此 proposal 当替代；后续 plan 验收见本节末尾。
 本次加载 cloud 原账本/线程行完全一致；laptop 断连时自动触发 episode 3
 本地自维护，续接原 self-maintenance thread 后遇到 Codex 额度错误，
 停在 needs_review。旧业务行保留，但原自维护 checkpoint 更新；不声称
@@ -205,16 +205,46 @@ active、空闲报告 ok，原journal/canary行未变，其他服务未重启。
 epoch 1 completed；模型选择/原新operation与service自动结算均读回，Root
 独立artifact/Git oracle核对及容量归还通过，原canary行保留；Root未手动
 execute。后续多候选/故障对账仍推进，见 [独立executor](MANAGED-EXECUTOR.md)。
-原生 goal/plan 仍 null，007 继续核对官方接口与真实 runtime，周期检查未创建。
-官方 Goals 合同明确 active goal 可在 idle 边界自动产生后续 turn；现有
+该 004c trial 的原生 goal/plan 为 null；这项历史观察保留，后续 007 的
+新 plan trial 不改写旧 checkpoint。周期检查未创建。
+官方 Goals 合同明确 active goal 可在 idle 边界自动产生后续 turn；当时
 adapter 只等待原 turn 的结束，因此先接入原生 plan 事件、自动 turn 的
 同任务租约/效果生命周期，再实际启用长期 goal。不能在 completed 原
 Leader 直接 set active，也不为 defer 标志 fork 新 Leader。
 [Codex Goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)
-当前先实现了当前thread/turn的真实plan/goal通知观察候选，12项新fixtures
+随后先实现了当前thread/turn的真实plan/goal通知观察候选，12项新fixtures
 与69项相关回归通过，修正可选callback缺省后本机完整1279项通过；未从
-旧plan推导本轮完成，未激活goal或声称已加载。004c实际完成但plan仍null，
-模型报告update_plan缺项，实际工具配置下一片独立核对。
+旧plan推导本轮完成，当时未激活goal或声称已加载。004c实际完成但plan为null，
+模型报告update_plan缺项；这不是对后来007 trial的结论。
 详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。
+
+当前正式源码已是 `3198c877234a8fd0c6912fdbe218f47185effedc`：同一冻结
+归档 SHA-256 `8362e05085179a06d2c9ff534df72a4460910c4f7ba97f696f2c52bf0b1436e6`
+两端各完整 1282 项通过（laptop 146.487 秒；VPS Python 3.6 143.941 秒），
+[CI 38020573081](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38020573081)
+实际 success。源码升级已在 laptop/VPS 完成，当前配置、原业务/原生会话/
+历史/执行表与 laptop 两条 epoch 0 guarded 队列保留；未恢复 DB/history。
+独立 provider 进程未重启。实际 cloud Codex 仍为 0.159.2；官方对应版本
+源码确认原生 update_plan 缺省关闭，因此只给 Mesh child 加
+`tools.update_plan.enabled=true`，未更换模型、预算、全局 profile 或权限。
+
+新 task `PAM-007-native-plan-handoff-20261010-v1` 已在 cloud completed
+epoch 1，保留原 Leader thread `01a116fc-8aae-7001-a0e2-07a1073c5bcb`，
+本轮 turn `01a123de-2b04-7d30-94b2-2bd8444a4b46`。Root 只读核对实际
+authority：checkpoint plan 来自真实通知，threadId/turnId 精确对应本轮，
+两个步骤均 completed；goal 为 null，side_effect_started 为 false，
+runtime_failure 为 null，完整结果 SHA-256 为
+`7914918df2e4abd37ce1642b637417efa8a2e698d70ae26b543f7e6ad18de48a`。
+这是原生 plan 的运行期验收，不是长期 goal 自动推进、定时检查或模型
+自主选型已实现。随后已实现同 task/epoch 的 goal 自动 turn、租约与效果
+生命周期源码候选，34 项 adapter 与 12 项 Worker/Store 新 fixtures、
+105 项 native 相关回归通过；尚未正式加载或在原 Leader 启用长期 goal。
+停止/回收运行器后才清标记并上传原生历史，未知/迟到工作不重放，
+authority 等子任务不再制造零效果。next task 为 PAM-007b 冻结两端完整
+回归/CI，007c 安全 active 协同 yield，007d 连续原生 rollout checkpoint，
+007e 实际周期与模型选择；这些是协调 task，不冒称已提交 runtime。
+当前 active goal 请求等子任务仍显式报告未支持并保留 unknown；途中
+跨节点记忆复制与强实时 lease watchdog 未完成。Chat 原生 MCP/OAuth
+未接通，Cloud 本项目环境仍为空且无实际 job/node。
 Cloud 本项目环境连接/发布条件单列，不以此缺项阻断 004b 中层真实出口。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。

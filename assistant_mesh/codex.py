@@ -56,6 +56,10 @@ WORKING_CONTRACT = (
     '恢复后按来源、所有权、授权期限和原 ID 对账，保留 unknown，不合并 SQLite 就宣称共识。')
 
 
+GOAL_STATUSES = frozenset(('active', 'paused', 'blocked', 'usageLimited',
+                           'budgetLimited', 'complete'))
+
+
 def working_instructions(existing):
     """Append the common contract without replacing owner-specific instructions.
 
@@ -78,6 +82,7 @@ class Codex:
         self.tools, self.on_tool, self.on_activity = tools or [], on_tool, on_activity
         self.deferred = []
         self.native_observations = {}
+        self.native_lifecycle = {'controller_enabled': True, 'goal_managed': False, 'settled': False}
         self.on_interaction = on_interaction
         memories = config.get('native_memories', True)
         if not isinstance(memories, bool):
@@ -120,7 +125,10 @@ class Codex:
                                         start_new_session=True, bufsize=1)
         self.events = queue.Queue()
         self.serial = 0
-        threading.Thread(target=self._read, daemon=True).start()
+        self.rpc_depth = 0
+        self._rpc_pending, self._rpc_responses = set(), {}
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
         try:
             self.rpc('initialize', {'clientInfo': {'name': 'personal_assistant_mesh', 'version': '0.2.0'},
                                     'capabilities': {'experimentalApi': True}})
@@ -174,19 +182,36 @@ class Codex:
     def rpc(self, method, params, timeout=30):
         self.serial += 1
         request_id = self.serial
-        self.send({'id': request_id, 'method': method, 'params': params})
-        until = time.monotonic() + timeout
-        while time.monotonic() < until:
-            value = self.event(max(0.01, until - time.monotonic()))
-            if value.get('id') == request_id and 'method' not in value:
-                if 'error' in value:
-                    # Don't expose arbitrary protocol errors: may contain private data.
-                    self.last_protocol_error = value['error']
-                    raise CodexError('codex_rpc_failed_' + method.replace('/', '_'))
-                return value.get('result', {})
-            if 'id' not in value:
-                self.deferred.append(value)
-        raise CodexError('codex_timeout')
+        self.rpc_depth = getattr(self, 'rpc_depth', 0) + 1
+        pending = getattr(self, '_rpc_pending', None)
+        if pending is None:
+            pending = self._rpc_pending = set()
+            self._rpc_responses = {}
+        pending.add(request_id)
+        try:
+            self.send({'id': request_id, 'method': method, 'params': params})
+            until = time.monotonic() + timeout
+            while time.monotonic() < until:
+                value = self._rpc_responses.pop(request_id, None)
+                if value is None:
+                    value = self.event(max(0.01, until - time.monotonic()))
+                if value.get('id') == request_id and 'method' not in value:
+                    if 'error' in value:
+                        # Don't expose arbitrary protocol errors: may contain private data.
+                        self.last_protocol_error = value['error']
+                        raise CodexError('codex_rpc_failed_' + method.replace('/', '_'))
+                    return value.get('result', {})
+                if 'id' not in value:
+                    self.deferred.append(value)
+                elif 'method' not in value and value.get('id') in pending:
+                    # An interaction callback can make a nested RPC. Never let
+                    # that wait discard its outer request's actual response.
+                    self._rpc_responses[value['id']] = value
+            raise CodexError('codex_timeout')
+        finally:
+            pending.discard(request_id)
+            self._rpc_responses.pop(request_id, None)
+            self.rpc_depth -= 1
 
     def account(self):
         value = self.rpc('account/read', {'refreshToken': False})
@@ -233,6 +258,29 @@ class Codex:
 
     def start(self, text, checkpoint=None):
         checkpoint = checkpoint or {}
+        # Checkpoint goals are historical observations, never a command to
+        # restore status/accounting or reactivate an owner's paused goal.
+        requested_goal = self.config.get('goal') or None
+        if requested_goal is not None and (not isinstance(requested_goal, dict)
+                or not isinstance(requested_goal.get('objective'), str)
+                or not requested_goal['objective'].strip()
+                or len(requested_goal['objective']) > 4000
+                or requested_goal.get('status', 'active') not in GOAL_STATUSES):
+            raise CodexError('invalid_native_goal_request')
+        mode = self.config.get('mode', 'default')
+        if mode not in ('plan', 'default'):
+            raise CodexError('invalid_collaboration_mode')
+        self.turn_id = None
+        self.native_lifecycle = {'controller_enabled': True,
+                                 'goal_managed': bool(requested_goal), 'settled': False,
+                                 'quiescent': False, 'runtime_closed': False,
+                                 'thread_id': checkpoint.get('thread_id'), 'turn_id': None,
+                                 'turn_ids': [], 'completed_turn_ids': [],
+                                 'expected_goal_objective': (requested_goal or {}).get('objective'),
+                                 'goal': None, 'thread_status': None}
+        self._completed_turns = set()
+        self._pending_goal_input = None
+        self._native_final_replies = []
         root = self.config['workspace']
         parameters = {'cwd': root,
                       'developerInstructions': working_instructions(
@@ -250,6 +298,10 @@ class Codex:
             if not catalog:
                 raise CodexError('codex_model_unavailable')
             parameters['model'] = catalog[0]['id']
+        method = 'thread/resume' if checkpoint.get('thread_id') else 'thread/start'
+        self._activity('native_start_intent', {
+            'thread_id': checkpoint.get('thread_id'), 'method': method,
+            'goal_managed': bool(requested_goal), 'native_lifecycle': self.native_lifecycle})
         if checkpoint.get('thread_id'):
             parameters['threadId'] = checkpoint['thread_id']
             # Omit only the response's hydrated UI turns, never the model's
@@ -266,27 +318,124 @@ class Codex:
         self.thread_id = value['thread']['id']
         self.rollout_path = value['thread'].get('path')
         self.model = parameters.get('model') or value['thread'].get('model')
+        self.native_lifecycle['thread_id'] = self.thread_id
+        self.native_lifecycle['thread_status'] = copy.deepcopy(value['thread'].get('status'))
+        self.native_observations = {'thread_id': self.thread_id, 'turn_id': None}
+        # This synchronous checkpoint boundary precedes all further work-
+        # producing calls. Resume itself can wake a stored active objective,
+        # which is why native_start_intent preceded even the resume RPC.
+        self._activity('session_ready', {'thread_id': self.thread_id,
+                                         'native_lifecycle': self.native_lifecycle})
+        actual_goal = self._read_goal_snapshot() if checkpoint.get('thread_id') else None
+        if requested_goal and actual_goal is not None:
+            if actual_goal['objective'] != requested_goal['objective']:
+                raise CodexError('codex_native_goal_objective_conflict')
+            self.native_lifecycle['goal_managed'] = True
+            # Never resume/re-set an existing goal from config or a checkpoint.
+            # An active native goal owns its continuation scheduling. Preserve
+            # owner/system pause, completion, block and budget states exactly.
+            if actual_goal['status'] == 'active':
+                self._pending_goal_input = text
+            return self._start_state(mode)
+        if actual_goal is not None and actual_goal['status'] == 'active':
+            self._pending_goal_input = text
+            return self._start_state(mode)
         turn = {'threadId': self.thread_id, 'input': [{'type': 'text', 'text': text}]}
         if self.model:
-            mode = self.config.get('mode', 'default')
-            if mode not in ('plan', 'default'):
-                raise CodexError('invalid_collaboration_mode')
             turn['collaborationMode'] = {'mode': mode, 'settings': {
                 'model': self.model, 'developer_instructions': None}}
-        if self.config.get('goal'):
-            goal = self.config['goal']
-            self.rpc('thread/goal/set', dict(goal, threadId=self.thread_id))
-        elif checkpoint.get('goal'):
-            goal = {k: checkpoint['goal'][k] for k in ('objective', 'status', 'tokenBudget') if k in checkpoint['goal']}
-            self.rpc('thread/goal/set', dict(goal, threadId=self.thread_id))
-        if self.on_activity:
-            self.on_activity('session_ready', {'thread_id': self.thread_id})
-        started = self.rpc('turn/start', turn, timeout=60)
-        self.turn_id = started['turn']['id']
-        # Observation only: do not infer a native plan/goal from configuration,
-        # old checkpoints, or the text used to start this turn.
-        self.native_observations = {'thread_id': self.thread_id, 'turn_id': self.turn_id}
-        return {'thread_id': self.thread_id, 'turn_id': self.turn_id, 'mode': self.config.get('mode', 'default')}
+        # For a fresh active goal put the task instruction in a real turn first.
+        # goal/set on an idle thread can create its own automatic turn; starting
+        # another user turn after that would race/duplicate native generation.
+        if not requested_goal or requested_goal.get('status', 'active') == 'active':
+            self._activity('native_start_intent', {'thread_id': self.thread_id,
+                           'method': 'turn/start', 'goal_managed': self.native_lifecycle['goal_managed']})
+            started = self.rpc('turn/start', turn, timeout=60)
+            self._adopt_turn(started['turn'], receipt=True)
+        if requested_goal:
+            self._activity('native_start_intent', {'thread_id': self.thread_id,
+                           'method': 'thread/goal/set', 'goal_managed': True})
+            response = self.rpc('thread/goal/set', dict(requested_goal, threadId=self.thread_id))
+            if 'goal' in response:
+                self._validate_goal_snapshot(response['goal'])
+                self._consume_prior_notifications()
+                self._store_goal_snapshot(response['goal'])
+            else:
+                self._read_goal_snapshot()
+        return self._start_state(mode)
+
+    def _activity(self, name, value):
+        callback = getattr(self, 'on_activity', None)
+        if callback:
+            callback(name, copy.deepcopy(value))
+
+    def _start_state(self, mode):
+        return {'thread_id': self.thread_id, 'turn_id': self.turn_id, 'mode': mode,
+                'native_lifecycle': copy.deepcopy(self.native_lifecycle)}
+
+    def _store_goal_snapshot(self, goal):
+        self._validate_goal_snapshot(goal)
+        expected = self.native_lifecycle.get('expected_goal_objective')
+        if goal is not None and expected is not None and goal['objective'] != expected:
+            raise CodexError('codex_native_goal_objective_conflict')
+        if goal is not None and expected is None and goal['status'] == 'active':
+            self.native_lifecycle['expected_goal_objective'] = goal['objective']
+        self.native_observations['goal'] = copy.deepcopy(goal)
+        self.native_lifecycle['goal'] = copy.deepcopy(goal)
+        if goal is not None:
+            self.native_lifecycle['goal_managed'] = True
+        self._activity('native_goal_snapshot', {'thread_id': self.thread_id, 'goal': goal})
+        return goal
+
+    def _validate_goal_snapshot(self, goal):
+        if goal is not None and (not isinstance(goal, dict)
+                or goal.get('threadId') != self.thread_id
+                or not isinstance(goal.get('objective'), str)
+                or goal.get('status') not in GOAL_STATUSES):
+            raise CodexError('codex_native_goal_snapshot_invalid')
+
+    def _consume_prior_notifications(self):
+        # These notifications arrived before the just-returned RPC response.
+        # Observe them first, then apply that newer read snapshot. Callback RPCs
+        # can append later notifications; they must not join this older batch.
+        prior = list(self.deferred)
+        self.deferred[:] = []
+        replies = self._native_final_replies
+        for value in prior:
+            self._consume_finish_event(value, replies)
+
+    def _read_goal_snapshot(self):
+        response = self.rpc('thread/goal/get', {'threadId': self.thread_id})
+        if not isinstance(response, dict) or 'goal' not in response:
+            # A malformed response is not proof that an active goal vanished.
+            raise CodexError('codex_native_goal_snapshot_invalid')
+        self._validate_goal_snapshot(response['goal'])
+        if response['goal'] is not None:
+            self.native_lifecycle['goal_managed'] = True
+        self._consume_prior_notifications()
+        return self._store_goal_snapshot(response['goal'])
+
+    def _adopt_turn(self, turn, receipt=False):
+        identity = turn.get('id') if isinstance(turn, dict) else None
+        if not isinstance(identity, str) or not identity:
+            raise CodexError('codex_native_turn_identity_invalid')
+        lifecycle = self.native_lifecycle
+        if identity == self.turn_id:
+            return
+        if identity in lifecycle['turn_ids']:
+            raise CodexError('codex_native_turn_replayed')
+        if (not receipt and self.turn_id is not None
+                and self.turn_id not in self._completed_turns):
+            raise CodexError('codex_native_turn_overlap')
+        self.turn_id = identity
+        lifecycle['turn_id'] = identity
+        lifecycle['turn_ids'].append(identity)
+        lifecycle['quiescent'] = lifecycle['settled'] = False
+        self.native_observations['turn_id'] = identity
+        # Do not mislabel a previous turn's checklist as this turn's plan.
+        self.native_observations.pop('plan', None)
+        self._activity('native_turn_adopted', {'thread_id': self.thread_id,
+                        'turn_id': identity, 'native_lifecycle': lifecycle})
 
     def steer(self, text):
         return self.rpc('turn/steer', {'threadId': self.thread_id, 'expectedTurnId': self.turn_id,
@@ -294,6 +443,12 @@ class Codex:
 
     def native_rollout(self):
         thread = self.rpc('thread/read', {'threadId': self.thread_id, 'includeTurns': False})['thread']
+        lifecycle = getattr(self, 'native_lifecycle', None)
+        if isinstance(lifecycle, dict) and lifecycle.get('goal_managed'):
+            if (thread.get('id') != self.thread_id or not isinstance(thread.get('status'), dict)
+                    or thread['status'].get('type') != 'idle'):
+                lifecycle['quiescent'] = False
+                raise CodexError('codex_native_not_quiescent')
         path = thread.get('path') or self.rollout_path
         if not path:
             raise CodexError('codex_rollout_unavailable')
@@ -316,15 +471,25 @@ class Codex:
         RPC waits leave notifications deferred until finish consumes them. Do
         not call this observer inside rpc: activity handlers can perform a tick
         or steer, and recursive native RPC must not consume another response.
-        This is NOT a goal-continuation controller. An unexpected turn never
-        replaces the turn/start receipt's identity in this single-turn host.
+        Goal-managed runs adopt only explicit same-thread turn/started events,
+        not item IDs, old checkpoints or prose. A single-turn host still never
+        replaces its receipt with an unrelated turn. No RPC occurs here.
         """
         method, params = value.get('method'), value.get('params')
         if not isinstance(params, dict) or params.get('threadId') != self.thread_id:
             return False
+        lifecycle = getattr(self, 'native_lifecycle', None)
+        controller = isinstance(lifecycle, dict) and lifecycle.get('controller_enabled') is True
+        managed = controller and lifecycle.get('goal_managed') is True
         if method in ('turn/started', 'turn/completed'):
             turn = params.get('turn')
-            if not isinstance(turn, dict) or turn.get('id') != self.turn_id:
+            if not isinstance(turn, dict):
+                return False
+            if method == 'turn/started' and turn.get('id') != self.turn_id and managed:
+                if turn.get('status') != 'inProgress':
+                    raise CodexError('codex_native_turn_state_invalid')
+                self._adopt_turn(turn)
+            if turn.get('id') != self.turn_id:
                 return False
         elif method in ('item/started', 'item/completed', 'turn/plan/updated'):
             if params.get('turnId') != self.turn_id:
@@ -334,8 +499,14 @@ class Codex:
         elif method == 'thread/goal/updated':
             goal = params.get('goal')
             if (not isinstance(goal, dict) or goal.get('threadId') != self.thread_id
-                    or params.get('turnId') not in (None, self.turn_id)):
+                    or (params.get('turnId') not in (None, self.turn_id)
+                        and (not managed or params.get('turnId') not in lifecycle['turn_ids']))):
                 return False
+        elif method == 'thread/status/changed' and managed:
+            status = params.get('status')
+            if (not isinstance(status, dict)
+                    or status.get('type') not in ('idle', 'active', 'notLoaded', 'systemError')):
+                raise CodexError('codex_native_thread_status_invalid')
         elif method != 'thread/goal/cleared':
             return False
         if method == 'turn/plan/updated':
@@ -358,49 +529,198 @@ class Codex:
         elif method in ('turn/started', 'turn/completed'):
             name = 'turn_started' if method == 'turn/started' else 'turn_completed'
             observations[name] = copy.deepcopy(params)
+            if method == 'turn/completed' and controller:
+                self._completed_turns.add(self.turn_id)
+                if self.turn_id not in lifecycle['completed_turn_ids']:
+                    lifecycle['completed_turn_ids'].append(self.turn_id)
             activity = (name, params)
         elif method == 'thread/goal/updated':
             observations['goal'] = copy.deepcopy(params['goal'])
             observations['goal_updated'] = copy.deepcopy(params)
+            if controller:
+                self._store_goal_snapshot(params['goal'])
             activity = ('goal_updated', params)
         elif method == 'thread/goal/cleared':
             observations['goal'] = None
             observations['goal_cleared'] = copy.deepcopy(params)
+            if controller:
+                self._store_goal_snapshot(None)
             activity = ('goal_cleared', params)
+        elif method == 'thread/status/changed':
+            observations['thread_status'] = copy.deepcopy(params['status'])
+            lifecycle['thread_status'] = copy.deepcopy(params['status'])
+            activity = ('native_thread_status', params)
         on_activity = getattr(self, 'on_activity', None)
         if activity and on_activity:
             on_activity(activity[0], copy.deepcopy(activity[1]))
         return True
 
-    def finish(self, tick=None, timeout=3600):
+    def _consume_finish_event(self, value, replies):
+        if not self._observe_native_event(value):
+            return False
+        method, params = value.get('method'), value['params']
+        if (getattr(self, '_pending_goal_input', None) and self.turn_id is not None
+                and self.turn_id not in self._completed_turns):
+            pending = self._pending_goal_input
+            self._pending_goal_input = None  # ambiguous steer never retries
+            self._activity('native_start_intent', {'thread_id': self.thread_id,
+                           'turn_id': self.turn_id, 'method': 'turn/steer', 'goal_managed': True})
+            self.steer(pending)
+        if method == 'item/completed':
+            item = params.get('item', {})
+            if item.get('type') == 'agentMessage' and item.get('phase') != 'commentary':
+                replies.append(item.get('text', ''))
+        if method == 'turn/completed':
+            status = params['turn'].get('status')
+            if status != 'completed':
+                error = params['turn'].get('error') or {}
+                if isinstance(error, dict) and error.get('codexErrorInfo') == 'usageLimitExceeded':
+                    raise CodexError('codex_usage_limit_exceeded')
+                if status != 'interrupted' or not self.native_lifecycle.get('goal_managed'):
+                    raise CodexError('codex_turn_failed')
+            return True
+        return False
+
+    def _drain_finish_events(self, replies):
+        """Consume already-arrived messages outside RPC waits, in wire order."""
+        consumed = False
+        while True:
+            try:
+                value = self.deferred.pop(0) if self.deferred else self.event(timeout=0)
+            except CodexError as exc:
+                if str(exc) == 'codex_timeout':
+                    return consumed
+                raise
+            self._consume_finish_event(value, replies)
+            consumed = True
+
+    def _goal_quiescence_barrier(self, replies):
+        lifecycle = self.native_lifecycle
+        self._read_goal_snapshot()
+        response = self.rpc('thread/read', {'threadId': self.thread_id, 'includeTurns': False})
+        thread = response.get('thread') if isinstance(response, dict) else None
+        if (not isinstance(thread, dict) or thread.get('id') != self.thread_id
+                or not isinstance(thread.get('status'), dict)
+                or thread['status'].get('type') not in ('idle', 'active', 'notLoaded', 'systemError')):
+            raise CodexError('codex_native_thread_snapshot_invalid')
+        self._consume_prior_notifications()
+        lifecycle['thread_status'] = copy.deepcopy(thread['status'])
+        # RPCs defer notifications, including a goal continuation which began
+        # while the read was pending. Observe all of them before deciding.
+        self._drain_finish_events(replies)
+        goal = lifecycle['goal']
+        no_current_work = self.turn_id is None or self.turn_id in self._completed_turns
+        terminal_goal = goal is None or goal.get('status') in GOAL_STATUSES - {'active'}
+        if terminal_goal and no_current_work and lifecycle['thread_status'].get('type') == 'idle':
+            lifecycle['quiescent'] = True
+            self._activity('native_quiescent', lifecycle)
+            return True
+        lifecycle['quiescent'] = False
+        return False
+
+    def finish(self, tick=None, timeout=3600, yield_requested=None):
         deadline = time.monotonic() + timeout
-        replies = []
+        # Fast native turns can emit their final item while start's goal/set or
+        # resume read is pending. Those actual messages were already consumed
+        # in response order; do not lose them at the finish boundary.
+        replies = getattr(self, '_native_final_replies', [])
+        self._native_final_replies = replies
+        lifecycle = getattr(self, 'native_lifecycle', None)
+        if not isinstance(lifecycle, dict):
+            # Compatibility for standalone notification observers; real start
+            # always creates the lifecycle before any work-producing RPC.
+            self.native_lifecycle = lifecycle = {'controller_enabled': False,
+                                                 'goal_managed': False, 'settled': False}
         while time.monotonic() < deadline:
             if tick:
                 tick()
+            if lifecycle['goal_managed'] and (self.turn_id is None or self.turn_id in self._completed_turns):
+                if (self.turn_id is not None and yield_requested and yield_requested()
+                        and (lifecycle.get('goal') or {}).get('status') == 'active'):
+                    # Safe cooperative handoff of an active native goal is a
+                    # separate contract. Do not fake settlement, pause the
+                    # owner's goal, or monopolize the worker needed by children.
+                    raise CodexError('codex_goal_coordination_yield_unavailable')
+                if self._goal_quiescence_barrier(replies):
+                    return '\n\n'.join(replies) or '原生目标已停止本轮工作；状态以实际 goal 快照为准。'
             try:
                 value = self.deferred.pop(0) if self.deferred else self.event(timeout=min(10, max(0.01, deadline - time.monotonic())))
             except CodexError as exc:
                 if str(exc) == 'codex_timeout':
                     continue
                 raise
-            if not self._observe_native_event(value):
-                continue
-            method, params = value.get('method'), value['params']
-            if method == 'item/completed':
-                item = params.get('item', {})
-                if item.get('type') == 'agentMessage' and item.get('phase') != 'commentary':
-                    replies.append(item.get('text', ''))
-            if method == 'turn/completed' and params.get('turn', {}).get('id') == self.turn_id:
-                if params['turn'].get('status') != 'completed':
-                    error = params['turn'].get('error') or {}
-                    # Keep a fixed classification, not private provider text.
-                    if isinstance(error, dict) and error.get('codexErrorInfo') == 'usageLimitExceeded':
-                        raise CodexError('codex_usage_limit_exceeded')
-                    raise CodexError('codex_turn_failed')
+            completed = self._consume_finish_event(value, replies)
+            if completed and not lifecycle['goal_managed']:
+                if lifecycle.get('controller_enabled'):
+                    # A model-created goal may be persisted before its update
+                    # notification arrives. The end of the first user turn is
+                    # not sufficient evidence that native auto-work is absent.
+                    self._read_goal_snapshot()
+                    self._drain_finish_events(replies)
+                    if lifecycle['goal_managed']:
+                        continue
                 return '\n\n'.join(replies) or '任务已结束，但没有生成文字回答。'
-        self.interrupt()
+        # Native interrupt implicitly pauses goals. Exhausting this controller's
+        # lease/runtime wait is not owner permission to change goal status.
+        if not lifecycle['goal_managed']:
+            self.interrupt()
         raise CodexError('codex_turn_timeout')
+
+    def seal_native_lifecycle(self):
+        """Fence/reap a quiescent goal runtime before releasing Mesh effects.
+
+        No RPC, tool execution, lifecycle write or replay is allowed after this
+        boundary. A late native turn/request/status keeps the outcome unknown.
+        The worker obtains its owned rollout path before calling this method.
+        """
+        lifecycle = self.native_lifecycle
+        if not lifecycle.get('goal_managed') or not lifecycle.get('quiescent'):
+            raise CodexError('codex_native_not_quiescent')
+        lifecycle['settled'] = False
+        self.close()
+        reader = getattr(self, 'reader', None)
+        if reader is not None:
+            reader.join(timeout=5)
+            if reader.is_alive():
+                raise CodexError('codex_native_reader_unsettled')
+        if self.process.poll() is None:
+            raise CodexError('codex_native_runtime_not_reaped')
+        lifecycle['runtime_closed'] = True
+        pending = list(self.deferred)
+        self.deferred[:] = []
+        while True:
+            try:
+                pending.append(self.events.get_nowait())
+            except queue.Empty:
+                break
+        for value in pending:
+            if value.get('eof'):
+                continue
+            params = value.get('params', {})
+            if 'id' in value and 'method' in value:
+                raise CodexError('codex_native_late_request')
+            if not isinstance(params, dict) or params.get('threadId') != self.thread_id:
+                continue
+            method = value.get('method')
+            if method in ('turn/started', 'item/started'):
+                raise CodexError('codex_native_late_work')
+            if method == 'thread/goal/updated':
+                goal = params.get('goal')
+                if (not isinstance(goal, dict) or goal.get('threadId') != self.thread_id
+                        or not isinstance(goal.get('objective'), str)
+                        or goal.get('status') not in GOAL_STATUSES - {'active'}
+                        or (lifecycle.get('expected_goal_objective') is not None
+                            and goal.get('objective') != lifecycle['expected_goal_objective'])):
+                    raise CodexError('codex_native_late_goal')
+                lifecycle['goal'] = copy.deepcopy(goal)
+            elif method == 'thread/goal/cleared':
+                lifecycle['goal'] = None
+            elif method == 'thread/status/changed':
+                status = params.get('status')
+                if not isinstance(status, dict) or status.get('type') != 'idle':
+                    raise CodexError('codex_native_late_status')
+        lifecycle['settled'] = True
+        return copy.deepcopy(lifecycle)
 
     def interrupt(self):
         if getattr(self, 'turn_id', None):

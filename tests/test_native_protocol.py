@@ -18,6 +18,7 @@ class ProtocolTests(unittest.TestCase):
         agent.on_interaction = None
         agent.on_tool = None
         agent.calls = []
+        agent.deferred, agent.events = [], queue.Queue()
 
         def rpc(method, params, **kwargs):
             agent.calls.append((method, params))
@@ -27,6 +28,10 @@ class ProtocolTests(unittest.TestCase):
                 return {'turn': {'id': 'native-turn'}}
             if method == 'model/list':
                 return {'data': [{'id': 'catalog-model'}]}
+            if method == 'thread/goal/get':
+                return {'goal': None}
+            if method == 'thread/goal/set':
+                return {'goal': dict(params)}
             return {}
 
         agent.rpc = rpc
@@ -56,14 +61,20 @@ class ProtocolTests(unittest.TestCase):
                 self.assertIsNone(turn['collaborationMode']['settings']['developer_instructions'])
                 self.assertEqual(mode, state['mode'])
 
-    def test_goal_is_set_through_native_rpc_before_turn_starts(self):
+    def test_new_goal_is_set_after_its_task_turn_and_both_have_prior_intent(self):
         goal = {'objective': 'verify a result', 'status': 'active'}
         agent = self.runtime({'goal': goal})
+        boundaries = []
+        agent.on_activity = lambda name, params: boundaries.append((name, params, len(agent.calls)))
         agent.start('work')
         methods = [method for method, _ in agent.calls]
-        self.assertLess(methods.index('thread/goal/set'), methods.index('turn/start'))
+        self.assertLess(methods.index('turn/start'), methods.index('thread/goal/set'))
         request = agent.calls[methods.index('thread/goal/set')][1]
         self.assertEqual(dict(goal, threadId='native-thread'), request)
+        for method in ('thread/start', 'turn/start', 'thread/goal/set'):
+            self.assertTrue(any(name == 'native_start_intent' and params['method'] == method
+                                and count == methods.index(method)
+                                for name, params, count in boundaries))
 
     def test_steering_targets_current_turn_not_another_process(self):
         agent = self.runtime()
