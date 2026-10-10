@@ -88,3 +88,14 @@ anchor 只供后续对账，不能代替实际关系行、原始 native 历史�
 受控接管和独立真实消息验收；不能导入新 SQLite、改 authority、重置
 unknown 或开启第二 poller 就宣称完成。当前生产 VPS 单收发保持。
 见 [沟通承载 HA](COMMUNICATION-CARRIER-HA.md)。
+
+## 实际只读验收
+
+在正式VPS通道账本上用隔离源码执行，没有加载新正式服务：默认
+64MiB预检查不足（主要为约94MiB原生BLOB锚点扫描），该证据保留。
+明确使用已有参数128MiB完成一次export→validate→新0600私有文件→
+读回validate；文件246,729 bytes，实际峰值RSS20,128KiB。
+保留42 tasks、18 inbox、73 outbox，其他48表/1,592行仅锚点。
+源inode与所选通道表前后指纹一致；不声称全DB不变，允许WAL writer
+继续。所有migration/import/send授权仍false，正式唯一receiver未动。
+参数按环境选择不改变默认合同，也不是跨承载导入/接管验收。

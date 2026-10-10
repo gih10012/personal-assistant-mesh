@@ -99,9 +99,7 @@ Root 负责发布、计划与集成。研究、实现、
 已安装、实际运行、独立核验分别记录。失败只改变相关 task 的下一步，
 不默默丢掉原目标、不新建 ID 绕过 unknown。
 
-## Leader 持续工作合同
-
-### 2026-10-10 后续实际实施切片
+## 2026-10-10 后续实际实施切片
 
 - **002a** 已有独立 `egress probe/run/hold`：owned loopback SOCKS5h、
   远端 DNS、仅 child 环境；最终源码实机 laptop→VPS→GitHub GET 200、
@@ -120,9 +118,20 @@ Root 负责发布、计划与集成。研究、实现、
   格式强制不可迁移，不是新receiver或接管；旧承载失权/完整历史/
   实际handoff由009c/d继续。[checkpoint](CHANNEL-CHECKPOINT.md)
 
-本片下一步冻结双端完整测试/公开CI，再将通用出口接到统一能力入口
-和实际承载；009c排他/受控交接另并行。正式核心仍3198c87，不把
+本片已冻结 `d8bfeda7322dcc962d962efee15baf7a7d5f19ce`，同归档 SHA
+`c03d07050d7d7c2eb25bbcb5bb5d2d5822521fc309cedfcdb2ffd7448a8d777b`
+本机/VPS Python3.6.8 各1707项完整通过（143.771s/146.275s），
+[CI38059197161](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38059197161)
+实际success。初版23a49b1的本机1/VPS2失败与CI保留；修正仅夹具
+umask和临时source权限，未放松运行检查。实际native0.162.1/0.159.2
+custom配置读回/空loaded list/自然0/reader回收均零模型通过；实际VPS
+checkpoint只读导出/私有写入/读回也通过，仍非handoff。
+
+下一片将通用出口接到统一能力入口和实际承载；009c排他/受控交接
+另并行，Campus002b与Chat/官方Cloud仍独立任务。正式核心仍3198c87，不把
 开发文件/配置初始化/单路径GET外推为已安装的全网智能或HA。
+
+## Leader 持续工作合同
 
 1. 开始/续接先读当前 goal、plan、任务账本和各节点真实状态，保留同一
    Leader 原生 thread；按项目复用子 agent，压缩使用原生机制。

@@ -78,8 +78,10 @@ generation/原生自动 goal 的逐 turn 费用 watchdog；实际免费/隐私/
 endpoint 下实际 `initialize → config/read → thread/loaded/list`：
 custom provider 读回一致，loaded threads=0，退出 0、reader 回收。
 只做这三个方法，**没有 thread/turn/goal/model 调用**。这证明真实
-native 配置可加载，不证明 Responses stream、认证、tool roundtrip
-或旧 VPS native 版本兼容；两端最终验证另记计划/任务证据。
+native 配置可加载，不证明 Responses stream、认证、tool roundtrip。
+最终冻结 `d8bfeda` 同源码在本机0.162.1/VPS0.159.2均完成这三个
+方法、loaded=0、自然0及reader回收；完整1707项双端/CI成功。
+不把旧版本配置兼容外推为实际第三方推理，详见 PLAN/TASKS。
 
 `tests/test_codex_provider.py` 覆盖配置/凭据隔离、费用失效的发送边界
 和同 provider 续接。PAM-010a 的统一实时目录/模型自主多候选路由、
