@@ -60,4 +60,12 @@ task epoch/result：追加工作使旧成果不能再被误认作当前任务成
 
 Mesh 只增加这一受管追加工作入口；原生 Shell、文件、联网和 MCP 不由
 它拦截。当前验证范围是隔离账本中的 CAS、权限、幂等和原字节保留，
-实际同原线程的新 turn 与完成回执仍需部署后独立验收。
+实际同原线程的新 turn 与完成回执须独立验收，不从测试推导。
+
+2026-10-10，`e2397f1` 两端完整 1267 项测试及公开 CI 通过并加载；当前
+配置与原任务/native/历史块/effect 表指纹保留。原 PAM-004b SELECT task
+completed epoch 1 的 owner CAS 已实际接受，旧结果 hash 绑定不变；正常
+claim 推进同 task 到 epoch 2，原 Codex Leader thread 开始新 turn 并 completed。
+旧完整 result 的 UTF-8 SHA 仍与源 CAS 一致，完整私有 journal 已独立读回。
+模型选择/原 operation link、受管 GET 产物/结算/容量归还另经实际核验，
+详见 [canary](EGRESS-CANARY.md)，不从续接接受直接推导业务成功。

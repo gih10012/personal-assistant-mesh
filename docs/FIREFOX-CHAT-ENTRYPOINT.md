@@ -6,7 +6,8 @@
 账户设置核对本人主账号，临时加载开发 XPI，并安装专用 ingress peer
 与本机 host。实际浏览器单次提交、原 Leader completed、Root 独立审查
 摘要发布和原 ID 批准成果读回全往返已通过，详见下方真实验收记录。
-这只是手动桥接，不是 Chat 模型原生 tools；候选源码还未公开发布。
+这只是手动桥接，不是 Chat 模型原生 tools；源码已公开发布，当前两端
+正式加载的核心代码为 `e2397f1`，两端各 1267 项与公开 CI 通过。
 它不安装 OpenClaw/opencode，不启动新模型，不改变原生 Leader 的连续
 会话或任何节点的 Shell、文件、联网、MCP 能力。
 
@@ -155,7 +156,9 @@ result。Firefox 实际按原 request 查到 completed，再点击读取批准�
 这份原成果发布时目录/remote projection 为空、004b 仅 stage；它是当时
 任务的快照，不随之后的安装更新。后续 Root 已实测 Codex MCP 三工具
 提交/完成/批准成果往返，004b 已发布和激活安装绑定、配置容量及新 probe；
-模型第一轮选择 waiting_evidence，尚未预留或执行。详见
+模型第一轮选择 waiting_evidence，当时未预留或执行。此后原 SELECT
+同 task/thread epoch 2 已 completed，真实模型选择、单次 owner executor、
+独立产物核对及结算/容量归还通过，见 [出口验收](EGRESS-CANARY.md)。详见
 [MCP 入口](MCP-ENTRYPOINT.md) 和 [执行计划](PLAN.md)。不把手动往返外推为 Chat 模型原生 tools、Cloud 入网或
 整体 goal 完成。
 

@@ -1,7 +1,9 @@
 # PAM-004b：真实出口的第一条能力链
 
-2026-10-10，状态是**安装绑定、容量与新独立观测已登记，模型选择执行仍在推进**。
+2026-10-10，状态是**固定目标的模型选择、真实受管执行、独立产物核对和结算已通过**。
 这不是固定网络评分器，也不是 agent 原生联网的准入门禁。
+日常 executor 仍由 Root 单次启动；自主常驻执行与真实多候选调度由
+PAM-004c 继续，不把此 canary 当作完整自主性。
 
 ## 实际证据
 
@@ -45,8 +47,8 @@ Leader thread；模型写出的工具及 11 项离线测试已由 Root 独立复
 `982cf1027248a1682ee84eefcdd4798deddcbabdfe29b3e79088374a52b5dec8`。
 
 工具曾为 `staged`，使用 stage 回读的新 descriptor。后续同 release
-实际 publish 和 manifest activation 已通过，安装绑定当前一致；runtime-loaded
-和实际受管 callback 执行仍未核验。owner 配置一个 `managed_gets` 容量、
+实际 publish 和 manifest activation 已通过，安装绑定当前一致；当时 runtime-loaded
+和实际受管 callback 执行尚未核验，后续验收见下节。owner 配置一个 `managed_gets` 容量、
 绑定同 capability epoch 1，并把已有 operator 作为独立 verifier；未共享
 operator bearer、未加跨主体执行 grant。新一次单目标 probe 原始 body 与
 独立 Git oracle 匹配、子进程已 reap，观测 ID 为
@@ -58,7 +60,7 @@ operator bearer、未加跨主体执行 grant。新一次单目标 probe 原始 
 或 provider execution journal。旧 thread 无新增 allocation dynamic tool；
 模型还把空 `managed_execution_candidates` 视为未加载 executor，而该段实际
 只列已有 allocation 关联，不是安装目录。下一步给出当前确切 owner 安装
-证据与 task-bound CLI、显式同 task continuation 后再由模型决策；不改
+证据与 task-bound CLI、显式同 task continuation 后再由模型决策；当时不改
 旧 proposal 或借新 effect/thread ID 重做。旧原生权限持续开放。
 
 实际 laptop 认证 projection 查询已看到 cloud 的这一能力且 `available=true`；
@@ -66,6 +68,54 @@ operator bearer、未加跨主体执行 grant。新一次单目标 probe 原始 
 原生工具创建已发生，不把认证恢复、测试或 stage 当作模型选择/
 业务执行。诊断与保留完整历史的恢复边界见
 [NATIVE-HISTORY-RECOVERY](NATIVE-HISTORY-RECOVERY.md)。
+
+## 原 task / 原 Leader 的真实完成验收
+
+源代码版本 `e2397f19e922fecb3480f70e408aced83d2dee5a` 已在 cloud/laptop
+加载；同一归档两端完整 1267 项通过，公开 CI
+[38007498893](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38007498893)
+成功。仅更换源码，配置字节、原任务/原生会话/完整历史块和执行表指纹
+保留；未恢复旧 DB/history 或更换 Leader。
+
+新的独立 observation 为 `PAM-004b-egress-probe-20261010T0020-review-v2`，
+实际 sample time `1791591376.2591817`，一次 GET 耗时 0.327 秒，正文与
+本地 Git oracle 匹配且子进程 reap。其 900 秒 TTL 从实际采样计算，
+不会因本文、ID 或后续验收续期。
+
+owner continuation `PAM-004b-egress-select-continuation-20261010-v1` 用
+原 completed epoch 1/result SHA CAS 接受新 instruction，完整旧结果和
+旧决定不改。原 SELECT `PAM-004b-egress-select-20261009T134300Z` 在
+同一原 Leader thread `01a116fc-8aae-7001-a0e2-07a1073c5bcb` 的 epoch 2
+运行并 completed，新 native turn 为
+`01a1232b-e7dd-7d71-a0e8-6fdbdc0be309`。
+
+模型实际创建 `PAM-004b-cloud-canary-select-v2`，选择 cloud 的确切
+安装 capability/epoch/scope/workload，引用当时 fresh 独立观测、容量及
+安装证据，指出 laptop 尚无可准入候选。读回确认决定不可变地关联原
+operation `PAM-004b-egress-get-20261009T134300Z`；不是 Root 代为预留或
+硬编码出口评分，也不证明存在多个真实合格候选或全局最优。
+
+在模型实际 reserve/link 后，Root 对这一原 pending operation 单次
+启动 owner executor。安装 callback 实际 GET：HTTP 200、10,814 bytes。
+原 operation/dispatch completed 并结算，共享池 held=0、remaining=1。
+闭合 provider journal 及实际 artifact 已由 Root 独立读取，正文哈希/
+长度与原 Git oracle 匹配；Leader 随后也核对并汇总原 task。
+
+| 核验对象 | SHA-256 |
+| --- | --- |
+| HTTP 正文原字节 | `00e502b82056d6f5e0e6eabd1b8505553a42d7b1769a393f1d89f85f258249c8` |
+| 实际 JSON artifact 原字节 | `9cfcb6fd07da6e325994163fbea8c0b381ec40cd52e8644b2bfab263eb3f8c89` |
+| canonical JSON artifact | `085eb96c8165c21f6bac5de75bba44c86227ff6b6d5a80872c9644659ceb325f` |
+| SELECT epoch 2 完整结果 | `8013c7f1a287bbe0929a2b7ccc1fb6c3b9c0c9ed23eb53bf17638818940d7f90` |
+
+原字节 artifact 和 canonical hash 是不同核验对象，不能混用。
+Core 执行证据仍为 `provider_reported`；owner 对此固定产物的核对不把
+它升级成独立性能、物理主机或 quiescence 证明。没有重放 callback、
+改原 operation 身份、扩大目标 URL、替换 journal 或新增跨主体 grant。
+
+PAM-004b 的此有界 canary 已完成；PAM-004c 继续把日常受管 executor
+交给 Mesh。原 native goal/plan 仍 null，PAM-007 继续衔接 goal 自动续跑
+与 Mesh 租约。Chat 原生 MCP/OAuth、Cloud job/node 均未因此接通。
 
 ## 复用现有底座的验收链
 
@@ -104,4 +154,6 @@ epoch 1、side_effect_started=true，原 task/thread/turn 保留。
 存在真实 Shell 回执，就不能套“额度拒绝且零执行”的 quota apply，
 不能清标志、切账号/新任务重放。新的只读状态（unit active、A2A
 connected）不替代原效果审查，也未证明 agent 修复或离线推理。
-下一步是 owner 准入、fresh 独立观测和原 Leader 真实选择/执行，整体 goal active。
+笔记本原 needs_review 保留，按原 task 做 owner 效果审查；两条同 scope
+且从未领取的维护队列仍被原效果 guard 阻止领取，不清 guard 或换任务
+重放。此 canary 不处理该原未知效果，整体 goal active。

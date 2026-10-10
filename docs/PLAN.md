@@ -22,7 +22,7 @@ Leader。面板只是观察入口。原生 Shell、网络、文件和 MCP 不由
 | 已发布底座 | PAM-001 | b1a10fa 已发布，941 项两端完整测试与 CI 通过；实际 v1/v2/新 epoch 回退已核验 | 两端测试、源码版本、真实结果/结算/容量释放，不用自报替代 |
 | 中层能力基础 | PAM-002 | 并行盘点 VPS 出口、电脑 Wi-Fi/路由/代理能力；读配置不改联网方式 | 实际采样、来源/TTL/单位/范围、可用与未验证分开；秘密不进公告 |
 | 去中心化恢复 | PAM-003 | 003a/b/c 已发布；003d 正式两端已备份加载，双向独立循环连续 `ok`；继续真实目录/故障域观察 | 单节点继续工作；旧消息/撤销/未知效果不因恢复重放；真实断连/重入网 |
-| 自主资源调度 | PAM-004 | 004a 两端 1053 项通过并加载，原 Leader 原线程实际提议/读回；推进 004b 真实出口 | 模型自行选路；底层核对授权/预留/回执；共享瓶颈不重复计容量 |
+| 自主资源调度 | PAM-004 | 004b 固定目标的模型选择、执行、独立产物核对与结算已通过；004c 推进日常 Mesh executor | 模型自行选路；底层核对授权/预留/回执；共享瓶颈不重复计容量 |
 | 异构节点适配 | PAM-005 | 定义 enrollment/运行期/能力/持久状态/适配报告合同，AI 按 OS 改装 | 先一个不同环境的真实接入；不要求先写完全部 Windows/手机功能 |
 | 多入口与临时节点 | PAM-006 | Firefox 手动与本机 Codex 原生 MCP 的提交/原 Leader completed/批准成果读回已实测；Cloud adapter 已发布但无实际 job/node | 从入口创建真实任务并读回结果；临时执行结束后持久状态仍在 Mesh |
 | 持续先进性 | PAM-007 | 将下方合同接入 Leader；配置 3–5 天检查的持续任务 | 有实际计划/task/检查记录；新模型/版本的能力与访问实际验证 |
@@ -38,7 +38,8 @@ PAM-003a/b/c 已发布，003c 隔离 SSH 断连/冷恢复/重联已验证；003d
 受管能力并在 laptop 认证 projection 实际读到它，但这仍不是 remote
 执行授权、业务执行或全局 HA。PAM-004a 的 task-bound 证据/不可变决定/原执行身份
 关联和薄模型/CLI 入口已实现，保留原 native thread。冻结代码两端
-1053 项完整通过并正式加载；PAM-004b 的受管真实出口仍未验证。PAM-006
+1053 项完整通过并正式加载；PAM-004b 的单目标受管出口现已通过下述
+原模型选择/执行/独立产物验收，不外推通用联网。PAM-006
 owner-bound ingress 提交/状态及受限成果 HTTP/CLI 合同已实现，入口/成果/
 新诊断合计 95 项测试通过。cf308b3 冻结代码两端各 1148 项通过，公开 CI
 37949397598 三个 Python 版本成功，laptop/VPS 已正式加载；重启边界原任务、
@@ -143,7 +144,17 @@ Worker 失败阶段诊断新增 20 项测试，相关 98 项回归通过；仅�
 CI 37960801403 completed/success；本机完整 1240 项通过（149.351 秒）。
 VPS 隔离 1240 项初次因两处测试使用 Python 3.6 不支持的 subprocess
 参数失败，兼容性修复后完整 1240 项通过（140.831 秒），未改系统 Python。
-正式核心服务仍为 cf308b3，不用源码发布替代正式加载证据。
+此前正式核心为 cf308b3；随后 `e2397f1` 已公开并两端加载，本机
+1267 项（144.987 秒）、VPS Python 3.6 1267 项（141.601 秒）完整通过，
+CI 38007498893 的 3.8/3.12/3.14 实际 success。同一冻结归档 SHA-256
+`e40591141bfdb2a6eafdb96dea56ebf6c5c8ec13589e189f38d20edee688298b`。
+升级只更换源码，当前配置、原任务/原生会话/历史块/执行账本指纹保持；
+新增 continuation 表为空，不恢复 DB/history，不重启隧道或 cloud companion。
+私有部署检查初版整表序列化在 896 MB VPS 上触发 OOM，发生在意图/停机前；
+逐行流式版实机峰值约 19 MB 后部署成功，未扩容或修改系统 Python。
+本机两条 epoch 0 的维护队列由原 needs_review 的同 scope 效果 guard 阻止
+领取；所有原行/guard 均保留，部署静止检查不把这种队列当执行中，也不
+把它当可重放业务。仍需按原维护 task 做 owner 效果审查。
 Codex MCP 的实际安装/三工具发现、提交、原 Leader completed epoch 1、
 Root 审查摘要发布及原 request 批准成果读回已通过；Cloud 仍无实际 job/node。
 Firefox 的原 request
@@ -169,9 +180,29 @@ allocation 动态工具，且将空 execution-candidate 段视为缺少 executor
 补当前 owner 安装证据、带当前任务 flags 的 CLI，以及 owner 显式 continuation
 CAS；之后再由原 Leader 同 task/thread 选择、等待原 operation 执行和结算。
 当前 CLI/worker 参考小片和 owner continuation 已完成并冻结；CLI 10 项、
-continuation 16 项及相关回归通过，正在完整测试与发布准备，尚未正式加载。
+continuation 16 项及相关回归通过，并已包含在上述两端正式版本。
 continuation 保留旧完整字节和同 native source，以 operator/result/epoch CAS
 仅追加新 instruction；子孙 hold/unknown 不因续接释放。
 不以清效果、新 task/thread 或修改旧决定绕过此缺项。
+新独立观测 `PAM-004b-egress-probe-20261010T0020-review-v2` 的实际 sample
+time 为 1791591376.2591817，GET body 与独立 Git oracle 匹配，子进程 reap；
+authority 已登记 verified。它按 900 秒失效，不以观测 ID 文本充当采样时刻。
+owner continuation 已接受原 SELECT 的 completed epoch 1/result SHA，新工作
+在原 task/Leader thread 的 epoch 2/新 native turn 运行并 completed；旧完整
+结果在私有 journal 保留。模型真实选择 `PAM-004b-cloud-canary-select-v2`，
+提及当前独立观测/容量/安装证据和 laptop 缺少可准入候选，保留旧决定；
+读回确认关联原 operation。Root 单次 owner executor 实际 GET 后，原 operation
+completed、dispatch 结算、容量 held=0/remaining=1；Root 和 Leader 各自核对
+真实产物 raw SHA/内容长度/正文 SHA 与独立 Git oracle 匹配。
+原始产物 SHA 为 `9cfcb6fd07da6e325994163fbea8c0b381ec40cd52e8644b2bfab263eb3f8c89`，
+canonical artifact SHA 与保留 oracle 一致。Core 仍为 provider_reported，
+不把 owner 内容核验升级为物理/性能证明。004b 的固定目标 canary 已验收；
+004c 将日常 executor 交给 Mesh 而非 Root 逐次启动，并继续多候选和故障观察。
+原生 goal/plan 仍 null，007 继续核对官方接口与真实 runtime，周期检查未创建。
+官方 Goals 合同明确 active goal 可在 idle 边界自动产生后续 turn；现有
+adapter 只等待原 turn 的结束，因此先接入原生 plan 事件、自动 turn 的
+同任务租约/效果生命周期，再实际启用长期 goal。不能在 completed 原
+Leader 直接 set active，也不为 defer 标志 fork 新 Leader。
+[Codex Goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)
 Cloud 本项目环境连接/发布条件单列，不以此缺项阻断 004b 中层真实出口。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。
