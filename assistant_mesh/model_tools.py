@@ -19,7 +19,8 @@ TOOLS = [
          'action=runtime_diagnose, arguments={} 只读观察本worker配置绑定的本节点运行包布局，不接受任意path/config，'
          '不读凭据、不联网推理、不安装/切换/重试；未知布局不是能力禁止，complete不证明原生Shell已验证。'
          'action=remote_delegate 将任务交给 mesh 内已授权 peer，arguments={peer,input,project_id,agent_id,role}；'
-         'delegate/children/wait_children 管理原账本子任务，wait_children 后结束本轮以便自动续接；remember/recall/notify 沿用原合同。'
+         'delegate/children/wait_children 管理原账本子任务；wait_children 返回 continue_after_children=true 才结束本轮等待续接，'
+         '返回 false 时使用 tasks 中的实际结果继续当前工作，不再等待；remember/recall/notify 沿用原合同。'
          '身份、task 与 task lease 来自当前认证运行环境，不接受伪造 actor/task_id/task epoch；资源 epoch 仍用于资源版本核对。'
          '目录、authorize.allowed 或 queued 不等于实际执行完成；'
          'action=federated_capabilities,arguments={issuer,kind,include_unavailable,limit} 查询可选远端能力投影，'
@@ -35,11 +36,13 @@ TOOLS = [
     tool('mesh_delegate', '建立可嵌套的持久子任务。模型决定分工与角色；默认任何 agent 节点可领取。',
          {'input': STRING, 'role': STRING, 'project_id': STRING, 'agent_id': STRING, 'required': {'type': 'array', 'items': STRING}}, ['input']),
     tool('mesh_remote_delegate', 'A2A 将工作交给已授权 peer 的自治 agent；不是 SSH 操作对端机器。'
-         '使用现有父子任务账本；mesh_children 查看结果，mesh_wait_children 让同一个原生父会话完成后自动继续。'
+         '使用现有父子任务账本；mesh_children 查看结果，mesh_wait_children 按实际 readiness 等待并让同一个原生父会话自动继续，'
+         '已结束时直接返回结果供当前 turn 使用。'
          '失联仅同一消息 ID 重连；queued 不是完成。peer 必须已通过 owner 的连接/委派授权。',
          {'peer': STRING, 'input': STRING, 'project_id': STRING, 'agent_id': STRING, 'role': STRING}, ['peer', 'input']),
     tool('mesh_children', '查看本任务的子任务状态及实际结果。'),
-    tool('mesh_wait_children', '请求在子任务完成后自动继续。调用后结束本轮，不宣称父目标已完成。'),
+    tool('mesh_wait_children', '读取实际子任务状态与结果；只有返回 continue_after_children=true 才结束本轮等待自动续接。'
+         '返回 false 时使用 tasks 中的结果继续当前工作，不再次等待；failed/needs_review 不代表成功，不宣称父目标已完成。'),
     tool('mesh_notify', '显式通知本人：使用配置的本人通道或节点回传链路；private 模式没有回传时仅 recorded_private。queued 或 accepted 都不等于手机已确认送达。', {'text': STRING}, ['text']),
     tool('mesh_resource', '发现、描述或登记模型创建的工具与动态资源能力；支持算力、性能观测和可达路径。'
          '能力目录不是原生终端白名单。跨节点必须 exact action/scope 授权，模型只能 request_grant，不能自行批准；'

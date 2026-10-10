@@ -578,10 +578,19 @@ class Store:
                 output = {'tasks': [dict(c) for c in db.execute('SELECT id,status,result FROM tasks WHERE parent_id=? ORDER BY created', (task_id,))],
                           'wait_requested': bool(json.loads(row['checkpoint']).get('wait_children_requested'))}
             elif action == 'wait_children':
+                # Read child readiness and persist the wait request under this
+                # same lease transaction. The immutable action receipt keeps
+                # its original snapshot when the native call ID is retried.
+                children = [dict(c) for c in db.execute(
+                    'SELECT id,status,result FROM tasks WHERE parent_id=? ORDER BY created', (task_id,))]
+                waiting = any(c['status'] not in ('completed', 'failed', 'needs_review') for c in children)
                 checkpoint = json.loads(row['checkpoint'])
-                checkpoint['wait_children_requested'] = True
+                checkpoint['wait_children_requested'] = waiting
                 db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(checkpoint), task_id))
-                output = {'continue_after_children': True, 'instruction': '结束本轮，父任务等待子任务后继续。'}
+                output = {'continue_after_children': waiting, 'tasks': children,
+                          'instruction': ('结束本轮，父任务等待子任务后继续。' if waiting else
+                              '没有仍需等待的子任务；使用下列实际结果继续当前工作，不要再次等待。'
+                              'failed/needs_review 不代表业务成功，也不允许重放未知效果。')}
             elif action == 'notify':
                 text = arguments['text']
                 if not isinstance(text, str) or not text or len(text.encode()) > 16000:

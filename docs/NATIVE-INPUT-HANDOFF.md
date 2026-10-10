@@ -210,3 +210,37 @@ MCP launcher正确拒绝；另两处快速同大小改写fixtures依赖文件时
 排空前拒绝，专用进程最终强杀；原任务/thread/active goal/guard均保留
 unknown，未resume、未清除、未变成成功。它不是正式服务或本版yield
 执行成功；后续新合同验证不得冒称修复这条unknown。相关私有记录不进公开仓库。
+
+修正验证目录/fixtures后的冻结 `85f9611` 两端1591项完整通过：本机
+148.597s、VPS Python3.6.8 144.798s；同归档SHA-256
+`13f3f6038662bf13699e172dd097ceeb1644a9718ace637636a339343af164ac`，
+[CI实际success](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38043492654)。
+两端原生版本0.162/0.159.2的独立observer零模型owned启动/空loaded-list/
+自然0/EOF亦通过；这不是两端active模型验收。
+
+新tool-field合同的独立私有canary在本机0.162实际成功：原runtime自然0、
+已接纳turn自然completed，observer前后原thread未加载、只读同active
+goal/createdAt/预算/累计usage，全原生字节prefix与完整历史保留，strict
+session/artifact ACK后原task才waiting_children/false guard。首epoch
+使用实际Codex与Worker validator/Store/save，不是full Worker.run_once。
+实际child结果写入后，原父task epoch2的full Worker.resume/steer回执
+与再次独立seal/commit通过，未创建thread或重设goal/usage；原runtime
+仍自然0。模型未回显child结果而再次请求等待，测试验收false保留。
+当前原父安全pending/guard false，不是unknown，消费结果仍待验证。
+
+## Managed wait readiness
+
+`wait_children` 在原task/node/epoch的同一事务读实际`id/status/result`，
+只有尚有非completed/failed/needs_review子任务时返回
+`continue_after_children=true`并请求等待。没有子任务或全终态返回False
+及实际`tasks`，模型继续当前工作，不进入空等待/唤醒循环；failed和
+needs_review不代表成功或允许重放未知效果。当前原生thread保留旧工具
+描述时，从新输入的resource reference提供这份附加能力合同，不能编辑
+旧原生rollout或fork替换记忆。
+
+原native call ID的action journal保持原快照，child后来完成不能重写旧
+true；下一次真实模型调用读取新快照。Worker只认显式False，旧server
+缺字段仍保持原等待。效果guard不由readiness清除。已TERM/admission
+之后迟到False也不得撤销原wait proof；true后的早完成竞态继续通过
+最终Store事务唤醒同一个parent row。19项新增Store/Worker fixtures及
+107项近邻通过，冻结双端/CI和原安全pending任务的消费验收另记。

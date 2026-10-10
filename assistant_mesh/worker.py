@@ -369,7 +369,17 @@ class Worker:
         except (OSError, ValueError) as exc:
             return self._mesh_tool_failure(exc, 'mesh_coordination', True)
         if name == 'mesh_wait_children':
-            self.wait_children = True
+            # Only an explicit authority result can cancel this managed wait.
+            # Already-finished children must be consumed in the current native
+            # turn, not force another TERM/yield/resume loop. Missing legacy
+            # fields still request the old wait; no native effect is settled.
+            if getattr(self.agent, 'native_drain_active', False) is not True:
+                self.wait_children = not (isinstance(output, dict)
+                                          and output.get('continue_after_children') is False)
+                self.current['checkpoint']['wait_children_requested'] = self.wait_children
+            # TERM/intent already admitted cannot be cancelled by a later
+            # ready snapshot. Return the tool result unchanged while retaining
+            # the original wait proof through its independent seal.
         return result(output)
 
     def resource_reference(self):
@@ -382,6 +392,7 @@ class Worker:
                      'fresh_thread_tool': 'mesh(action, arguments)',
                      'legacy_tool': 'mesh_resource(action, arguments)',
                      'gateway': {'coordination_actions': ['remote_delegate', 'delegate', 'children', 'wait_children', 'remember', 'recall', 'notify'],
+                         'wait_children': '按实际返回值决定：continue_after_children=true 才结束本轮等待续接；false 时使用 tasks 的实际结果继续当前工作，不再等待。failed/needs_review 不代表成功或允许重放未知效果。',
                          'resource_wrapper': {'action': 'resource', 'arguments': {'action': 'resource API action', 'arguments': {}}},
                          'allocation_wrapper': {'action': 'allocation', 'arguments': {'action': 'reserve/inspect/pending/accept/start/unknown/settle/decline/cancel', 'arguments': {}}},
                          'allocation_execution': '共享容量预留和provider回执是受管Mesh合同；start不是工具执行证明。没有实际provider适配器不得宣称完成；未知或running占用不会仅因TTL自动释放。',

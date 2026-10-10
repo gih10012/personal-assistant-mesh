@@ -21,6 +21,30 @@
     "correction_state": "superseded by separately frozen 58fac34 two-host 1510/CI and opt-in idle verification; original failed attempt retained"
   },
   "latest_source_release": {
+    "phase": "PAM-007c-3 independent native seal and strict Worker handoff; isolated candidate, not production",
+    "code_commit": "85f961120d373eb80c02b6472ff65bbaef187a99",
+    "archive_sha256": "13f3f6038662bf13699e172dd097ceeb1644a9718ace637636a339343af164ac",
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38043492654",
+    "ci_verified_success": true,
+    "source_public": true,
+    "local_full_suite_tests_passed": 1591,
+    "local_full_suite_duration_seconds": 148.597,
+    "vps_python36_full_suite_tests_passed": 1591,
+    "vps_python36_full_suite_duration_seconds": 144.798,
+    "actual_opt_in_idle_verified": true,
+    "actual_idle_probe_versions": {"local": "0.162.0", "vps": "0.159.2"},
+    "actual_private_active_goal_drain_and_seal_verified": true,
+    "actual_private_seal_scope": "local native 0.162, same active goal and original history; natural runtime/observer exits, strict artifact ACK; first admission uses actual Codex plus Worker validator, not full Worker run_once",
+    "actual_private_full_worker_wake_verified": true,
+    "actual_private_full_worker_wake_scope": "same task epoch 2/thread/goal, one resume and one steer receipt, strict yielded artifact commit and natural exit; child-result consumption not yet verified",
+    "actual_child_result_consumed_verified": false,
+    "native_goal_drain_default_enabled": false,
+    "native_goal_yield_default_enabled": false,
+    "production_core_loaded": false,
+    "production_runtime_and_configuration_changed": false,
+    "original_unknown_replayed": false
+  },
+  "previous_drain_source_release": {
     "phase": "PAM-007c-2 opt-in admitted drain and optional frozen-session upload; validated source candidate, not production",
     "code_commit": "58fac34ebb2622eda0df6bf632d9d53a7c919972",
     "archive_sha256": "b8a6ef446b5e7255fc3a1be17c3585e9dceb89da4f4188cf7e9a3443834d0c0c",
@@ -580,7 +604,7 @@
       "state": "in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "58fac34冻结两端1510项/CI及opt-in零模型owned-peer idle已验收，默认禁用且未部署。007c-2只记录drained_unverified/保留guard；接007c-3独立goal/history yielded seal，再以新受控canary实际验drain/原task父子往返。私有原resume unknown不重放。正式仍3198c87；Chat/Cloud/剩余入口隔离及3–5天schedule单列",
+      "next_action": "85f9611冻结两端1591项/CI与owned idle通过；新的隔离active goal drain/independent seal通过，同原父epoch2 resume/steer/再次seal真实Worker通过但未证明模型消费child结果。修正受管wait readiness/实际结果返回后以原安全pending任务继续验收，不重跑unknown。正式仍3198c87，默认禁用；Chat/Cloud/入口隔离及3–5天schedule单列",
       "evidence": {
         "coordination_tasks_created": true,
         "plan": "docs/PLAN.md",
@@ -622,7 +646,14 @@
         "native_goal_socket_trial_goal_after_resume_failure_still_active": true,
         "native_goal_socket_trial_usage_after_resume_failure": 7671,
         "native_goal_socket_trial_failure_replayed": false,
-        "native_goal_safe_active_cooperative_yield_implemented": false,
+        "native_goal_safe_active_cooperative_yield_implemented": true,
+        "native_goal_safe_active_cooperative_yield_actual_isolated_verified": true,
+        "native_goal_safe_active_cooperative_yield_production_verified": false,
+        "native_goal_private_worker_wake_same_task_thread_goal_input_receipt_verified": true,
+        "native_goal_private_worker_wake_child_result_consumed_verified": false,
+        "native_goal_wait_children_ready_contract_implemented": true,
+        "native_goal_wait_children_ready_new_fixture_tests_passed": 19,
+        "native_goal_wait_children_ready_related_fixture_tests_passed": 107,
         "native_goal_handoff_prerequisites_contract": "docs/NATIVE-INPUT-HANDOFF.md",
         "native_goal_once_only_input_intent_and_turn_receipt_implemented": true,
         "native_goal_resume_host_callback_barrier_implemented": true,
@@ -691,14 +722,14 @@
         {"id": "PAM-007b", "title": "同任务租约绑定的原生goal多turn控制器", "state": "source_candidate_validated",
          "owner": "root+native_goal_adapter", "depends_on": ["PAM-007a"],
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
-        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "independent_seal_and_worker_source_implemented_runtime_roundtrip_unverified",
+        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "isolated_seal_and_wake_verified_child_consumption_pending",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "007c-3独立observer/history与007c-4 Worker严格commit/final ACK源码已实现默认关闭，81新fixtures；先同份冻结源码双端/CI验证，再新受控adapter canary及原父task/thread/goal等待唤醒roundtrip，候选未部署、原unknown保留，Chat/Cloud仍未入网",
+         "next_action": "85f9611双端1591项/CI、隔离真实active drain/independent seal与epoch2原task/thread/goal resume/steer/reseal通过；模型未消费child marker又等待。修正wait_children按实际终态返回False/tasks及原生旧thread入口参考，19新fixture/107回归通过；冻结双端/CI后原安全pending task续接验消费。不重放unknown、不部署；Chat/Cloud仍未入网",
          "implementation_slices": [
            {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
-           {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "source_candidate_two_host_ci_idle_verified_active_drain_unverified", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "58fac34同一冻结源码两端1510项/CI与opt-in零模型idle已核验，默认false、未部署；23 drain与6 Worker新fixture保留drained_unverified/false settled/原guard。原e229651实机失败保留。接007c-3独立seal后以新受控canary验真实active drain，不借旧私有probe、未知原trial不重放"},
-           {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "source_implemented_default_disabled_pending_frozen_validation_and_actual_canary", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "40 history+19 observer+7seal新fixture通过；同实际goal baseline/有限prefix/owned原runtime closure，独立只读全页turns和稳定JSONL，默认native_goal_yield false。冻结双端/CI后新受控实际canary验原active goal无reset及完整历史，不重放旧unknown"},
-           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "worker_source_implemented_default_disabled_runtime_roundtrip_unverified", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "14 Worker+1 Store ACK新fixtures涵盖真实Store提前child完成/new epoch，仍不是实机原生交接。严格history commit前guard true、原task/epoch最终ACK后才等待；自然终态不隐式续跑。待adapter canary后原父等待唤醒同goal roundtrip；未知原trial不重放"}
+           {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "isolated_actual_active_drain_verified_not_production", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "85f9611两端1591项/CI，新tool-field合同实际active drain自然0/EOF、一个admitted turn完成；默认false未部署。原e229651 idle失败、最早resume unknown及私有错误callback unknown均保留不重放"},
+           {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "isolated_actual_active_goal_seal_and_artifact_commit_verified_not_production", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "85f9611双端1591项/CI通过；新隔离实际active goal/usage不reset，独立observer自然0且原thread前后notLoaded、turn自然完成/完整历史/strict artifact ACK通过。第一epoch不是full Worker；保留原unknown。正式默认false，跨节点及任意外部副作用另验"},
+           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "same_task_epoch2_native_input_and_reseal_verified_child_consumption_pending", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "实际full Worker原父epoch2同thread/goal resume+steer一次、natural0/严格commit/reseal通过，当前安全pending且guard false；未输出child marker。修正受管wait_children已结束返回False/真实tasks，19新fixture及107回归通过；冻结双端/CI后在同原安全pending task续接验证模型消费，不清账本/goal、不重跑unknown"}
          ]},
         {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
@@ -726,7 +757,7 @@
     }
   ],
   "current_work": {
-    "phase": "PAM-007c-3 independent observer/history and 007c-4 strict Worker handoff implemented default disabled; 81 new fixtures; frozen two-host/CI and actual canary pending; original unknown retained, production unchanged, Chat/Cloud still not joined",
+    "phase": "85f9611 two-host 1591/CI and isolated native active drain/seal plus same-task epoch2 wake/input/reseal verified; managed wait-ready contract fixed with 19 new/107 related fixtures; freeze and actual same pending-task child consumption next; production unchanged and Chat/Cloud not joined",
     "whole_goal_completed": false
   }
 }

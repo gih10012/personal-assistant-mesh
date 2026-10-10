@@ -316,6 +316,21 @@ baseline、同文件有限前缀、独立 readonly observer 的完整分页/同�
 independent seal，再原父 task/同 goal 等待唤醒的真实 roundtrip；Chat 原生
 tools/OAuth 与 Codex Cloud job/node 仍未入网。
 
+随后 `85f9611` 同一冻结归档
+`13f3f6038662bf13699e172dd097ceeb1644a9718ace637636a339343af164ac`
+两端完整1591项通过（本机148.597s、VPS Python3.6.8 144.798s），
+[CI 38043492654](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38043492654)
+实际success；两端独立observer零模型启动/自然0也通过。新的私有
+tool-field合同canary在本机原生0.162真实active goal下自然drain、独立
+observer/history seal及strict artifact ACK通过，同目标/createdAt/累计
+用量保留。这一首epoch用实际Codex及Worker validator，不冒称full Worker。
+子任务完成后，原父epoch2的实际full Worker同thread/goal resume一次、
+steer一次并再次严格seal，自然0且guard最终false；模型再次等待，未输出
+真实child marker，因此结果消费尚未验收。当前修正额外Mesh wait能力，
+按同租约事务的实际终态返回False/完整结果，旧回执不可变、TERM后不撤销
+已接纳等待；19项新fixtures与107项回归通过。冻结验证后只续接这条
+安全pending原任务，不重放任何unknown。正式服务仍为3198c87。
+
 正式 laptop worker/node 原先直接以开发仓库为工作目录，重启可能误载
 候选。已保留一致账本与单位配置，改为私有冻结 `3198c87` 版本目录；
 实际两进程 working directory 已核对，原行、配置字节与两条 guard 未变，
