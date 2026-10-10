@@ -263,7 +263,17 @@ authority 等子任务不再制造零效果。`ef647c80253740b1ac2e43b3e8e41df88
 与实际turnId回执、host回调握手边界、子task不继承父goal、yielded
 scope等待/唤醒/零native-start的auth/backend回退预留。缺少/重置的
 原生goal状态不从配置重新创建。当前仍未实现active yield的独立seal，
-也未启用正式目标；将继续两端冻结测试与零模型传输核验，之后补
+也未启用正式目标。`455430d` 同一冻结归档
+`486f84c1b00e53e27b66ec938969ddce634717104b8dd312196be587da805472`
+两端完整 1424 项通过（laptop 144.480 秒，VPS Python 3.6 144.367 秒），
+[CI 38029201527](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38029201527)
+实际 success，源码已公开。该版本实机 idle 检查在两端都因官方
+rendezvous symlink 被拒绝，未 initialize、更没有 model/thread/goal 调用。
+随后按已读官方 0.159.2/0.162 listener 修正精确 alias 与物理目标校验，
+握手前核对 owned app-server PID/UID，不放松通用 symlink 校验。
+本机直接官方 native binary 的零模型初始化、空 loaded list 和自然
+退出已通过；npm 包装器 PID 不同则拒绝，不能猜子孙进程放宽。
+新候选继续两端冻结测试和 VPS idle 核验，之后补
 admission drain/event pump和真实父子续接。
 详见 [输入与归属前置合同](NATIVE-INPUT-HANDOFF.md)。
 详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。

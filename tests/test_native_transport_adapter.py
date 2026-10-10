@@ -1,4 +1,5 @@
 """Adapter integration fixtures; no real app-server, account or model."""
+import hashlib
 import os
 import queue
 import signal
@@ -6,6 +7,7 @@ import socket
 import subprocess
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -19,6 +21,8 @@ class NativeTransportAdapterTests(unittest.TestCase):
         agent.transport_name = 'unix'
         agent._native_socket = mock.Mock()
         agent._socket_path = agent._socket_directory = None
+        agent._socket_directory_identity = None
+        agent._socket_binding = agent._socket_target = None
         agent._native_cleanup_forced = agent._reader_forced_close = agent._term_sent = False
         agent.events, agent.deferred = queue.Queue(), []
         agent.reader = mock.Mock()
@@ -161,13 +165,201 @@ class NativeTransportAdapterTests(unittest.TestCase):
     def test_truncated_handshake_is_fixed_backend_failure_not_uncaught_eof(self):
         agent = self.runtime()
         with tempfile.TemporaryDirectory() as directory:
-            agent._socket_path = str(Path(directory) / 'socket')
+            agent._socket_path = str(Path(directory) / 'app.sock')
+            agent._socket_directory = directory
+            entry = os.lstat(directory)
+            agent._socket_directory_identity = (entry.st_dev, entry.st_ino, entry.st_uid, entry.st_mode)
+            agent.process.poll.return_value = None
             listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.addCleanup(listener.close)
             listener.bind(agent._socket_path)
+            os.chmod(agent._socket_path, 0o600)
             with mock.patch('assistant_mesh.codex.UnixWebSocket', side_effect=EOFError('PRIVATE_FIXTURE')):
                 with self.assertRaisesRegex(CodexError, '^codex_native_transport_connect_failed$'):
                     agent._connect_native_socket()
+
+
+class NativeAliasAdapterTests(unittest.TestCase):
+    runtime = NativeTransportAdapterTests.runtime
+
+    @contextmanager
+    def alias(self):
+        agent = self.runtime()
+        agent.process.poll.return_value = None
+        with tempfile.TemporaryDirectory() as directory:
+            alias_parent = os.path.join(directory, 'alias')
+            physical_parent = os.path.join(directory, 'codex-daemon-' + str(os.geteuid()))
+            os.mkdir(alias_parent, 0o700)
+            os.mkdir(physical_parent, 0o700)
+            agent._socket_directory = alias_parent
+            entry = os.lstat(alias_parent)
+            agent._socket_directory_identity = (entry.st_dev, entry.st_ino, entry.st_uid, entry.st_mode)
+            agent._socket_path = os.path.join(alias_parent, 'app.sock')
+            digest = hashlib.sha256(os.fsencode(agent._socket_path)).hexdigest()
+            target = os.path.join(physical_parent, digest)
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(target)
+            os.chmod(target, 0o600)
+            os.symlink(target, agent._socket_path)
+            realpath = os.path.realpath
+            try:
+                with mock.patch('assistant_mesh.codex.os.path.realpath',
+                                side_effect=lambda path: directory if path == '/tmp' else realpath(path)):
+                    yield agent, target
+            finally:
+                listener.close()
+
+    def test_exact_official_alias_connects_physical_path_with_owned_peer_proof(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket') as connect, \
+                mock.patch('assistant_mesh.codex.os.chmod') as chmod:
+            agent._connect_native_socket()
+            self.assertEqual(target, connect.call_args[0][0])
+            self.assertEqual(424242, connect.call_args[1]['expected_peer_pid'])
+            self.assertEqual(os.geteuid(), connect.call_args[1]['expected_peer_uid'])
+            chmod.assert_not_called()
+
+    def test_wrong_alias_payload_never_connects_or_changes_target_permissions(self):
+        for payload in ('relative', '/tmp/unrelated-owner-socket'):
+            with self.subTest(payload=payload), self.alias() as (agent, target), \
+                    mock.patch('assistant_mesh.codex.UnixWebSocket') as connect:
+                os.unlink(agent._socket_path)
+                os.symlink(payload, agent._socket_path)
+                with self.assertRaisesRegex(CodexError, '^codex_native_transport_path_unsafe$'):
+                    agent._connect_native_socket()
+                connect.assert_not_called()
+                self.assertEqual(0o600, os.lstat(target).st_mode & 0o777)
+
+    def test_physical_parent_and_exact_socket_mode_are_required(self):
+        for unsafe in ('alias_parent', 'physical_parent', 'socket'):
+            with self.subTest(unsafe=unsafe), self.alias() as (agent, target), \
+                    mock.patch('assistant_mesh.codex.UnixWebSocket') as connect:
+                path = {'alias_parent': agent._socket_directory,
+                        'physical_parent': os.path.dirname(target), 'socket': target}[unsafe]
+                os.chmod(path, 0o755 if unsafe != 'socket' else 0o400)
+                with self.assertRaisesRegex(CodexError, '^codex_native_transport_path_unsafe$'):
+                    agent._connect_native_socket()
+                connect.assert_not_called()
+
+    def test_physical_target_cannot_be_a_second_symlink(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket') as connect:
+            replacement = target + '-different'
+            os.rename(target, replacement)
+            os.symlink(replacement, target)
+            with self.assertRaisesRegex(CodexError, '^codex_native_transport_path_unsafe$'):
+                agent._connect_native_socket()
+            connect.assert_not_called()
+
+    def test_alias_parent_cannot_be_a_symlink_even_when_owner_private(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket') as connect:
+            old_parent = agent._socket_directory + '-moved'
+            os.rename(agent._socket_directory, old_parent)
+            os.symlink(old_parent, agent._socket_directory)
+            with self.assertRaisesRegex(CodexError, '^codex_native_transport_path_unsafe$'):
+                agent._connect_native_socket()
+            connect.assert_not_called()
+
+    def test_alias_replacement_after_connection_is_not_accepted(self):
+        with self.alias() as (agent, target):
+            def replace(*args, **kwargs):
+                os.rename(agent._socket_path, agent._socket_path + '-original')
+                os.symlink(target, agent._socket_path)
+                return mock.Mock()
+            with mock.patch('assistant_mesh.codex.UnixWebSocket', side_effect=replace):
+                with self.assertRaisesRegex(CodexError, '^codex_native_transport_path_unsafe$'):
+                    agent._connect_native_socket()
+
+    def test_physical_replacement_after_connection_is_not_accepted(self):
+        with self.alias() as (agent, target):
+            def replace(*args, **kwargs):
+                os.rename(target, target + '-original')
+                replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self.addCleanup(replacement.close)
+                replacement.bind(target)
+                os.chmod(target, 0o600)
+                return mock.Mock()
+            with mock.patch('assistant_mesh.codex.UnixWebSocket', side_effect=replace):
+                with self.assertRaisesRegex(CodexError, '^codex_native_transport_path_unsafe$'):
+                    agent._connect_native_socket()
+
+    def test_exited_owned_child_is_not_replaced_by_same_uid_listener(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket') as connect:
+            agent.process.poll.return_value = 0
+            with self.assertRaisesRegex(CodexError, '^codex_native_transport_start_failed$'):
+                agent._connect_native_socket()
+            connect.assert_not_called()
+
+    def test_cleanup_removes_only_unchanged_alias_not_shared_socket(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket'):
+            agent._connect_native_socket()
+            agent.process.poll.return_value = 0
+            agent.close()
+            self.assertFalse(os.path.lexists(agent._socket_path))
+            self.assertTrue(os.path.exists(target))
+
+    def test_cleanup_retains_replaced_alias_and_shared_target(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket'):
+            agent._connect_native_socket()
+            os.rename(agent._socket_path, agent._socket_path + '-original')
+            os.symlink(target, agent._socket_path)
+            agent.process.poll.return_value = 0
+            agent.close()
+            self.assertTrue(os.path.islink(agent._socket_path))
+            self.assertTrue(os.path.exists(target))
+
+    def test_connection_that_observes_child_exit_does_not_allow_rpc(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket') as connect:
+            agent.process.poll.side_effect = [None, 0]
+            with self.assertRaisesRegex(CodexError, '^codex_native_transport_start_failed$'):
+                agent._connect_native_socket()
+            connect.assert_called_once()
+
+    def test_cleanup_of_broken_alias_does_not_follow_or_recreate_target(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket'):
+            agent._connect_native_socket()
+            os.unlink(target)
+            self.assertTrue(os.path.lexists(agent._socket_path))
+            agent.process.poll.return_value = 0
+            agent.close()
+            self.assertFalse(os.path.lexists(agent._socket_path))
+            self.assertFalse(os.path.lexists(target))
+
+    def test_cleanup_keeps_replaced_private_directory_even_when_empty(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket'):
+            agent._connect_native_socket()
+            original = agent._socket_directory + '-original'
+            os.rename(agent._socket_directory, original)
+            os.mkdir(agent._socket_directory, 0o700)
+            agent.process.poll.return_value = 0
+            agent.close()
+            self.assertTrue(os.path.isdir(agent._socket_directory))
+            self.assertTrue(os.path.islink(os.path.join(original, 'app.sock')))
+
+    def test_shared_directory_ctime_change_does_not_reject_owned_peer(self):
+        with self.alias() as (agent, target):
+            def unrelated_socket_activity(*args, **kwargs):
+                Path(os.path.join(os.path.dirname(target), 'unrelated-lock')).touch(mode=0o600)
+                return mock.Mock()
+            with mock.patch('assistant_mesh.codex.UnixWebSocket', side_effect=unrelated_socket_activity):
+                agent._connect_native_socket()
+            self.assertEqual(target, agent._socket_target)
+
+    def test_natural_nonzero_exit_retains_private_alias_and_shared_target(self):
+        with self.alias() as (agent, target), \
+                mock.patch('assistant_mesh.codex.UnixWebSocket'):
+            agent._connect_native_socket()
+            agent.process.poll.return_value = 7
+            agent.close()
+            self.assertTrue(os.path.islink(agent._socket_path))
+            self.assertTrue(os.path.exists(target))
 
 
 class WorkerChildGoalTests(unittest.TestCase):

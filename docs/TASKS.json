@@ -6,6 +6,22 @@
   "plan": "docs/PLAN.md",
   "status_source": "project coordination record; runtime evidence is separately identified, not invented",
   "latest_source_release": {
+    "phase": "PAM-007c input/transport/child scope prerequisites; validated source candidate, not production",
+    "code_commit": "455430d8a18c9367f45556ebf04af5da1ef08bda",
+    "archive_sha256": "486f84c1b00e53e27b66ec938969ddce634717104b8dd312196be587da805472",
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38029201527",
+    "ci_verified_success": true,
+    "source_public": true,
+    "local_full_suite_tests_passed": 1424,
+    "local_full_suite_duration_seconds": 144.480,
+    "production_core_loaded": false,
+    "vps_python36_full_suite_tests_passed": 1424,
+    "vps_python36_full_suite_duration_seconds": 144.367,
+    "actual_idle_unix_adapter_verified": false,
+    "idle_probe_failure": "official owned Unix rendezvous alias rejected before initialize; no model/thread/goal calls",
+    "alias_adaptation_state": "new working-tree candidate; local native 0.162 idle initialize/natural exit verified, final frozen two-host validation pending"
+  },
+  "previous_source_release": {
     "phase": "PAM-007b native goal controller; validated source candidate, not production",
     "code_commit": "ef647c80253740b1ac2e43b3e8e41df88e75afaa",
     "archive_sha256": "dcc479462be8a07cb9d33590621a247bda34422832c69e1a4a746befb6635e64",
@@ -505,7 +521,7 @@
       "state": "in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "原Leader真实update_plan已验收；ef647c8候选两端1328项及CI通过但未部署。007c输入回执/私有unix传输/子goal隔离/scope预留源码已补，正在冻结两端验证；私有原resume unknown保留不重放。随后接admission drain/event pump、独立yielded seal与原生历史checkpoint。正式仍3198c87，Chat/Cloud/剩余入口隔离及3–5天schedule单列，不直接启用正式长期goal",
+      "next_action": "原Leader真实update_plan已验收；455430d候选两端1424项及CI通过但未部署。实机发现官方unix alias，已补精确目标/owned PID握手前校验及本机零模型初始化/自然退出，继续冻结两端验证。私有原resume unknown保留不重放，随后接admission drain/event pump、独立yielded seal与原生历史checkpoint。正式仍3198c87；Chat/Cloud/剩余入口隔离及3–5天schedule单列",
       "evidence": {
         "coordination_tasks_created": true,
         "plan": "docs/PLAN.md",
@@ -556,6 +572,14 @@
         "native_goal_missing_migrated_state_reset_allowed": false,
         "native_unix_socket_adapter_source_implemented": true,
         "native_unix_socket_adapter_production_loaded": false,
+        "native_unix_socket_official_alias_source_verified": true,
+        "native_unix_socket_official_alias_compatible_candidate_implemented": true,
+        "native_unix_socket_owned_peer_before_handshake_candidate_implemented": true,
+        "native_unix_socket_candidate_local_idle_probe_verified": true,
+        "native_unix_socket_candidate_local_idle_probe_version": "0.162.0",
+        "native_unix_socket_candidate_vps_idle_probe_verified": false,
+        "native_unix_socket_candidate_model_turns_requested": 0,
+        "native_unix_socket_npm_wrapper_pid_fallback_allowed": false,
         "native_goal_new_input_actual_model_receipt_verified": false,
         "native_goal_continuous_cross_node_rollout_replication_implemented": false,
         "native_goal_strict_realtime_lease_watchdog_verified": false,
@@ -602,7 +626,7 @@
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
         {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "handoff_prerequisites_source_implemented_yield_incomplete",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "私有原resume unknown不重放。源码已补可选unix传输、一次输入intent/hash/实际turnId回执、host请求握手边界、子task goal隔离、yielded scope预留及原生goal状态缺失/重置拒绝。先冻结两端测试与零模型握手，再接admission drain/event pump和独立yielded seal；真实生产lease/children交接未验收"},
+         "next_action": "私有原resume unknown不重放。455430d前置代码两端1424项与CI已通过，实机官方alias拒绝问题另补安全适配：精确hash/owner/模式/身份和握手前owned PID，无UID-only或npm子孙PID猜测；本机native0.162 idle通过。先验证新冻结版本与VPS native0.159.2 idle，再接admission drain/event pump和独立yielded seal；生产lease/children交接未验收"},
         {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
          "next_action": "按原生字节/稳定前缀和压缩保留途中新上下文，不用应用摘要或旧artifact冒充完整恢复"},
@@ -629,7 +653,7 @@
     }
   ],
   "current_work": {
-    "phase": "PAM-007c handoff input/transport/child scope prerequisites source implemented, frozen verification pending; original private resume unknown retained; next admission drain/yield seal and continuous native checkpoints; PAM-006 Chat/Cloud connection remains separate",
+    "phase": "PAM-007c prerequisites 455430d frozen two-host 1424/CI verified; official Unix alias and owned-peer adaptation in progress with local native idle check passed; original private resume unknown retained; next drain/yield seal and native checkpoints; PAM-006 Chat/Cloud remains separate",
     "whole_goal_completed": false
   }
 }

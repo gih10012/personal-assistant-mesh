@@ -35,11 +35,31 @@ rollout 文件；只传历史不能声称目标已迁移。实际 paused/blocked
 ## 可选私有 Unix WebSocket
 
 Codex 子配置的 `native_transport` 默认为 `stdio`；显式 `unix` 使用
-本人的 0700 临时目录和 0600 socket，原有 auth/memories/plan/权限
+本人的 0700 临时入口目录，原有 auth/memories/plan/权限
 配置保持。没有 TCP 公网监听、第三方依赖、新 key 或新费用。缺少
-AF_UNIX 的环境明确不支持该选项，节点可以继续 stdio 或自行适配
+AF_UNIX 或 Linux owned-peer 证明的环境明确不支持该选项，节点可以继续 stdio 或自行适配
 相同生命周期合同；Linux 机制不是所有平台的限制。
 [官方 listener](https://learn.chatgpt.com/docs/developer-commands#codex-app-server)
+
+0.159.2/0.162 官方 listener 将入口发布为 symlink：物理 socket 位于
+canonical `/tmp/codex-daemon-{euid}` 的 0700 目录，文件名为 canonical
+入口路径 bytes 的 SHA-256 纯 hex（无 `.sock`），模式 0600。
+[已核对的 listener 源码](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/app-server-transport/src/transport/unix_socket.rs)、
+[物理目录合同](https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/uds/src/daemon_directory.rs)。
+
+仅 Codex adapter 接受自己随机创建且身份未变目录内的官方最终 alias：
+readlink 必须精确匹配计算出的绝对物理路径，真实祖先不得增加链接链，
+目录/socket 所有权和模式都需核验。直接连接物理路径，握手前以 Linux
+SO_PEERCRED 验证精确 owned Popen PID/UID，连接前后复核路径身份；
+不得按同 UID、进程组、名称或猜测子孙 PID 放行。通用 UnixWebSocket
+仍拒绝 symlink。目录权限与快照不声称是对同 UID 恶意进程的原子沙箱。
+
+Unix 模式的 `executable` 应指向官方原生二进制或真正 `exec` 它的
+包装器。npm CLI 的 Node 启动器另 spawn native，PID 不同会被拒绝；
+按本节点安装路径配置 native binary，不改全局命令或认证。版本升级
+后若路径合同变化就拒绝连接，不自动寻找未知 daemon 或修其权限。
+正常清理只删除身份/readlink 都未变的自身 alias 和身份未变的空入口
+目录；绝不 chmod/unlink 共享 physical socket、目录、锁或别人的入口。
 
 传输校验升级握手、帧、JSON 与上限，接收超时保留部分帧。写入失败
 可能已被服务端接收，因此不会自动重试。关闭只向自有 app-server

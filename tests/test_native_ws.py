@@ -5,6 +5,7 @@ import os
 import socket
 import stat
 import struct
+import sys
 import tempfile
 import threading
 import unittest
@@ -69,6 +70,7 @@ class Fixture:
         self.errors = []
         self.done = threading.Event()
         self.request = None
+        self.received = b''
 
         def serve():
             try:
@@ -80,6 +82,7 @@ class Fixture:
                     if not part:
                         return  # A path-identity refusal can precede HTTP.
                     request += part
+                    self.received += part
                     if len(request) > 4096:
                         raise AssertionError('test_request_limit')
                 self.request = request
@@ -625,6 +628,112 @@ class PrivateNativeSocket(unittest.TestCase):
             with self.assertRaisesRegex(NativeSocketError, '^native_socket_path_changed$'):
                 UnixWebSocket(fixture.path)
         fixture.finish()
+
+
+@unittest.skipUnless(sys.platform.startswith('linux') and hasattr(socket, 'AF_UNIX')
+                     and hasattr(socket, 'SO_PEERCRED') and hasattr(os, 'geteuid'),
+                     'Linux owner-private peer credential proof is unavailable')
+class NativePeerCredentials(unittest.TestCase):
+    def connect(self, fixture, **expectation):
+        client = UnixWebSocket(fixture.path, expected_peer_pid=os.getpid(),
+                               expected_peer_uid=os.geteuid(), **expectation)
+        self.addCleanup(client.close)
+        return client
+
+    def refused_before_handshake(self, fixture, error, **expectation):
+        with self.assertRaisesRegex(NativeSocketError, '^' + error + '$'):
+            UnixWebSocket(fixture.path, **expectation)
+        fixture.finish()
+        self.assertEqual(fixture.received, b'')
+        self.assertIsNone(fixture.request)
+
+    def identity(self):
+        return {'expected_peer_pid': os.getpid(), 'expected_peer_uid': os.geteuid()}
+
+    def test_real_kernel_pid_and_uid_match_before_handshake(self):
+        fixture = Fixture(self, initial=frame(b'{"peer":"proved"}'))
+        client = self.connect(fixture)
+        self.assertEqual(client.recv_json(), {'peer': 'proved'})
+        fixture.finish()
+        self.assertTrue(fixture.received.startswith(b'GET / HTTP/1.1\r\n'))
+
+    def test_real_wrong_pid_refuses_without_handshake_bytes(self):
+        fixture = Fixture(self)
+        self.refused_before_handshake(fixture, 'native_socket_peer_identity_mismatch',
+                                     expected_peer_pid=os.getpid() + 1,
+                                     expected_peer_uid=os.geteuid())
+
+    def test_real_wrong_uid_refuses_without_handshake_bytes(self):
+        fixture = Fixture(self)
+        self.refused_before_handshake(fixture, 'native_socket_peer_identity_mismatch',
+                                     expected_peer_pid=os.getpid(),
+                                     expected_peer_uid=os.geteuid() + 1)
+
+    def test_default_transport_does_not_request_peer_credentials(self):
+        fixture = Fixture(self, initial=frame(b'{}'))
+        with mock.patch('assistant_mesh.native_ws.socket.socket.getsockopt',
+                        side_effect=AssertionError('unexpected_peer_credential_request')):
+            client = UnixWebSocket(fixture.path)
+            self.addCleanup(client.close)
+            self.assertEqual(client.recv_json(), {})
+        fixture.finish()
+
+    def test_proof_unsupported_platform_refuses_without_handshake_bytes(self):
+        fixture = Fixture(self)
+        with mock.patch('assistant_mesh.native_ws.sys.platform', 'darwin'):
+            self.refused_before_handshake(fixture, 'native_socket_peer_credentials_unsupported',
+                                         **self.identity())
+
+    def test_missing_credential_option_refuses_without_handshake_bytes(self):
+        fixture = Fixture(self)
+        with mock.patch.object(socket, 'SO_PEERCRED'):
+            delattr(socket, 'SO_PEERCRED')
+            self.refused_before_handshake(fixture, 'native_socket_peer_credentials_unsupported',
+                                         **self.identity())
+
+    def test_getsockopt_failure_is_fixed_and_sends_no_handshake(self):
+        fixture = Fixture(self)
+        with mock.patch('assistant_mesh.native_ws.socket.socket.getsockopt',
+                        side_effect=OSError('PRIVATE_CREDENTIAL_ERROR')):
+            self.refused_before_handshake(fixture, 'native_socket_peer_credentials_unavailable',
+                                         **self.identity())
+
+    def test_malformed_credentials_refuse_without_handshake_bytes(self):
+        invalid = (None, 12, 'secret', b'', b'x' * 11, b'x' * 13,
+                   struct.pack('=iII', 0, os.geteuid(), os.getegid()),
+                   struct.pack('=iII', -1, os.geteuid(), os.getegid()))
+        for raw in invalid:
+            with self.subTest(raw_type=type(raw).__name__):
+                fixture = Fixture(self)
+                with mock.patch('assistant_mesh.native_ws.socket.socket.getsockopt', return_value=raw):
+                    self.refused_before_handshake(fixture, 'native_socket_peer_credentials_invalid',
+                                                 **self.identity())
+
+    def test_expectations_require_complete_integer_pid_uid_pair(self):
+        invalid = ((None, os.geteuid()), (os.getpid(), None), (True, os.geteuid()),
+                   (os.getpid(), False), (0, os.geteuid()), (-1, os.geteuid()),
+                   (1 << 31, os.geteuid()), ('1', os.geteuid()), (1.0, os.geteuid()),
+                   (os.getpid(), -1), (os.getpid(), 1 << 32), (os.getpid(), '0'),
+                   (os.getpid(), 0.0))
+        for pid, uid in invalid:
+            with self.subTest(pid_type=type(pid).__name__, uid_type=type(uid).__name__):
+                with mock.patch('assistant_mesh.native_ws.socket.socket') as create:
+                    with self.assertRaisesRegex(NativeSocketError, '^native_socket_peer_expectation_invalid$'):
+                        UnixWebSocket('/fixture/missing', expected_peer_pid=pid,
+                                      expected_peer_uid=uid)
+                    create.assert_not_called()
+
+    def test_matching_peer_expectation_does_not_allow_symlink_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.addCleanup(listener.close)
+            path = directory + '/socket'
+            listener.bind(path)
+            os.chmod(path, 0o600)
+            alias = directory + '/alias'
+            os.symlink(path, alias)
+            with self.assertRaisesRegex(NativeSocketError, '^native_socket_path_not_private$'):
+                UnixWebSocket(alias, **self.identity())
 
 
 if __name__ == '__main__':

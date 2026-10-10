@@ -16,6 +16,7 @@ import select
 import socket
 import stat
 import struct
+import sys
 import threading
 import time
 
@@ -34,6 +35,17 @@ def _timeout(value):
     if not math.isfinite(value) or value <= 0:
         raise NativeSocketError('native_socket_timeout_invalid')
     return float(value)
+
+
+def _peer_expectation(pid, uid):
+    if pid is None and uid is None:
+        return None
+    # A UID alone does not identify the child we launched; a PID alone is not
+    # the complete owner identity. These optional arguments are a paired proof.
+    if (not isinstance(pid, int) or isinstance(pid, bool) or not 0 < pid <= 0x7fffffff
+            or not isinstance(uid, int) or isinstance(uid, bool) or not 0 <= uid <= 0xffffffff):
+        raise NativeSocketError('native_socket_peer_expectation_invalid')
+    return pid, uid
 
 
 def _private_socket(path):
@@ -104,6 +116,9 @@ class UnixWebSocket:
     its own total deadline, including control frames. Concurrent writes are
     serialized without altering the receiving socket's timeout. ``close`` is
     idempotent. EOF, receive timeout and protocol/local errors remain distinct.
+    Optional ``expected_peer_pid`` and ``expected_peer_uid`` must be supplied
+    together. Linux kernel credentials must match both before any handshake
+    bytes are sent. Requesting this proof never enables following symlinks.
     """
 
     LIMIT = 8 * 1024 * 1024
@@ -111,8 +126,9 @@ class UnixWebSocket:
     _GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
     _TOKEN = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
-    def __init__(self, path, timeout=10):
+    def __init__(self, path, timeout=10, expected_peer_pid=None, expected_peer_uid=None):
         self.timeout = _timeout(timeout)
+        expected_peer = _peer_expectation(expected_peer_pid, expected_peer_uid)
         self.sock = None
         self.buffer = bytearray()
         self.fragment = bytearray()
@@ -136,10 +152,34 @@ class UnixWebSocket:
                 raise NativeSocketError('native_socket_connect_failed') from None
             if _private_socket(path)[1] != identity:
                 raise NativeSocketError('native_socket_path_changed')
+            if expected_peer is not None:
+                self._verify_peer(*expected_peer)
             self._handshake(deadline)
         except BaseException:
             self.close()
             raise
+
+    def _verify_peer(self, expected_pid, expected_uid):
+        if not sys.platform.startswith('linux') or not hasattr(socket, 'SO_PEERCRED'):
+            raise NativeSocketError('native_socket_peer_credentials_unsupported')
+        # Linux struct ucred: signed pid_t, unsigned uid_t/gid_t in native byte
+        # order. No PID lookup, process-name guess or same-UID daemon fallback.
+        credentials = struct.Struct('=iII')
+        try:
+            raw = self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                       credentials.size)
+        except OSError:
+            raise NativeSocketError('native_socket_peer_credentials_unavailable') from None
+        if not isinstance(raw, bytes) or len(raw) != credentials.size:
+            raise NativeSocketError('native_socket_peer_credentials_invalid')
+        try:
+            pid, uid, _ = credentials.unpack(raw)
+        except struct.error:
+            raise NativeSocketError('native_socket_peer_credentials_invalid') from None
+        if pid <= 0:
+            raise NativeSocketError('native_socket_peer_credentials_invalid')
+        if (pid, uid) != (expected_pid, expected_uid):
+            raise NativeSocketError('native_socket_peer_identity_mismatch')
 
     @staticmethod
     def _remaining(deadline):

@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from .config import discover_codex_auth, private_json
-from .native_ws import NativeSocketError, UnixWebSocket
+from .native_ws import NativeSocketError, UnixWebSocket, _private_socket
 
 
 class CodexError(ValueError):
@@ -103,7 +103,10 @@ class Codex:
             raise CodexError('codex_native_transport_unsupported')
         self._native_socket = None
         self._socket_directory = None
+        self._socket_directory_identity = None
         self._socket_path = None
+        self._socket_binding = None
+        self._socket_target = None
         self._native_cleanup_forced = self._reader_forced_close = self._term_sent = False
         root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
         env = os.environ.copy()
@@ -135,6 +138,9 @@ class Codex:
         command += ['-c', 'tools.update_plan.enabled=' + ('true' if native_plan else 'false')]
         if self.transport_name == 'unix':
             self._socket_directory = tempfile.mkdtemp(prefix='pa-mesh-codex-')
+            directory_entry = os.lstat(self._socket_directory)
+            self._socket_directory_identity = (directory_entry.st_dev, directory_entry.st_ino,
+                                               directory_entry.st_uid, directory_entry.st_mode)
             self._socket_path = os.path.join(self._socket_directory, 'app.sock')
             command += ['app-server', '--listen', 'unix://' + self._socket_path]
         else:
@@ -168,19 +174,81 @@ class Codex:
             if time.monotonic() >= deadline:
                 raise CodexError('codex_native_transport_start_timeout')
             time.sleep(.05)
-        entry = os.lstat(self._socket_path)
-        if not stat.S_ISSOCK(entry.st_mode) or entry.st_uid != os.geteuid():
-            raise CodexError('codex_native_transport_path_unsafe')
-        # The newly spawned server may inherit a permissive umask. Tighten only
-        # its socket inside our 0700 directory; never the owner's global umask.
-        os.chmod(self._socket_path, 0o600)
-        current = os.lstat(self._socket_path)
-        if (entry.st_dev, entry.st_ino) != (current.st_dev, current.st_ino):
-            raise CodexError('codex_native_transport_path_unsafe')
+        target, binding = self._native_socket_binding()
+        self._socket_binding = binding
+        self._socket_target = target
+        if self.process.poll() is not None:
+            raise CodexError('codex_native_transport_start_failed')
         try:
-            self._native_socket = UnixWebSocket(self._socket_path, timeout=max(.01, deadline - time.monotonic()))
+            self._native_socket = UnixWebSocket(
+                target, timeout=max(.01, deadline - time.monotonic()),
+                expected_peer_pid=self.process.pid, expected_peer_uid=os.geteuid())
+            if self._native_socket_binding() != (target, binding):
+                raise CodexError('codex_native_transport_path_unsafe')
+            if self.process.poll() is not None:
+                raise CodexError('codex_native_transport_start_failed')
         except (NativeSocketError, socket.timeout, EOFError):
             raise CodexError('codex_native_transport_connect_failed') from None
+
+    def _native_socket_binding(self):
+        """Accept only this owned runtime's official, deterministic Unix alias.
+
+        Codex 0.159.2/0.162 bind a protected physical socket and advertise a
+        symlink. General UnixWebSocket still rejects symlinks. Never chmod,
+        connect through, or clean a shared target via an arbitrary alias.
+        """
+        def identity(entry):
+            return (entry.st_dev, entry.st_ino, entry.st_uid,
+                    stat.S_IMODE(entry.st_mode), entry.st_ctime_ns)
+        try:
+            path = self._socket_path
+            directory = os.path.dirname(path)
+            if (not isinstance(path, str) or not os.path.isabs(path)
+                    or directory != self._socket_directory
+                    or os.path.basename(path) != 'app.sock'
+                    or os.path.normpath(path) != path
+                    or os.path.realpath(directory) != directory):
+                raise CodexError('codex_native_transport_path_unsafe')
+            uid = os.geteuid()
+            parents, parent = [], directory
+            while True:
+                entry = os.lstat(parent)
+                if (not stat.S_ISDIR(entry.st_mode) or entry.st_uid not in (0, uid)
+                        or (entry.st_mode & 0o022 and not entry.st_mode & stat.S_ISVTX)):
+                    raise CodexError('codex_native_transport_path_unsafe')
+                parents.append((parent, identity(entry)[:4]))
+                if parent == '/':
+                    break
+                parent = os.path.dirname(parent)
+            final_parent = os.lstat(directory)
+            directory_identity = (final_parent.st_dev, final_parent.st_ino,
+                                  final_parent.st_uid, final_parent.st_mode)
+            if (directory_identity != self._socket_directory_identity
+                    or final_parent.st_uid != uid or stat.S_IMODE(final_parent.st_mode) != 0o700):
+                raise CodexError('codex_native_transport_path_unsafe')
+            entry = os.lstat(path)
+            if entry.st_uid != uid:
+                raise CodexError('codex_native_transport_path_unsafe')
+            if stat.S_ISLNK(entry.st_mode):
+                digest = hashlib.sha256(os.fsencode(path)).hexdigest()
+                target = os.path.join(os.path.realpath('/tmp'), 'codex-daemon-' + str(uid), digest)
+                if os.readlink(path) != target:
+                    raise CodexError('codex_native_transport_path_unsafe')
+            elif stat.S_ISSOCK(entry.st_mode):
+                target = path
+            else:
+                raise CodexError('codex_native_transport_path_unsafe')
+            _, target_identity = _private_socket(target)
+            target_entry = os.lstat(target)
+            if stat.S_IMODE(target_entry.st_mode) != 0o600:
+                raise CodexError('codex_native_transport_path_unsafe')
+            target_parent = os.lstat(os.path.dirname(target))
+            return target, (tuple(parents), identity(entry), target_identity,
+                            identity(target_entry), identity(target_parent)[:4])
+        except (OSError, NativeSocketError, TypeError, ValueError) as exc:
+            if isinstance(exc, CodexError):
+                raise
+            raise CodexError('codex_native_transport_path_unsafe') from None
 
     def _read(self):
         try:
@@ -910,16 +978,31 @@ class Codex:
                     self._reader_forced_close = True
             if self._native_socket is not None:
                 self._native_socket.close()
-            # Retain unknown cleanup's private path. Ordinary cleanup removes
-            # only our exact socket and otherwise-empty temporary directory.
-            if not self._native_cleanup_forced and not self._reader_forced_close:
+            # Retain unknown cleanup's private path. Never delete the shared
+            # physical socket/lock; the native owner cleans those itself.
+            if (not self._native_cleanup_forced and not self._reader_forced_close
+                    and (process is None or process.poll() == 0)):
                 try:
-                    if self._socket_path and os.path.lexists(self._socket_path):
-                        entry = os.lstat(self._socket_path)
-                        if stat.S_ISSOCK(entry.st_mode) and entry.st_uid == os.geteuid():
+                    binding = getattr(self, '_socket_binding', None)
+                    if binding and self._socket_path and os.path.lexists(self._socket_path):
+                        # The target may already be removed by native Drop, so
+                        # check only the alias and its immediate owned parent.
+                        entry, parent = os.lstat(self._socket_path), os.lstat(os.path.dirname(self._socket_path))
+                        current = (entry.st_dev, entry.st_ino, entry.st_uid,
+                                   stat.S_IMODE(entry.st_mode), entry.st_ctime_ns)
+                        parent_identity = (parent.st_dev, parent.st_ino, parent.st_uid,
+                                           stat.S_IMODE(parent.st_mode), parent.st_ctime_ns)
+                        # Parent ctime changes when native Drop removes the
+                        # alias; inode/owner/mode, not directory ctime, fence it.
+                        alias_matches = (not stat.S_ISLNK(entry.st_mode)
+                                         or os.readlink(self._socket_path) == self._socket_target)
+                        if current == binding[1] and parent_identity[:4] == binding[0][0][1] and alias_matches:
                             os.unlink(self._socket_path)
                     if self._socket_directory:
-                        os.rmdir(self._socket_directory)
+                        entry = os.lstat(self._socket_directory)
+                        identity = (entry.st_dev, entry.st_ino, entry.st_uid, entry.st_mode)
+                        if identity == self._socket_directory_identity:
+                            os.rmdir(self._socket_directory)
                 except OSError:
                     pass
             return
