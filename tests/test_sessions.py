@@ -34,6 +34,19 @@ class SessionTests(unittest.TestCase):
         self.assertEqual('native-id', second['session']['state']['thread_id'])
         self.assertEqual('leader:owner', second['scope'])
 
+    def test_commit_ack_explicitly_confirms_current_scope_and_artifact(self):
+        state = {'thread_id': 'original-thread', 'side_effect_started': True}
+        ack = sessions.save(self, self.task, 'n', 'codex', state)
+        self.assertEqual({'ok': True, 'scope': self.task['scope'], 'saved': True,
+                          'artifact_saved': False}, ack)
+        self.store.session_action(self.task['id'], 'n', self.task['epoch'], 'upload',
+            {'harness': 'codex', 'part': 0, 'data': base64.b64encode(b'private native bytes').decode()})
+        ack = self.store.session_action(self.task['id'], 'n', self.task['epoch'], 'commit',
+            {'harness': 'codex', 'state': state, 'parts': 1})
+        self.assertIs(True, ack['ok'])
+        self.assertIs(True, ack['artifact_saved'])
+        self.assertEqual(self.task['scope'], ack['scope'])
+
     def test_scope_does_not_allow_concurrent_native_turns(self):
         self.store.create_task('second')
         self.assertIsNone(self.store.claim('n'))

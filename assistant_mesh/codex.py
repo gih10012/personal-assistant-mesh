@@ -98,6 +98,11 @@ class Codex:
             raise ValueError('invalid_native_plan_tool_flag')
         if not isinstance(config.get('native_goal_drain', False), bool):
             raise CodexError('invalid_native_goal_drain_flag')
+        if not isinstance(config.get('native_goal_yield', False), bool):
+            raise CodexError('invalid_native_goal_yield_flag')
+        if config.get('native_goal_yield') is True and (
+                config.get('native_goal_drain') is not True or config.get('native_transport') != 'unix'):
+            raise CodexError('codex_native_yield_configuration_invalid')
         self.native_drain_active = False
         self._socket_owner_verified = False
         self._native_started_turns = set()
@@ -905,7 +910,7 @@ class Codex:
             self._native_drain_idle = status['type'] == 'idle'
         value['_mesh_drain_observed'] = True
 
-    def _begin_native_goal_drain(self):
+    def _begin_native_goal_drain(self, tick=None, deadline=None):
         if self.config.get('native_goal_drain') is not True:
             raise CodexError('codex_goal_coordination_yield_unavailable')
         if (getattr(self, 'transport_name', 'stdio') != 'unix'
@@ -920,6 +925,32 @@ class Codex:
         if self.process.poll() is not None:
             raise CodexError('codex_native_runtime_exit_unknown')
         self.native_drain_active = True  # Gate optional steer BEFORE the forced tick.
+
+        def check_deadline():
+            if deadline is not None and time.monotonic() >= deadline:
+                raise CodexError('codex_native_drain_timeout')
+
+        def capture_tick():
+            check_deadline()
+            if tick:
+                tick()
+            check_deadline()
+
+        check_deadline()
+        if self.config.get('native_goal_yield') is True:
+            from .native_goal_observer import validate_goal_continuity
+            from .native_history import capture_prefix
+            goal = copy.deepcopy(self.native_lifecycle.get('goal'))
+            validate_goal_continuity(goal, goal, self.thread_id)
+            if (goal['status'] != 'active'
+                    or goal['objective'] != self.native_lifecycle.get('expected_goal_objective')):
+                raise CodexError('codex_native_goal_continuity_unverified')
+            # No RPC after the admission gate; this was returned by the original
+            # thread/start or resume, not a guessed account-wide session path.
+            prefix = capture_prefix(getattr(self, 'rollout_path', None), self.thread_id, tick=capture_tick)
+            check_deadline()
+            self.native_lifecycle['pre_drain_goal'] = goal
+            self.native_lifecycle['history_prefix'] = prefix
         intent = {'status': 'intent', 'pid': self.process.pid, 'thread_id': self.thread_id,
                   'turn_id': self.turn_id, 'signal': 'SIGTERM'}
         lifecycle = self.native_lifecycle
@@ -929,6 +960,7 @@ class Codex:
                 or ack.get('pid') != self.process.pid or ack.get('thread_id') != self.thread_id):
             intent['status'] = 'unknown'
             raise CodexError('codex_native_drain_intent_unconfirmed')
+        check_deadline()
         if self.process.poll() is not None:
             intent['status'] = 'unknown'
             raise CodexError('codex_native_runtime_exit_unknown')
@@ -1059,7 +1091,7 @@ class Codex:
         while time.monotonic() < deadline:
             if (lifecycle['goal_managed'] and yield_requested and yield_requested()
                     and (lifecycle.get('goal') or {}).get('status') == 'active'):
-                self._begin_native_goal_drain()
+                self._begin_native_goal_drain(tick=tick, deadline=deadline)
                 return self._pump_native_goal_drain(replies, tick, deadline)
             if tick:
                 tick()
@@ -1088,6 +1120,78 @@ class Codex:
         if not lifecycle['goal_managed']:
             self.interrupt()
         raise CodexError('codex_turn_timeout')
+
+    def seal_native_yield(self, tick=None, timeout=30):
+        """Independently verify the original goal/history; never resume it.
+
+        This is separate from terminal seal, default disabled, and does not
+        release the worker's effect guard or commit its native artifact.
+        """
+        from .native_goal_observer import observe_native_yield, validate_goal_continuity
+        from .native_history import verify_history
+        if self.config.get('native_goal_yield') is not True:
+            raise CodexError('codex_native_yield_seal_required')
+        if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
+                or not math.isfinite(timeout) or timeout <= 0):
+            raise CodexError('codex_native_observer_timeout')
+        lifecycle = self.native_lifecycle
+        evidence, intent = lifecycle.get('drain_evidence'), lifecycle.get('drain_intent')
+        closed = self._native_started_turns
+        if (lifecycle.get('outcome') != 'drained_unverified'
+                or lifecycle.get('settled') is not False or lifecycle.get('runtime_closed') is not True
+                or lifecycle.get('thread_id') != self.thread_id
+                or self.native_drain_active is not True or self._socket_owner_verified is not True
+                or self.transport_name != 'unix' or self._term_sent is not True
+                or self.process.poll() != 0 or self.reader.is_alive()
+                or self._native_cleanup_forced or self._reader_forced_close
+                or not self._native_drain_eof or not self._native_drain_idle
+                or self.deferred or not self.events.empty() or self._rpc_pending
+                or getattr(self, '_pending_goal_input', None) is not None
+                or getattr(self, '_held_host_requests', [])
+                or any(value.get('status') != 'responded' for value in self._native_host_receipts.values())
+                or not closed or set(self._native_completion_statuses) != closed
+                or any(value != 'completed' for value in self._native_completion_statuses.values())
+                or not isinstance(intent, dict) or intent.get('status') != 'sent'
+                or intent.get('pid') != self.process.pid or intent.get('thread_id') != self.thread_id
+                or not isinstance(evidence, dict) or evidence.get('pid') != self.process.pid
+                or evidence.get('natural_exit_code') != 0 or evidence.get('reader_eof') is not True
+                or evidence.get('idle_observed') is not True
+                or evidence.get('started_turn_ids') != sorted(closed)
+                or evidence.get('natural_completion_statuses') != self._native_completion_statuses):
+            raise CodexError('codex_native_yield_seal_invalid')
+        baseline, prefix = lifecycle.get('pre_drain_goal'), lifecycle.get('history_prefix')
+        validate_goal_continuity(baseline, baseline, self.thread_id)
+        if (baseline['status'] != 'active' or baseline['objective'] != lifecycle.get('expected_goal_objective')
+                or not isinstance(prefix, dict) or prefix.get('path') != self.rollout_path):
+            raise CodexError('codex_native_yield_seal_invalid')
+        deadline = time.monotonic() + timeout
+
+        def checked_tick():
+            if tick:
+                tick()
+            if time.monotonic() >= deadline:
+                raise CodexError('codex_native_observer_timeout')
+
+        checked_tick()
+        # Reap again is harmless; this is our original owned Popen, never a PID
+        # rediscovered after the fact or another live process in the account.
+        self.process.wait(timeout=0)
+        config = dict(self.config, auth_home=self.auth_home, strict_auth_home=True)
+        observed = observe_native_yield(config, self.thread_id, prefix['path'],
+                                       baseline, closed, checked_tick, deadline)
+        frozen = verify_history(prefix['path'], self.thread_id, prefix, closed, tick=checked_tick)
+        checked_tick()
+        goal = validate_goal_continuity(baseline, observed['goal'], self.thread_id)
+        settled = copy.deepcopy(lifecycle)
+        settled.update(goal=goal, thread_status=observed['thread_status'],
+            independent_observer=observed['independent_observer'],
+            history_proof={'path': frozen['path'], 'fingerprint': frozen['fingerprint'],
+                           'prefix_preserved': True, 'turns_verified': sorted(closed)},
+            outcome='yielded' if goal['status'] == 'active' else 'terminal',
+            runtime_closed=True, settled=True, quiescent=True)
+        self.native_lifecycle = settled
+        return {'path': frozen['path'], 'fingerprint': copy.deepcopy(frozen['fingerprint']),
+                'lifecycle': copy.deepcopy(settled)}
 
     def seal_native_lifecycle(self):
         """Fence/reap a quiescent goal runtime before releasing Mesh effects.

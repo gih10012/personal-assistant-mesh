@@ -1,7 +1,7 @@
 # 原生 goal 交接前置合同（PAM-007c）
 
-2026-10-10 源码候选。它补齐输入回执、可选传输、scope 归属和 opt-in drain，**没有
-启用正式 active goal yield**。运行期仍为冻结 `3198c87`。既有私有
+2026-10-10 源码候选。它补齐输入回执、可选传输、scope 归属、opt-in drain
+及独立 goal/history seal，**没有启用正式 active goal yield**。运行期仍为冻结 `3198c87`。既有私有
 resume 失败的原 thread、active goal、历史与 unknown 均保留，不重放。
 
 ## 新输入不是 resume 配置
@@ -155,8 +155,12 @@ guard。33 项新 fixture 通过；并非原生 goal/history 独立 seal，不
 loaded list空、自然0/reader回收，无强杀。没有start/resume/model/goal
 写入；正式核心代码/PID保持3198c87，没有部署或启用候选。
 
-`PAM-007c-3`：新增独立 yielded seal，不放宽 terminal seal。原运行器
-回收后，新 observer 只 initialize/read goal/read thread/loaded list，
+`PAM-007c-3` 已实现默认关闭的独立 yielded seal，不放宽 terminal seal。
+配置 `native_goal_yield=true` 必须同时选择 verified Unix 和
+`native_goal_drain=true`；这不是正式配置的建议启用指令。TERM 前先
+保留实际 goal baseline 和 owned 原 rollout 有限前缀，允许 writer
+追加及后续半行；捕获/意图 ACK 过期不能再发送 drain signal。
+原运行器回收后，新 observer 只 initialize/read goal/read thread/loaded list/turns list，
 不 start/resume/steer 或写 goal；前后核对原 thread 都未加载，注意
 notLoaded 不等于原进程 idle。核对同 objective/createdAt、预算与用量
 未重置、所有自然完成 turn 及稳定完整的 owned 原生历史；观察 RPC
@@ -164,9 +168,33 @@ notLoaded 不等于原进程 idle。核对同 objective/createdAt、预算与用
 runtime_closed/settled，原 goal 仍 active。若 goal 自然变成实际终态，
 尊重它并走原终态路径，不写回 active。
 
-`PAM-007c-4`：Worker 使用 seal 返回的冻结历史，不在 close 后调用
+`thread/read(false)` 后用 `thread/turns/list(asc,full)` 穷尽分页，拒绝
+cursor 环、重复 ID、缺页和 summary/notLoaded；两版官方 schema
+对缺省 itemsView 定义 full。只有明确 -32601 missing method 才尝试
+实际 legacy full read，不能将超时/其它失败降成空历史。前后 metadata、
+goal 和 unloaded 观察一致；独立 observer 自身亦须自然 0/EOF/reap。
+[官方 goal 接口](https://learn.chatgpt.com/docs/app-server#manage-a-thread-goal)
+与 [0.159.2 turn schema](https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/app-server-protocol/schema/json/v2/ThreadTurnsListResponse.json)。
+
+`native_history` 只读同一 owned regular JSONL，检查完整字节前缀、
+文件/祖先身份、全文件 hash/metadata 及本轮 start/natural complete；
+支持官方 task/turn event aliases，error 或 abort 不能被后来 complete
+掩盖。旧无关失败与 compaction 原样保留，不生成摘要。单条 record
+超过16MiB或非支持布局只拒绝该严格 seal，不截断或限制原生能力；
+缺少 nofollow/openat 由节点按合同适配。不是防恶意同 UID writer 的锁。
+
+`PAM-007c-4` 的 Worker 接入已实现为 opt-in 源码，真实模型等待/唤醒
+往返尚待验收。Worker 使用 seal 返回的冻结历史，不在 close 后调用
 `native_rollout()` 产生新 RPC。原 guard 持续为 true，直到独立核验和
 session/artifact commit 完成，才在原 task/epoch 的最终 update 中同时
 写完整 yielded seal、false guard 和 waiting_children。children 提前
 完成由既有 Store 唤醒原 row/new epoch，不另建 continuation task。
 旧私有 stage-two unknown 不作为这个新合同的可重启测试数据。
+
+严格分支 upload/commit 期间 task 和 native session guard 都为 true，
+commit 必须明确 ok/saved/artifact_saved/scope；Store additive ok ACK
+保留旧字段，但旧 server 无此 ACK 时本分支不能静默放行。最终同 epoch
+update 也须 ACK；回复丢失可能已经写入 authority，必须读回原行对账，
+不靠本地布尔断言或重试 finalize。自然 terminal 优先真实 status，不
+因 wait_children 隐式续跑。这里只证明受控 Codex admission/历史边界，
+不声称已停止任意 detached Shell/MCP 外部效果、达成全局 HA 或入网 Chat/Cloud。

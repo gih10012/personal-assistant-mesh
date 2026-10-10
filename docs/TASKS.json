@@ -691,14 +691,14 @@
         {"id": "PAM-007b", "title": "同任务租约绑定的原生goal多turn控制器", "state": "source_candidate_validated",
          "owner": "root+native_goal_adapter", "depends_on": ["PAM-007a"],
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
-        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "handoff_prerequisites_source_implemented_yield_incomplete",
+        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "independent_seal_and_worker_source_implemented_runtime_roundtrip_unverified",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "007c-2源码58fac34两端1510项/CI及opt-in零模型idle通过，候选未部署，原guard与unknown保留。继续007c-3独立yielded seal，然后新受控canary实际drain和007c-4原父task/thread/goal等待唤醒roundtrip；不重放私有unknown，不冒称生产lease/children交接已验收",
+         "next_action": "007c-3独立observer/history与007c-4 Worker严格commit/final ACK源码已实现默认关闭，81新fixtures；先同份冻结源码双端/CI验证，再新受控adapter canary及原父task/thread/goal等待唤醒roundtrip，候选未部署、原unknown保留，Chat/Cloud仍未入网",
          "implementation_slices": [
            {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
            {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "source_candidate_two_host_ci_idle_verified_active_drain_unverified", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "58fac34同一冻结源码两端1510项/CI与opt-in零模型idle已核验，默认false、未部署；23 drain与6 Worker新fixture保留drained_unverified/false settled/原guard。原e229651实机失败保留。接007c-3独立seal后以新受控canary验真实active drain，不借旧私有probe、未知原trial不重放"},
-           {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "planned_with_optional_frozen_file_upload_prerequisite", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "sessions.save可选expected_fingerprint严格三阶段同FD与实际压缩字节校验已实现，33新fixture通过，默认未启用；这不制造goal/history证据。接独立observer核对同goal/连续用量、closed turns与稳定原生历史，outcome yielded独立于terminal seal，证据+artifact commit齐全后才清guard"},
-           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "先受控specialist合同实测，再原Leader正式启用；按原task/thread/goal/counters续接，最后child唤醒原task；未知原trial不重放、不用新ID伪称修复"}
+           {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "source_implemented_default_disabled_pending_frozen_validation_and_actual_canary", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "40 history+19 observer+7seal新fixture通过；同实际goal baseline/有限prefix/owned原runtime closure，独立只读全页turns和稳定JSONL，默认native_goal_yield false。冻结双端/CI后新受控实际canary验原active goal无reset及完整历史，不重放旧unknown"},
+           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "worker_source_implemented_default_disabled_runtime_roundtrip_unverified", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "14 Worker+1 Store ACK新fixtures涵盖真实Store提前child完成/new epoch，仍不是实机原生交接。严格history commit前guard true、原task/epoch最终ACK后才等待；自然终态不隐式续跑。待adapter canary后原父等待唤醒同goal roundtrip；未知原trial不重放"}
          ]},
         {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
@@ -726,7 +726,7 @@
     }
   ],
   "current_work": {
-    "phase": "PAM-007c-2 58fac34 frozen two-host 1510/CI and opt-in zero-model idle 0.162/0.159.2 verified; source candidate only, default disabled; next 007c-3 independent goal/history seal, then active drain canary and 007c-4 original task/goal child roundtrip; original unknown retained; Chat/Cloud still not joined",
+    "phase": "PAM-007c-3 independent observer/history and 007c-4 strict Worker handoff implemented default disabled; 81 new fixtures; frozen two-host/CI and actual canary pending; original unknown retained, production unchanged, Chat/Cloud still not joined",
     "whole_goal_completed": false
   }
 }

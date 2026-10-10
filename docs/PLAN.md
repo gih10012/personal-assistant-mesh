@@ -299,11 +299,22 @@ owned-peer initialize、loaded list空、自然0及reader回收，无强杀。
 候选未部署、drain默认false、严格fingerprint默认None；正式核心
 PID/NRestarts/原codex.py哈希保持3198c87。新 adapter 未启动模型或
 active goal，不能把此验收当真实active drain或父子交接已完成。
-下一切片按固定 task ID 推进：`007c-3` 自然回收后的独立同 goal/用量/
+此前下一切片按固定 task ID 推进：`007c-3` 自然回收后的独立同 goal/用量/
 turns/历史核验与独立 yielded seal；`007c-4` 原父 task 等待/唤醒、新 epoch
 同 thread/goal 输入真实往返。未核验不能清 guard，stdio 仍明确未支持。
 详见 [输入与归属前置合同](NATIVE-INPUT-HANDOFF.md)。
 详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。
+
+当前 `007c-3` 与 `007c-4` Worker 接入已实现默认关闭的源码：实际 goal
+baseline、同文件有限前缀、独立 readonly observer 的完整分页/同目标
+预算和累计用量、不加载原 thread、自身自然退出、稳定完整 JSONL。
+父 task/epoch 的 guard 在冻结历史 upload/commit 明确 ACK 之前保持；
+自然终态优先，不重设 goal/用量，不发 post-close RPC。新增40 history、
+19 observer、7 Codex seal、14 Worker、1 Store ACK fixtures（共81项）；
+双端冻结验证、CI与新受控实际 canary分别记录，不能以 fixtures冒充运行验收。
+正式配置仍未启用，原私有 unknown 保留。下一步为新受控 adapter drain/
+independent seal，再原父 task/同 goal 等待唤醒的真实 roundtrip；Chat 原生
+tools/OAuth 与 Codex Cloud job/node 仍未入网。
 
 正式 laptop worker/node 原先直接以开发仓库为工作目录，重启可能误载
 候选。已保留一致账本与单位配置，改为私有冻结 `3198c87` 版本目录；

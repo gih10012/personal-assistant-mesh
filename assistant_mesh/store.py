@@ -830,7 +830,7 @@ class Store:
                         artifact = None
                 db.execute('INSERT OR REPLACE INTO native_sessions VALUES(?,?,?,?,?,?)',
                     (row['scope'], node, harness, json.dumps(state), artifact, self.clock()))
-                return {'scope': row['scope'], 'saved': True, 'artifact_saved': bool(count)}
+                return {'ok': True, 'scope': row['scope'], 'saved': True, 'artifact_saved': bool(count)}
             if action == 'download':
                 if not session or not session['artifact']:
                     raise ValueError('native_session_artifact_unavailable')

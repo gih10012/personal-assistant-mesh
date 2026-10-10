@@ -32,6 +32,15 @@ _SESSION_FAILURES = frozenset((
     'native_session_fingerprint_invalid', 'native_session_fingerprint_unsupported',
     'native_session_fingerprint_path_unsafe', 'native_session_fingerprint_changed',
     'native_session_fingerprint_rollout_required'))
+_HISTORY_FAILURES = frozenset((
+    'native_history_path_unsafe', 'native_history_thread_invalid',
+    'native_history_unsupported', 'native_history_unstable',
+    'native_history_identity_changed', 'native_history_prefix_changed',
+    'native_history_jsonl_invalid', 'native_history_metadata_invalid',
+    'native_history_record_oversized', 'native_history_metadata_incomplete',
+    'native_history_prefix_invalid', 'native_history_turns_invalid',
+    'native_history_turn_unsettled', 'native_history_turn_aborted',
+    'native_history_jsonl_incomplete'))
 _NATIVE_FAILURES = frozenset((
     'codex_auth_required', 'pi_auth_required', 'codex_usage_limit_exceeded',
     'no_local_backend_available',
@@ -64,13 +73,23 @@ _NATIVE_FAILURES = frozenset((
     'codex_native_drain_transport_unverified', 'codex_native_drain_boundary_unknown',
     'codex_native_drain_signal_unknown', 'codex_native_drain_timeout',
     'codex_native_yield_seal_required',
+    'codex_native_yield_seal_invalid', 'codex_native_yield_commit_unconfirmed',
+    'codex_native_yield_finalize_unconfirmed',
+    'codex_native_yield_fence_unconfirmed',
+    'invalid_native_goal_yield_flag', 'codex_native_yield_configuration_invalid',
+    'codex_native_observer_boundary_unknown', 'codex_native_observer_pagination_invalid',
+    'codex_native_observer_rpc_blocked', 'codex_native_observer_snapshot_changed',
+    'codex_native_observer_snapshot_invalid', 'codex_native_observer_thread_loaded',
+    'codex_native_observer_timeout', 'codex_native_observer_turn_unsettled',
+    'codex_native_observer_unexpected_work',
     'pi_model_configuration_required', 'pi_mesh_grant_required', 'pi_timeout',
     'pi_disconnected', 'pi_resume_cancelled', 'pi_prompt_not_started',
     'pi_turn_failed', 'pi_turn_timeout')) | frozenset(
     'codex_rpc_failed_' + method for method in (
         'initialize', 'account_read', 'account_rateLimits_read', 'model_list',
         'thread_resume', 'thread_start', 'thread_goal_set', 'thread_goal_get',
-        'thread_read', 'turn_start', 'turn_steer', 'turn_interrupt')) | frozenset(
+        'thread_read', 'thread_loaded_list', 'thread_turns_list',
+        'turn_start', 'turn_steer', 'turn_interrupt')) | frozenset(
     'pi_rpc_failed_' + method for method in ('get_state', 'switch_session', 'prompt', 'steer'))
 
 
@@ -79,6 +98,7 @@ def _runtime_failure_code(exc, phase):
     code = str(exc)
     if ((phase == 'native_restore' and code in _RESTORE_FAILURES)
             or (phase == 'session_save' and code in _SESSION_FAILURES)
+            or (phase in ('native_finish', 'native_yield_seal') and code in _HISTORY_FAILURES)
             or (isinstance(exc, CodexError) and code in _NATIVE_FAILURES)):
         return code
     return 'worker_unavailable'
@@ -688,12 +708,14 @@ class Worker:
             self.current['checkpoint']['plan'] = value
             self.tick(force=True)
 
-    def tick(self, force=False):
+    def tick(self, force=False, require_ack=False):
         if force or time.monotonic() - self.last_tick >= 15:
             self.heartbeat()
             if self.current:
-                self.client.request('/v1/task/update', {'id': self.current['id'], 'epoch': self.current['epoch'],
-                                                       'checkpoint': self.current['checkpoint']})
+                receipt = self.client.request('/v1/task/update', {'id': self.current['id'], 'epoch': self.current['epoch'],
+                                                               'checkpoint': self.current['checkpoint']})
+                if require_ack and (not isinstance(receipt, dict) or receipt.get('ok') is not True):
+                    raise CodexError('codex_native_yield_fence_unconfirmed')
             self.last_tick = time.monotonic()
             # Optional steering must not nest a native RPC while a tool/question
             # handler is servicing another request. Heartbeat/fencing still run.
@@ -798,6 +820,108 @@ class Worker:
                         self.current['checkpoint']['mesh_steering_status'] = dict(self._steering_status)
                     self.polling_steering = False
 
+    def _native_yield_tick(self, force=False):
+        # Only this opt-in observer/upload path additionally requires explicit
+        # task-fence ACKs; unrelated native tool and heartbeat behavior stays
+        # unchanged. Periodic calls keep the normal 15-second cadence.
+        return self.tick(force=force, require_ack=True)
+
+    def _checked_native_yield_seal(self, agent, drained, value):
+        """Require this exact runtime's independently generated handoff proof.
+
+        This checks the adapter's evidence contract, not physical attestation
+        from isolated booleans. No file/goal repair, RPC, or replay happens here.
+        """
+        from .native_goal_observer import validate_goal_continuity
+        thread = self.current['checkpoint'].get('thread_id')
+        config = getattr(agent, 'config', None)
+        if (not isinstance(value, dict) or not isinstance(config, dict)
+                or config.get('native_goal_drain') is not True
+                or config.get('native_transport') != 'unix'
+                or config.get('native_goal_yield') is not True
+                or not isinstance(thread, str) or not thread
+                or drained.get('thread_id') != thread
+                or drained.get('outcome') != 'drained_unverified'
+                or drained.get('runtime_closed') is not True
+                or drained.get('settled') is not False
+                or self.current['checkpoint'].get('side_effect_started') is not True):
+            raise CodexError('codex_native_yield_seal_invalid')
+        path, fingerprint, lifecycle = (value.get(key) for key in ('path', 'fingerprint', 'lifecycle'))
+        if (not isinstance(path, str) or not path or not os.path.isabs(path)
+                or not isinstance(fingerprint, dict)
+                or set(fingerprint) != {'dev', 'ino', 'uid', 'mode', 'size', 'sha256', 'mtime_ns', 'ctime_ns'}
+                or not isinstance(lifecycle, dict)
+                or lifecycle != getattr(agent, 'native_lifecycle', None)
+                or lifecycle.get('thread_id') != thread
+                or any(lifecycle.get(key) is not True for key in
+                       ('controller_enabled', 'goal_managed', 'runtime_closed', 'settled', 'quiescent'))
+                or not isinstance(lifecycle.get('thread_status'), dict)
+                or lifecycle.get('thread_status', {}).get('type') != 'notLoaded'
+                or lifecycle.get('drain_evidence') != drained.get('drain_evidence')
+                or lifecycle.get('drain_intent') != drained.get('drain_intent')
+                or not isinstance(drained.get('history_prefix'), dict)
+                or lifecycle.get('history_prefix') != drained['history_prefix']
+                or drained['history_prefix'].get('path') != path
+                or lifecycle.get('pre_drain_goal') != drained.get('pre_drain_goal')):
+            raise CodexError('codex_native_yield_seal_invalid')
+        # Use the upload module's same schema rather than an independently
+        # invented hash convention. The actual file is checked during save.
+        try:
+            fingerprint = sessions._expected_fingerprint(fingerprint)
+        except ValueError:
+            raise CodexError('codex_native_yield_seal_invalid') from None
+        evidence, intent = drained.get('drain_evidence'), drained.get('drain_intent')
+        if not isinstance(evidence, dict) or not isinstance(intent, dict):
+            raise CodexError('codex_native_yield_seal_invalid')
+        persisted = self.current['checkpoint'].get('native_drain_intent')
+        started = evidence.get('started_turn_ids')
+        pid = evidence.get('pid')
+        if (not isinstance(started, list) or not started
+                or any(not isinstance(turn, str) or not turn for turn in started)
+                or len(set(started)) != len(started)
+                or evidence.get('natural_completion_statuses') != {turn: 'completed' for turn in started}
+                or type(evidence.get('natural_exit_code')) is not int
+                or evidence['natural_exit_code'] != 0
+                or evidence.get('reader_eof') is not True
+                or evidence.get('idle_observed') is not True
+                or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0
+                or intent.get('pid') != pid or intent.get('thread_id') != thread
+                or intent.get('status') != 'sent' or intent.get('signal') != 'SIGTERM'
+                or pid != getattr(getattr(agent, 'process', None), 'pid', None)
+                or not isinstance(persisted, dict) or persisted.get('pid') != pid
+                or persisted.get('thread_id') != thread
+                or persisted.get('task_id') != self.current['id']
+                or persisted.get('task_epoch') != self.current['epoch']):
+            raise CodexError('codex_native_yield_seal_invalid')
+        observer, history = lifecycle.get('independent_observer'), lifecycle.get('history_proof')
+        if (not isinstance(observer, dict) or observer.get('thread_id') != thread
+                or not isinstance(observer.get('pid'), int) or isinstance(observer.get('pid'), bool)
+                or observer['pid'] <= 0 or observer['pid'] == pid
+                or type(observer.get('natural_exit_code')) is not int
+                or observer['natural_exit_code'] != 0
+                or any(observer.get(key) is not True for key in
+                       ('reader_eof', 'unloaded_before', 'unloaded_after', 'read_only'))
+                or observer.get('turns_verified') != started
+                or not isinstance(history, dict) or history.get('path') != path
+                or history.get('fingerprint') != fingerprint
+                or history.get('prefix_preserved') is not True
+                or history.get('turns_verified') != started):
+            raise CodexError('codex_native_yield_seal_invalid')
+        goal, previous = lifecycle.get('goal'), drained.get('pre_drain_goal')
+        terminal = ('complete', 'paused', 'blocked', 'budgetLimited', 'usageLimited')
+        if (not isinstance(goal, dict) or not isinstance(previous, dict)
+                or previous.get('status') != 'active'
+                or lifecycle.get('expected_goal_objective') != previous.get('objective')
+                or ((lifecycle.get('outcome'), goal.get('status')) != ('yielded', 'active')
+                    and not (lifecycle.get('outcome') == 'terminal' and goal.get('status') in terminal))
+                or (lifecycle.get('outcome') == 'yielded' and not self.wait_children)):
+            raise CodexError('codex_native_yield_seal_invalid')
+        try:
+            validate_goal_continuity(previous, goal, thread)
+        except CodexError:
+            raise CodexError('codex_native_yield_seal_invalid') from None
+        return {'path': path, 'fingerprint': fingerprint, 'lifecycle': copy.deepcopy(lifecycle)}
+
     def run_once(self):
         self.tick(force=True)
         task = self.client.request('/v1/claim', {})['task']
@@ -858,15 +982,36 @@ class Worker:
                 answer = agent.finish(**finish_options)
                 self._native_turn_live = False
                 lifecycle = getattr(agent, 'native_lifecycle', None)
+                yielded_seal = None
                 if isinstance(lifecycle, dict) and lifecycle.get('outcome') == 'drained_unverified':
-                    # A natural local exit is not same-goal/history settlement.
-                    # Do not send native_rollout/goal RPC to a closed runtime or
-                    # release guard until the independent yielded seal exists.
-                    raise CodexError('codex_native_yield_seal_required')
+                    config = getattr(agent, 'config', None)
+                    if (self.harness != 'codex' or not isinstance(config, dict)
+                            or config.get('native_goal_yield') is not True):
+                        # A natural local exit alone is never settlement. The
+                        # legacy/default-disabled boundary remains unchanged.
+                        raise CodexError('codex_native_yield_seal_required')
+                    seal = getattr(agent, 'seal_native_yield', None)
+                    if not callable(seal):
+                        raise CodexError('codex_native_yield_seal_required')
+                    phase = 'native_yield_seal'
+                    before_seal = copy.deepcopy(lifecycle)
+                    self._native_yield_tick(force=True)
+                    yielded_seal = seal(tick=self._native_yield_tick,
+                        timeout=self.config.get('native_yield_seal_timeout', 30))
+                    yielded_seal = self._checked_native_yield_seal(
+                        agent, before_seal, yielded_seal)
                 phase = 'session_save'
                 state = dict(self.current['checkpoint'])
-                rollout = agent.native_rollout() if self.harness == 'codex' else state.get('pi_session_file')
-                if self.harness == 'codex':
+                if yielded_seal is not None:
+                    # This path is frozen by the independent observer. Calling
+                    # native_rollout/goal/terminal seal here would send RPCs to
+                    # the already closed original runtime.
+                    rollout = yielded_seal['path']
+                    state['native_lifecycle'] = copy.deepcopy(yielded_seal['lifecycle'])
+                    state['goal'] = copy.deepcopy(yielded_seal['lifecycle']['goal'])
+                else:
+                    rollout = agent.native_rollout() if self.harness == 'codex' else state.get('pi_session_file')
+                if self.harness == 'codex' and yielded_seal is None:
                     lifecycle = getattr(agent, 'native_lifecycle', None)
                     if isinstance(lifecycle, dict) and lifecycle.get('goal_managed'):
                         phase = 'native_settle'
@@ -890,12 +1035,28 @@ class Worker:
                         state['goal'] = agent.goal()
                         if isinstance(state['goal'], dict) and state['goal'].get('status') == 'active':
                             raise CodexError('codex_goal_lifecycle_unsettled')
-                # Only after the native runtime's complete lifecycle is settled.
+                phase = 'session_save'
+                if yielded_seal is not None:
+                    # Keep both the live task checkpoint and committed session
+                    # guarded throughout upload. An ACK-lost commit must not
+                    # publish a resumable false-guard session as a side effect.
+                    state['side_effect_started'] = True
+                    self._native_yield_tick(force=True)
+                    saved = sessions.save(self.client, task, self.config.get('node_id'),
+                        self.harness, state, rollout, self._native_yield_tick,
+                        expected_fingerprint=yielded_seal['fingerprint'])
+                    if (not isinstance(saved, dict) or saved.get('ok') is not True
+                            or saved.get('saved') is not True
+                            or saved.get('artifact_saved') is not True
+                            or saved.get('scope') != task.get('scope')):
+                        raise CodexError('codex_native_yield_commit_unconfirmed')
+                # Only after lifecycle settlement AND this branch's frozen
+                # history commit ACK may the final task update clear the guard.
                 state['side_effect_started'] = False
                 if isinstance(state.get('native_execution_intent'), dict):
                     state['native_execution_intent'] = dict(state['native_execution_intent'], settled=True)
-                phase = 'session_save'
-                sessions.save(self.client, task, self.config.get('node_id'), self.harness, state, rollout, self.tick)
+                if yielded_seal is None:
+                    sessions.save(self.client, task, self.config.get('node_id'), self.harness, state, rollout, self.tick)
                 phase = 'coordination'
                 coordination = self.client.request('/v1/agent/action', {'task_id': task['id'], 'epoch': task['epoch'],
                     'call_id': task['id'] + ':settled:' + str(task['epoch']), 'action': 'children', 'arguments': {}})
@@ -903,6 +1064,11 @@ class Worker:
                 goal_status = (state.get('goal') or {}).get('status')
                 terminal = ('waiting_children' if self.wait_children else 'needs_review' if self.current['checkpoint'].get('approval_required')
                             else 'needs_review' if goal_status in ('blocked', 'budgetLimited', 'usageLimited', 'paused') else 'completed')
+                if yielded_seal is not None and state['native_lifecycle']['outcome'] == 'terminal':
+                    # A goal that naturally stopped during drain is not a child
+                    # yield. Do not wake it implicitly or write it back active.
+                    terminal = ('needs_review' if goal_status != 'complete'
+                                or self.current['checkpoint'].get('approval_required') else 'completed')
                 # WeChat bound: retain original in task checkpoint, notify with bounded text.
                 output = answer.encode('utf8')[:15000].decode('utf8', errors='ignore')
                 phase = 'task_finalize'
@@ -911,9 +1077,12 @@ class Worker:
                 for key in ('native_lifecycle', 'native_execution_intent'):
                     if key in state:
                         final_checkpoint[key] = state[key]
-                self.client.request('/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
+                finalized = self.client.request('/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
                     'checkpoint': final_checkpoint, 'result': output,
                     'status': terminal})
+                if (yielded_seal is not None
+                        and (not isinstance(finalized, dict) or finalized.get('ok') is not True)):
+                    raise CodexError('codex_native_yield_finalize_unconfirmed')
         except (ValueError, OSError, urllib.error.URLError) as exc:
             # Losing the authority must terminate the local runtime before takeover.
             status = 'waiting_auth' if 'auth' in str(exc) else 'waiting_backend'
