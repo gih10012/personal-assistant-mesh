@@ -4,7 +4,9 @@
 
 产品入口基于真实 fork：[personal-assistant-dots](https://github.com/gih10012/personal-assistant-dots)。控制面不依赖面板在线；面板是任务、能力和成果的观察窗口，不是模型的工具白名单。
 
-持续执行以 [PLAN](docs/PLAN.md) 和 [TASKS](docs/TASKS.json) 续接；任务有稳定 ID、依赖、负责人、下一步与验收条件。此清单是项目协调记录，实际执行状态仍以认证运行账本和证据为准。
+持续执行以 [GOAL](docs/GOAL.md)、[PLAN](docs/PLAN.md) 和 [TASKS](docs/TASKS.json) 续接；任务有稳定 ID、依赖、负责人、下一步与验收条件。此清单是项目协调记录，实际执行状态仍以认证运行账本和证据为准。
+
+[2026-10-10 状态交接](docs/STATUS-2026-10-10.md)：底层互联/部分任务可用，Chat 原生 tools、官方 Codex Cloud 和 ClawBot 多节点接管未验收。内部 `cloud` 是 Alibaba VPS，不是 OpenAI Codex Cloud；下一片并行推进真实出口、沟通容灾和 [Codex/Pi 多模型](docs/MODEL-PROVIDERS-RESEARCH.md)。
 
 ## 设计方向
 
@@ -17,7 +19,7 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 ## 已实现的执行基础
 
 - 标准库、SQLite WAL、单权威事务账本；无 Redis 或常开桌面依赖。
-- 独立云端微信 iLink 入口：整批消息、任务、上下文和游标原子落盘；稳定出站 ID，未知结果不重试。
+- 当前独立 VPS 微信 iLink 入口：整批消息、任务、上下文和游标原子落盘；稳定出站 ID，未知结果不重试。多节点承载交接待 [PAM-009](docs/COMMUNICATION-CARRIER-HA.md)。
 - 节点能力目录、Leader/任务租约和双代 epoch fencing；任务绑定实际 Leader 任期，同名节点重新当选也不能续写旧任期任务。
 - Leader 原生 thread 跨任务连续，子 agent 按项目/身份复用；上下文压缩由 Codex 自己维护。
 - 只传输选定的原生 rollout 用于跨机恢复，不复制整个认证目录或其他聊天。跨机实际验收见 [ACCEPTANCE](docs/ACCEPTANCE.md)。
@@ -27,7 +29,7 @@ Mesh 内的资源公告不自动授予其他主体使用权，远端调用仍检
 - Codex 启动/认证不可用且尚未开始执行时，才尝试配置好的 Pi；不跨 harness 重放已起效 turn。Pi 真实兜底仍需配置/验收。
 - 复用已有 Codex 认证，从账户实时模型目录选择，不要求在面板粘贴 API Key。
 - 项目只读观察 API、viewer/operator 权限分离。浏览器鉴权由 Dots 产品层处理。
-- 可选 owner-bound ingress：独立来源/subject/scopes 凭据提交持久任务并回查有限状态，原生 Leader scope 由部署配置绑定，同请求去重与任务创建同事务；不暴露 operator 权限或原始结果。HTTP/CLI 已实现，OAuth/MCP/Chat/Cloud 实际连接尚未安装，见 [入口合同](docs/INGRESS-CONTRACT.md)。
+- 可选 owner-bound ingress：独立来源/subject/scopes 凭据提交持久任务并回查有限状态，原生 Leader scope 由部署配置绑定，同请求去重与任务创建同事务；不暴露 operator 权限或原始结果。HTTP/CLI、Firefox 手动桥与本机一个 Codex MCP profile 往返已实测；Chat 原生 tools/OAuth、官方 Cloud job 未验收，见 [入口合同](docs/INGRESS-CONTRACT.md)。
 - 受限成果发布：operator 显式审查的有界摘要绑定已完成任务与实际结果摘要哈希，入口仅回查同一来源/subject 的成果；不自动发布原始结果或下载任意路径，见 [成果合同](docs/INGRESS-RESULTS.md)。
 - 资源/算力/性能/工具/连接的开放能力目录、租约、证据指标、资源图、exact scope/action 远端授权与审计；provider 声明不等于验证。
 - 模型选择能力/路径后的事务型共享容量预留、provider 接收/启动/未知/结算回执；可选独立 provider 运行器承接宿主安装的版本化工具和持久执行 journal。已有跨宿主只读 SHA 工具真实执行验收；这不是自主最佳调度或性能验收。只有受管 Mesh 合同受此管控，不接管原生工具，见 [共享容量与回执合同](docs/MANAGED-ALLOCATIONS.md)。

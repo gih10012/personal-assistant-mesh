@@ -4,6 +4,16 @@
   "goal_status": "active",
   "updated_at": "2026-10-10",
   "plan": "docs/PLAN.md",
+  "effective_owner_goal": "docs/GOAL.md",
+  "latest_owner_status": "docs/STATUS-2026-10-10.md",
+  "native_goal_accounting_preserved": true,
+  "native_objective_in_place_edited": false,
+  "execution_priority_groups": [
+    ["PAM-009a", "PAM-009b", "PAM-002a", "PAM-002b", "PAM-010a"],
+    ["PAM-009c", "PAM-004d", "PAM-010b", "PAM-010c", "PAM-006d", "PAM-006e"],
+    ["PAM-007c-4", "PAM-007f", "PAM-007e"]
+  ],
+  "priority_group_semantics": "parallel coordination priorities, not native execution receipts or a serialized gate; respect each task's actual dependencies",
   "status_source": "project coordination record; runtime evidence is separately identified, not invented",
   "drain_candidate_previous_attempt": {
     "code_commit": "e22965171dbbb65f2426dc79104cd7ffd6e46be3",
@@ -21,6 +31,26 @@
     "correction_state": "superseded by separately frozen 58fac34 two-host 1510/CI and opt-in idle verification; original failed attempt retained"
   },
   "latest_source_release": {
+    "phase": "native goal code-mode and boolean wait guidance; isolated source candidate, not production",
+    "code_commit": "a4c412aa86f310ec0a6661a3b548c2ff7f930f95",
+    "archive_sha256": "d50043d82bfbe1f780bba802e9d2be6f555ba3748c7175863c9c898f14478cd8",
+    "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38046321351",
+    "ci_verified_success": true,
+    "source_public": true,
+    "local_full_suite_tests_passed": 1612,
+    "local_full_suite_duration_seconds": 148.361,
+    "vps_python36_full_suite_tests_passed": 1612,
+    "vps_python36_full_suite_duration_seconds": 142.984,
+    "native_goal_drain_default_enabled": false,
+    "native_goal_yield_default_enabled": false,
+    "production_core_loaded": false,
+    "production_runtime_and_configuration_changed": false,
+    "original_unknown_replayed": false,
+    "actual_full_parent_child_goal_roundtrip_verified": false,
+    "actual_full_http_contract_trial_started": false,
+    "earlier_native_control_partial_evidence": "previous_wait_ready_source_release; separate canaries are not a full roundtrip"
+  },
+  "previous_wait_ready_source_release": {
     "phase": "managed wait readiness; corrected older-Python fixture, isolated candidate not production",
     "code_commit": "d8c603da6e8b286151857c96f8d27fbbe516fb52",
     "archive_sha256": "e7d4ed447c1ca2225e68d6c5c9ff00d2e46c8f7bf47410a05c411250450b963e",
@@ -239,7 +269,7 @@
       "state": "in_progress",
       "owner": "root+mesh-leader",
       "depends_on": [],
-      "next_action": "两端原生采样/原父等待与续接汇总已完成；重新采样后明确登记候选，再验证一个受管出口；不自动改联网",
+      "next_action": "盘点已完成；优先002a VPS通用公网路径与002b校园选择性路径，网页/API/推理及校内目标分开验证，再004d统一调用；不全局修改代理或禁止native备用网络",
       "evidence": {
         "specialist_tests_passed": 70,
         "network_inventory_tests": 21,
@@ -258,7 +288,32 @@
         "automatic_owner_result_accepted": true,
         "phone_receipt_verified": false
       },
-      "acceptance": "实际采样/TTL/接口类型/路由候选可用；私有地址/SSID/代理凭据不泄露；未测互联网与性能明确未验证"
+      "current_readonly_observation": {
+        "date": "2026-10-10",
+        "vps_direct_unauthenticated_chatgpt_head_http_status": 403,
+        "vps_direct_unauthenticated_openai_models_head_http_status": 401,
+        "tls_reachability_only": true,
+        "chat_authenticated_usability_verified": false,
+        "arbitrary_model_api_call_verified": false,
+        "generic_egress_installed_and_verified": false,
+        "campus_remote_egress_installed_and_verified": false,
+        "campus_target_probed_this_turn": false
+      },
+      "subtasks": [
+        {
+          "id": "PAM-002a", "title": "VPS受管通用公网出口",
+          "state": "planned", "owner": "root+mesh-leader", "depends_on": [],
+          "next_action": "设计最薄TLS端到端CONNECT/SOCKS或等效路径；私有配置后逐项验证网页/API认证/真实推理，不把403/401当可用；VPS为受管流量默认路径，原生备用联网保持",
+          "acceptance": "laptop及另一个执行环境能实际使用VPS路径；范围/TTL/失败/回执明确，不全局强制代理"
+        },
+        {
+          "id": "PAM-002b", "title": "校园节点校内选择性网络出口",
+          "state": "planned", "owner": "root+mesh-leader", "depends_on": [],
+          "next_action": "重采当前Wi-Fi/校内可达性，选择实际校内目标与DNS路径，暴露选择性能力；不把SSID/默认路由或校园登录态当远端业务授权",
+          "acceptance": "远端通过该节点访问一个明确校内目标有真实结果；非校内流量不被错误导入，秘密不公告"
+        }
+      ],
+      "acceptance": "实际出口/目标/身份/TTL与结果可追溯；历史候选、TLS到达、认证可用和业务成功分别记录"
     },
     {
       "id": "PAM-003",
@@ -479,6 +534,13 @@
             "private_install_fault_tests_passed_per_host": 6
           },
           "acceptance": "Mesh自行选择/触发已准入能力并等待真实结算；原journal跨重启保持未知不重放；不将单目标GET扩成通用联网/性能证明"
+        },
+        {
+          "id": "PAM-004d", "title": "统一能力入口和真实多候选出口调度",
+          "state": "planned", "owner": "root+mesh-leader",
+          "depends_on": ["PAM-002a", "PAM-003c"],
+          "next_action": "在现有mesh入口上组合发现/调用/委派/状态/成果，模型选择真实VPS或其他当前可用路径；同owner日常复用授权，不加native白名单；校园能力002b就绪后独立接入",
+          "acceptance": "模型实际跨节点调用和结果回收，故障后选择其他新工作路径；旧unknown不重放，共享出口瓶颈不重复计容量"
         }
       ],
       "acceptance": "模型能选择与改路，实际资源结算；共享瓶颈不重复计算；不以静态模型排名替代判断"
@@ -501,7 +563,7 @@
       "state": "implementation_in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "Firefox与本机Codex MCP任务/原Leader/批准成果读回实测通过；入口验收版本e2397f1两端1267项与CI通过，后续核心已升至3198c87两端1282项与CI通过并加载。继续004c/007；Chat原生tools/OAuth与Cloud环境连接单列，尚无Cloud job/node",
+      "next_action": "Firefox手动桥与本机Codex MCP往返已实测；并行006d主账号Chat原生tools/OAuth和006e官方Codex Cloud环境/job/结果回收，不全部等待007；内部cloud是Alibaba VPS，不是官方Cloud，尚无官方Cloud job/node",
       "evidence": {
         "research": "docs/ENTRYPOINTS-RESEARCH.md",
         "connector_installed": false,
@@ -639,6 +701,18 @@
           "owner": "root+mesh_mcp_entrypoint",
           "depends_on": ["PAM-006a"],
           "next_action": "源码已公开，实际本机一个既有profile配置/发现三工具/提交/原Leadercompleted/批准成果原MCP读回通过。未安装portable marketplace包，验证客户端没有模型turn；后续模型自主调用和其他host另验，不冒称Chat/Cloud已接通"
+        },
+        {
+          "id": "PAM-006d", "title": "主账号Chat原生Mesh工具与推理能力",
+          "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
+          "next_action": "核对主账号当前官方插件/tools/OAuth能力，连接最薄Mesh入口并真实对话提交/结果回收；浏览器手动桥另记，不假设不限额度或可绕成万能API",
+          "acceptance": "实际Chat模型工具回执/原任务/成果一致，身份范围与使用限制实核；连好后另验定时检查"
+        },
+        {
+          "id": "PAM-006e", "title": "OpenAI官方Codex Cloud临时节点",
+          "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
+          "next_action": "确认本项目官方环境与repo授权；有现有权限则单次job接入、领取/回传/终止后读回，缺授权问owner。node cloud始终是ali-vps，不拿该服务代替官方job",
+          "acceptance": "官方job身份、真实执行与成果回收、退出后持久状态分别核验；不给临时环境operator bearer或复制整个认证目录"
         }
       ]
     },
@@ -648,7 +722,7 @@
       "state": "in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "d8c603d冻结双端1610/CI通过，原Luna epoch3 marker已核验但unknown保留不resume。官方goal默认开启，原生code-mode工具名称已核清；新gpt-6.1-sol实际get/update goal、独立complete及普通artifact SHA通过，但私有client缺最终children查询，整task仍unknown。补默认wait布尔/原生工具提示两新fixture后冻结；后续真实完整API客户端/同父子合同验收，不为unknown换ID修复。正式3198c87，Chat/Cloud仍未入网",
+      "next_action": "a4c412a冻结双端1612/CI通过，默认wait/native工具提示已发布，完整真实HTTP父子合同未启动；旧局部成功和unknown保留，不拼成全往返。正式3198c87未开drain/yield；007c/f/e并行继续但不阻塞009容灾、002出口、010模型、006d/e官方入口",
       "evidence": {
         "coordination_tasks_created": true,
         "plan": "docs/PLAN.md",
@@ -782,19 +856,19 @@
          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
         {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "isolated_seal_wake_and_ready_marker_verified_native_goal_terminal_handoff_pending",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "d8c603d双端1610/CI通过；原Luna epoch3 actual marker/False已验但timeout unknown保留。新实际sol原生get/update goal+独立complete+普通artifact通过，私有client缺最后children query所以task仍unknown，不resume。修正默认wait布尔和native code-mode名字提示，两新fixture/151近邻通过；冻结后以完整实际API合同再验父子交接，不能用新ID修旧unknown或host强设complete/reset",
+         "next_action": "a4c412a双端1612/CI通过且未部署；此前Luna父子marker/False与另一个sol原生get/update/complete只是局部成功，旧unknown保留。完整真实HTTP父子合同尚未启动；下片只验该合同，不用新ID修旧unknown或host强设complete/reset，不阻塞网络/沟通并行实现",
          "implementation_slices": [
            {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
            {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "isolated_actual_active_drain_verified_not_production", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "85f9611两端1591项/CI，新tool-field合同实际active drain自然0/EOF、一个admitted turn完成；默认false未部署。原e229651 idle失败、最早resume unknown及私有错误callback unknown均保留不重放"},
            {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "isolated_actual_active_goal_seal_and_artifact_commit_verified_not_production", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "85f9611双端1591项/CI通过；新隔离实际active goal/usage不reset，独立observer自然0且原thread前后notLoaded、turn自然完成/完整历史/strict artifact ACK通过。第一epoch不是full Worker；保留原unknown。正式默认false，跨节点及任意外部副作用另验"},
-           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "actual_ready_marker_and_separate_native_goal_control_verified_full_roundtrip_pending", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "原父epoch2 strict reseal与epoch3实际marker已验，epoch3 unknown不resume；新sol get/update/独立complete及普通artifact已验，私有client缺最后children query的task保持unknown。后续完整实际API客户端与原生工具合同父子往返，不能拆证据拼成一次完整roundtrip；DEFAULT等待描述与WORKING_CONTRACT原生code-mode提示已改，两新fixture/151近邻通过，冻结后继续"}
+           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "actual_ready_marker_and_separate_native_goal_control_verified_full_roundtrip_pending", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "a4c412a1612双端/CI已通过，真实HTTP完整合同未启动；先修正私有验收客户端读取真实history proof路径，再按完整API验新合同。旧epoch3和sol漏查询的unknown不resume/重放；必须一次完整父子goal交接证据，不拼局部成功"}
          ]},
         {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
          "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
          "next_action": "按原生字节/稳定前缀和压缩保留途中新上下文，不用应用摘要或旧artifact冒充完整恢复"},
         {"id": "PAM-007e", "title": "实际前沿周期检查与模型自主选型", "state": "planned",
-         "owner": "mesh-leader", "depends_on": ["PAM-007c"],
-         "next_action": "保留3–5天检查与实时目录选择的原owner要求，配置实际周期入口并核验触发/记录，不靠排序假称模型选择"},
+         "owner": "mesh-leader", "depends_on": [],
+         "next_action": "配置实际3–5天持久检查与触发/记录，不必等待007c；Chat定时入口等待006d实际连接，本地持久入口可先独立实施。实时目录交给模型判断，不固定排行榜，不把文档当已运行schedule"},
         {"id": "PAM-007f", "title": "源码候选与正式运行入口的版本边界", "state": "partially_verified",
          "owner": "root", "depends_on": [],
          "next_action": "laptop worker/node与新启动的Firefox/Codex MCP入口已固定到冻结3198；入口原request/task/publication/status/result及client/grant/manifest保留，没有新task/model。存活MCP进程未重启，native-recovery与其他入口/模板仍需逐项隔离，不把本机Linux路径固化成协议"}
@@ -812,10 +886,72 @@
       ],
       "next_action": "底层到位后由 Mesh 自己创建项目 task、分工与接入",
       "acceptance": "由 Mesh 持续推进与交付，上层入口不变成权限根或 Leader 工作区"
+    },
+    {
+      "id": "PAM-009", "title": "ClawBot沟通能力多节点承载与安全接管",
+      "state": "design_ready_implementation_pending", "owner": "root+mesh-leader",
+      "depends_on": [],
+      "next_action": "优先009a/b候选与checkpoint，再009c/d受控交接和实际故障验证；与002出口/010模型并行，不以007未完成阻塞。当前VPS单收发保留，不另启第二poller",
+      "evidence": {
+        "contract": "docs/COMMUNICATION-CARRIER-HA.md",
+        "actual_current_vps_only_carrier_verified": true,
+        "automatic_laptop_takeover_implemented": false,
+        "cross_carrier_channel_lease_implemented": false,
+        "cross_carrier_checkpoint_handoff_verified": false,
+        "actual_failure_takeover_verified": false,
+        "scope": "source audit and current read-only deployment state; not HA implementation"
+      },
+      "subtasks": [
+        {"id": "PAM-009a", "title": "任意节点沟通承载候选能力", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": [],
+         "next_action": "定义owner/account/runtime/private credential refs并核本机与VPS能力；候选/holder/Leader位置分离，探测不自动启动receiver"},
+        {"id": "PAM-009b", "title": "版本化私有通道checkpoint交接", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": [],
+         "next_action": "保留cursor/inbox/context/canonical task及authority映射/outbox/client IDs/intent/unknown/receipt；私有备份与单次交接协议，不复制token就假称完成"},
+        {"id": "PAM-009c", "title": "通道任期和旧承载失权排他", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": ["PAM-009a", "PAM-009b"],
+         "next_action": "account/holder/epoch/deadline/checkpoint revision独立于Leader lease；poll与send各边界fence、在途效果对账；明确两节点分区限制，选现有零费仲裁/可证明停止机制，不凭ping抢权"},
+        {"id": "PAM-009d", "title": "真实受控交接和故障回汇", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": ["PAM-009c"],
+         "next_action": "隔离ACKloss/crash/partition/rejoin后实际单次handoff；旧holder失权、单条合成消息原task/原发送身份/回执核对；再开启同合同自动接管，不损坏当前入口"}
+      ],
+      "acceptance": "本机/VPS或其他候选可安全接管同一沟通能力；保留原账本与unknown，不限制native自主网络，不把两个独立本地lease叫共识"
+    },
+    {
+      "id": "PAM-010", "title": "Codex/Pi任意可接入模型能力",
+      "state": "research_complete_implementation_pending", "owner": "root+mesh-leader",
+      "depends_on": [],
+      "next_action": "上游主源研究已完成；010a目录合同、010b Codex显式Responses provider、010c Pi多协议隔离配置并行，再010d无秘密真实工具续接。OpenCode仅作为模型服务，不更换Leader",
+      "evidence": {
+        "research": "docs/MODEL-PROVIDERS-RESEARCH.md",
+        "pi_upstream_commit": "c5f5b3282d5e4203c085e59837ba17aeaf2829b5",
+        "current_mesh_codex_provider_hardcoded_openai": true,
+        "current_pi_single_candidate_after_codex_chain": true,
+        "new_credentials_created": false,
+        "new_billing_enabled": false,
+        "third_party_model_call_verified": false
+      },
+      "subtasks": [
+        {"id": "PAM-010a", "title": "模型协议/成本/隐私/时效目录", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": [],
+         "next_action": "登记harness/protocol/provider/model/context/tools/cost/privacy/availability及私有认证引用；动态目录供模型选择，不把限时免费或model alias当保证"},
+        {"id": "PAM-010b", "title": "Codex custom Responses provider", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": ["PAM-010a"],
+         "next_action": "移除openai写死但保留默认订阅，显式隔离provider配置和真实版本兼容；SSE/tools/history/metadata完整验证，Messages/ChatCompletion不直接假充Responses"},
+        {"id": "PAM-010c", "title": "Pi原生多协议provider配置与选择", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": ["PAM-010a"],
+         "next_action": "增加隔离agent_dir/private models.json、真实目录/模型选择、原Pi session续接、准确免费API/受控付费合同；不把Codex历史直接当Pi会话"},
+        {"id": "PAM-010d", "title": "合成无秘密工具任务与兜底边界", "state": "planned",
+         "owner": "root+mesh-leader", "depends_on": ["PAM-010b", "PAM-010c"],
+         "next_action": "现有授权下验证一个可用Responses和一个Pi协议路径，含实际工具结果/原会话续接/产物回读；新凭据/费用问owner，不上传完整记忆，不切模型重放unknown"}
+      ],
+      "acceptance": "模型能力目录与实际账户/协议/工具续接一致；零新增费用和隐私数据范围可核对；不是永久模型排名或无限免费承诺"
     }
   ],
   "current_work": {
-    "phase": "d8c603d two-host1610/CI verified; ready False/native marker and separate sol native get/update/independent complete/ordinary artifact verified, failed task identities/guards retained and full child roundtrip unverified; default wait/native-code-mode instruction fix has 2 new/151 related fixtures, freeze next; production unchanged and Chat/Cloud not joined",
+    "phase": "owner status/research/goal-plan-task handoff: a4c412a two-host1612 and CI success, candidate not production; production3198c87 and A2A connected, ClawBot still VPS-only, generic/campus egress and Chat/official Cloud unjoined; prioritize carrier HA, real egress and Codex/Pi providers in parallel; native goal full roundtrip pending and old unknowns preserved",
+    "runtime_changed_this_status_turn": false,
+    "goal_status": "active",
     "whole_goal_completed": false
   }
 }

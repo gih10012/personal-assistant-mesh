@@ -1,6 +1,6 @@
 # Personal Assistant Mesh working contract
 
-Read `docs/PLAN.md` and `docs/TASKS.json` before changing this project. Preserve
+Read `docs/GOAL.md`, `docs/PLAN.md` and `docs/TASKS.json` before changing this project. Preserve
 the complete owner goal, task IDs, dependencies and next actions; update the
 coordination record when work or evidence changes. Runtime tasks and external
 results must be verified from their actual authority, not inferred from this file.
@@ -9,6 +9,12 @@ Prioritize bottom/middle Mesh architecture: decentralized recovery, autonomous
 resource routing, real network/capability inventory and environment-adaptive
 enrollment. Live/voice/panel are later projects to delegate to Mesh. Dots is the
 product benchmark; native Codex is primary, Pi optional, not an OpenClaw leader.
+
+Prioritize real egress and multi-node communication alongside native-goal work;
+the latter must not block all other capabilities. ClawBot is communication,
+never the Leader workspace or permanently VPS-only. Internal node ID `cloud`
+means Alibaba VPS (display `ali-vps`), not official OpenAI Codex Cloud
+(`openai-codex-cloud`). Preserve existing IDs and journals.
 
 Keep all native Shell/files/network/MCP features available. Mesh adds managed
 capability contracts; it is not a host-wide allowlist. Let node agents adapt
