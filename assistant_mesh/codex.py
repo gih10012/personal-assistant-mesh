@@ -1,4 +1,5 @@
 """Codex app-server JSON-RPC over stdio; auth stays under a discovered Codex home."""
+import copy
 import json
 import os
 import queue
@@ -76,6 +77,7 @@ class Codex:
         self.config = config
         self.tools, self.on_tool, self.on_activity = tools or [], on_tool, on_activity
         self.deferred = []
+        self.native_observations = {}
         self.on_interaction = on_interaction
         memories = config.get('native_memories', True)
         if not isinstance(memories, bool):
@@ -273,6 +275,9 @@ class Codex:
             self.on_activity('session_ready', {'thread_id': self.thread_id})
         started = self.rpc('turn/start', turn, timeout=60)
         self.turn_id = started['turn']['id']
+        # Observation only: do not infer a native plan/goal from configuration,
+        # old checkpoints, or the text used to start this turn.
+        self.native_observations = {'thread_id': self.thread_id, 'turn_id': self.turn_id}
         return {'thread_id': self.thread_id, 'turn_id': self.turn_id, 'mode': self.config.get('mode', 'default')}
 
     def steer(self, text):
@@ -297,6 +302,68 @@ class Codex:
     def goal(self):
         return self.rpc('thread/goal/get', {'threadId': self.thread_id}).get('goal')
 
+    def _observe_native_event(self, value):
+        """Capture real current-turn notifications, without a native RPC/write.
+
+        RPC waits leave notifications deferred until finish consumes them. Do
+        not call this observer inside rpc: activity handlers can perform a tick
+        or steer, and recursive native RPC must not consume another response.
+        This is NOT a goal-continuation controller. An unexpected turn never
+        replaces the turn/start receipt's identity in this single-turn host.
+        """
+        method, params = value.get('method'), value.get('params')
+        if not isinstance(params, dict) or params.get('threadId') != self.thread_id:
+            return False
+        if method in ('turn/started', 'turn/completed'):
+            turn = params.get('turn')
+            if not isinstance(turn, dict) or turn.get('id') != self.turn_id:
+                return False
+        elif method in ('item/started', 'item/completed', 'turn/plan/updated'):
+            if params.get('turnId') != self.turn_id:
+                return False
+            if method.startswith('item/') and not isinstance(params.get('item'), dict):
+                return False
+        elif method == 'thread/goal/updated':
+            goal = params.get('goal')
+            if (not isinstance(goal, dict) or goal.get('threadId') != self.thread_id
+                    or params.get('turnId') not in (None, self.turn_id)):
+                return False
+        elif method != 'thread/goal/cleared':
+            return False
+        if method == 'turn/plan/updated':
+            plan = params.get('plan')
+            if (not isinstance(plan, list) or any(
+                    not isinstance(step, dict) or not isinstance(step.get('step'), str)
+                    or step.get('status') not in ('pending', 'inProgress', 'completed')
+                    for step in plan)):
+                return False
+        observations = getattr(self, 'native_observations', None)
+        if observations is None:
+            observations = self.native_observations = {
+                'thread_id': self.thread_id, 'turn_id': self.turn_id}
+        activity = None
+        if method == 'item/started':
+            activity = ('native_item', params['item'])  # Preserve existing callback shape.
+        elif method == 'turn/plan/updated':
+            observations['plan'] = copy.deepcopy(params)
+            activity = ('plan_updated', params)
+        elif method in ('turn/started', 'turn/completed'):
+            name = 'turn_started' if method == 'turn/started' else 'turn_completed'
+            observations[name] = copy.deepcopy(params)
+            activity = (name, params)
+        elif method == 'thread/goal/updated':
+            observations['goal'] = copy.deepcopy(params['goal'])
+            observations['goal_updated'] = copy.deepcopy(params)
+            activity = ('goal_updated', params)
+        elif method == 'thread/goal/cleared':
+            observations['goal'] = None
+            observations['goal_cleared'] = copy.deepcopy(params)
+            activity = ('goal_cleared', params)
+        on_activity = getattr(self, 'on_activity', None)
+        if activity and on_activity:
+            on_activity(activity[0], copy.deepcopy(activity[1]))
+        return True
+
     def finish(self, tick=None, timeout=3600):
         deadline = time.monotonic() + timeout
         replies = []
@@ -309,13 +376,9 @@ class Codex:
                 if str(exc) == 'codex_timeout':
                     continue
                 raise
-            method, params = value.get('method'), value.get('params', {})
-            if params.get('threadId') not in (None, self.thread_id):
+            if not self._observe_native_event(value):
                 continue
-            if method == 'item/started' and self.on_activity:
-                self.on_activity('native_item', params.get('item', {}))
-            if method == 'turn/plan/updated' and self.on_activity:
-                self.on_activity('plan_updated', params)
+            method, params = value.get('method'), value['params']
             if method == 'item/completed':
                 item = params.get('item', {})
                 if item.get('type') == 'agentMessage' and item.get('phase') != 'commentary':

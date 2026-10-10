@@ -198,11 +198,23 @@ completed、dispatch 结算、容量 held=0/remaining=1；Root 和 Leader 各自
 canonical artifact SHA 与保留 oracle 一致。Core 仍为 provider_reported，
 不把 owner 内容核验升级为物理/性能证明。004b 的固定目标 canary 已验收；
 004c 将日常 executor 交给 Mesh 而非 Root 逐次启动，并继续多候选和故障观察。
+现已保留原 canary 闭合快照并加载独立 cloud provider service：enabled/
+active、空闲报告 ok，原journal/canary行未变，其他服务未重启。原 pool
+过期后以 owner epoch CAS 更新相同容量合同/原binding，新独立采样另存。
+新的明确 `PAM-004c-executor-handoff-20261010-v1` 已在原 Leader thread
+epoch 1 completed；模型选择/原新operation与service自动结算均读回，Root
+独立artifact/Git oracle核对及容量归还通过，原canary行保留；Root未手动
+execute。后续多候选/故障对账仍推进，见 [独立executor](MANAGED-EXECUTOR.md)。
 原生 goal/plan 仍 null，007 继续核对官方接口与真实 runtime，周期检查未创建。
 官方 Goals 合同明确 active goal 可在 idle 边界自动产生后续 turn；现有
 adapter 只等待原 turn 的结束，因此先接入原生 plan 事件、自动 turn 的
 同任务租约/效果生命周期，再实际启用长期 goal。不能在 completed 原
 Leader 直接 set active，也不为 defer 标志 fork 新 Leader。
 [Codex Goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)
+当前先实现了当前thread/turn的真实plan/goal通知观察候选，12项新fixtures
+与69项相关回归通过，修正可选callback缺省后本机完整1279项通过；未从
+旧plan推导本轮完成，未激活goal或声称已加载。004c实际完成但plan仍null，
+模型报告update_plan缺项，实际工具配置下一片独立核对。
+详见 [native事件边界](NATIVE-PLAN-EVENTS.md)。
 Cloud 本项目环境连接/发布条件单列，不以此缺项阻断 004b 中层真实出口。
 不把这组工具验收当作去中心化、完整自主授权或整个 goal 的完成证据。

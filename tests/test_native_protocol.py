@@ -102,11 +102,11 @@ class ProtocolTests(unittest.TestCase):
         agent = self.runtime()
         agent.start('work')
         agent.deferred = [
-            {'method': 'item/completed', 'params': {'threadId': 'another',
+            {'method': 'item/completed', 'params': {'threadId': 'another', 'turnId': 'native-turn',
                 'item': {'type': 'agentMessage', 'text': 'unrelated'}}},
-            {'method': 'item/completed', 'params': {'threadId': 'native-thread',
+            {'method': 'item/completed', 'params': {'threadId': 'native-thread', 'turnId': 'native-turn',
                 'item': {'type': 'agentMessage', 'phase': 'commentary', 'text': 'progress'}}},
-            {'method': 'item/completed', 'params': {'threadId': 'native-thread',
+            {'method': 'item/completed', 'params': {'threadId': 'native-thread', 'turnId': 'native-turn',
                 'item': {'type': 'agentMessage', 'phase': 'final_answer', 'text': 'verified'}}},
             {'method': 'turn/completed', 'params': {'threadId': 'native-thread',
                 'turn': {'id': 'native-turn', 'status': 'completed'}}},
