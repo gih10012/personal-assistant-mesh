@@ -262,22 +262,22 @@ class NativeGoalObserver(Codex):
                 self._check_deadline()
                 if not self.reader.is_alive():
                     return {'thread_id': self.observed_thread_id, 'pid': self.process.pid,
-                            'natural_exit_code': 0, 'reader_eof': True, 'read_only': True,
-                            'unloaded_before': True, 'unloaded_after': True}
+                            'natural_exit_code': 0, 'reader_eof': True, 'read_only': True}
 
 
 def observe_native_yield(config, thread_id, path, baseline, closed_turn_ids, tick, deadline):
     observer = NativeGoalObserver(config, thread_id, tick, deadline)
     try:
-        observer.unloaded()
+        before = observer.unloaded()
         observer.read_thread(path)
         goal = observer.read_goal(baseline)
         verified = observer.closed_turns(path, closed_turn_ids)
         observer.read_thread(path)
         if observer.read_goal(goal) != goal:
             raise CodexError('codex_native_observer_snapshot_changed')
-        observer.unloaded()
+        after = observer.unloaded()
         proof = observer.finish_read_only()
+        proof.update(unloaded_before=before, unloaded_after=after)
         proof['turns_verified'] = verified
         return {'goal': goal, 'thread_status': {'type': 'notLoaded'},
                 'independent_observer': proof}

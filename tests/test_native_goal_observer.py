@@ -196,6 +196,8 @@ class NativeObserverTests(unittest.TestCase):
             proof = observer.finish_read_only()
         kill.assert_called_once_with(777, signal.SIGTERM)
         self.assertIs(True, proof['reader_eof'])
+        self.assertNotIn('unloaded_before', proof)  # Shutdown alone did not read loaded/list.
+        self.assertNotIn('unloaded_after', proof)
         observer.process.wait.assert_called_once_with(timeout=0)
         for code, forced in ((1, False), (0, True)):
             observer = self.observer()

@@ -139,7 +139,14 @@ class NativeHistoryTests(unittest.TestCase):
             def mutate():
                 count.append(True)
                 if len(count) == when:
+                    metadata = self.path.stat()
                     self.mutate_prefix()
+                    # A rewrite before the first digest can only be observed
+                    # through metadata. Some filesystems coalesce rapid write
+                    # timestamps, so explicitly move mtime beyond that quantum.
+                    os.utime(str(self.path), ns=(metadata.st_atime_ns,
+                                                metadata.st_mtime_ns + 2000000000))
+                    self.assertNotEqual(metadata.st_mtime_ns, self.path.stat().st_mtime_ns)
 
             with self.subTest(tick=when):
                 with self.assertRaisesRegex(ValueError, 'native_history_prefix_changed'):
@@ -426,7 +433,11 @@ class NativeHistoryTests(unittest.TestCase):
                         self.path.chmod(0o644)
 
             with self.subTest(change=change):
-                with self.assertRaisesRegex(ValueError, 'native_history_(unstable|identity_changed)'):
+                # With coarse timestamps a same-size rewrite can be rejected
+                # by the original prefix digest rather than the metadata check.
+                expected = ('native_history_(unstable|prefix_changed)' if change == 'same_size'
+                            else 'native_history_(unstable|identity_changed)')
+                with self.assertRaisesRegex(ValueError, '^' + expected + '$'):
                     self.verify(prefix, tick=mutate)
 
     def test_verify_path_replacement_during_final_block_tick_is_rejected(self):

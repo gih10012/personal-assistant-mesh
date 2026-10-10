@@ -198,3 +198,15 @@ update 也须 ACK；回复丢失可能已经写入 authority，必须读回原�
 不靠本地布尔断言或重试 finalize。自然 terminal 优先真实 status，不
 因 wait_children 隐式续跑。这里只证明受控 Codex admission/历史边界，
 不声称已停止任意 detached Shell/MCP 外部效果、达成全局 HA 或入网 Chat/Cloud。
+
+首份 `eb760b0` 已公开且本机冻结1591项/CI通过，VPS同归档首次1591项
+有3个失败，保留而非列双端成功：临时源码目录默认umask产生group-write，
+MCP launcher正确拒绝；另两处快速同大小改写fixtures依赖文件时钟精度。
+后续修正只让夹具显式推进mtime/接受实际prefix hash拒绝，并使用私有
+验证目录，不放宽生产权限/历史检查。observer shutdown也不再单独
+写unloaded证据，只由实际前后loaded-list读取生成。
+
+一次新隔离 canary 的私有回调将官方 `tool` 字段误写为 `name`，在
+排空前拒绝，专用进程最终强杀；原任务/thread/active goal/guard均保留
+unknown，未resume、未清除、未变成成功。它不是正式服务或本版yield
+执行成功；后续新合同验证不得冒称修复这条unknown。相关私有记录不进公开仓库。
