@@ -278,6 +278,18 @@ class Worker:
     def on_tool(self, call):
         arguments = call.get('arguments', {})
         if (call.get('tool') == 'mesh' and isinstance(arguments, dict)
+                and arguments.get('action') == 'model_advice'):
+            # Pure local advice remains available without authority heartbeat;
+            # it neither authorizes dispatch nor changes the current backend.
+            if (set(arguments) - {'action', 'arguments'}
+                    or not isinstance(arguments.get('arguments', {}), dict)):
+                return result({'error': 'invalid_model_advice_arguments',
+                               'native_features_restricted': False}, False)
+            from .model_advice import model_advice
+            output = model_advice(self.config, arguments.get('arguments', {}))
+            return result(output, output['status'] not in
+                          ('invalid_requirements', 'evidence_unavailable_or_invalid'))
+        if (call.get('tool') == 'mesh' and isinstance(arguments, dict)
                 and arguments.get('action') == 'runtime_diagnose'):
             # This local observation neither executes a task nor changes its
             # lease. It remains usable when Mesh heartbeat is unavailable.
@@ -445,6 +457,13 @@ class Worker:
                        'complete 仅表示布局存在，不证明完整性、Shell、模型或网络可用。'
                        '下列命令是推荐句柄，未自动执行；原生 Shell/网络和创建任意工具仍保留。',
             'automatic_repair': False, 'task_replayed': False, 'session_replaced': False}
+        from .model_advice import model_advice, advice_summary
+        reference['model_advice'] = {
+            'tool': 'mesh(action="model_advice",arguments={required_capabilities,data_scope,prefer,operation_state})',
+            'snapshot': advice_summary(model_advice(self.config)),
+            'purpose': '按本人实际渠道增量费用比较模型+推理强度；免费/订阅内可为0，额度、时延、隐私另记。'
+                       '这是可选建议，不是执行授权、永久白名单或原生功能门禁；证据未知仍可自主发现能力。'
+                       '已有unknown按原身份核对，换模型不重放。Leader仍Codex/Pi；外部执行能力须独立受管调用。'}
         reference['federation'] = {
             'tool': 'mesh(action="federated_capabilities",arguments={issuer,kind,include_unavailable,limit})',
             'cli_command': 'mesh-capabilities',

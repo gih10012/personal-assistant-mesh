@@ -7,6 +7,12 @@ probe, key, purchase, retry, process or native-tool restriction is created.
 The 28 focused tests use synthetic scores and prices, not live AA observations;
 85 related frontier/Codex-provider/Pi-provider/extension tests also passed.
 
+Later2026-10-11 source wiring adds an optional private evidence reader, bounded
+Worker prompt advice and local Mesh/CLI read-only action. See
+[MODEL-ADVICE-ENTRYPOINT](MODEL-ADVICE-ENTRYPOINT.md). Production Worker adoption,
+actual selection/dispatch and periodic refresh are **still unverified**; the
+opening paragraph describes the original pure-library stage, retained here.
+
 ## Owner preference and actual price
 
 Prefer capable, good-value model/effort combinations on the current frontier and

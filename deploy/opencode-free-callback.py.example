@@ -1,0 +1,12 @@
+"""Copy privately, fill reviewed fixed references, hash-pin via ProviderRuntime.
+
+This intentionally unconfigured example neither installs nor advertises a service.
+The release containing imported dependencies must also be frozen/reviewed; the
+ProviderRuntime wrapper SHA alone is not a closed dependency supply chain.
+"""
+from assistant_mesh.free_execution import execute
+
+
+def invoke(context):
+    return execute(context, '/OWNER-PRIVATE-0700/free-owner.json',
+                   '0000000000000000000000000000000000000000000000000000000000000000')

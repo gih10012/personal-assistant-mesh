@@ -7,6 +7,28 @@
 
 ## 最新可执行下一片（协调计划，不是新 runtime receipt）
 
+21:52 owner要求先收尾/Claw报告/共同重新plan。当前片只完成已有
+三项source集成/风险相称回归/公开推送，不新模型POST/注册生产/
+receiver交接/服务或网络修改。旧Store只_ingest_in_db patch，43项
+Root复跑0skip；免费callback保持stock/native全部tools及原intent/
+私有完整export/artifact，16聚焦/80相关fake-native组通过，没有
+新的真实模型执行。model_advice保持可选、native功能不限制。
+当前laptop→cloud connected，cloud→laptop unreachable；reverse
+新SSH间歇重传/timeout，不是固定认证拒绝或统一stale-socket失败。
+本轮无修复，保留可用forward/原receiver/worker。先报告并共同重
+plan；完整active goal及原43项依赖不改变，不继续自动扩实现。
+
+21:31续接：三个专员分别最小原Store ingress事务兼容、真实stock
+免费外部callback、当前反向SSH/A2A只读诊断；Root接可选模型建议。
+免费专员首次续接额度失败无新产出，未当作模型任务unknown重试；
+实现专员新接线仅offline/source，不新POST/注册/第二poller。
+model_advice已接新Worker源码/纯本地tool/旧thread可用CLI，12新/115
+相关tests通过；原3198Worker未加载，实际选模与3–5day周期仍欠。
+carrier facade自带事务，旧Store缺口主要_ingest_in_db提取，不用整份
+新Store升级native goal。当前原本机→VPS认证link可达，reverse SSH
+间歇新连接timeout；先按实际原link定位，未改网络/重启原node。
+最新a701001精确CI38134520892已核三版本success，以下19:03保留。
+
 19:03实际进展：唯一receiver独立加载/真实IPC/原carrier-only stop/
 完整callback归还/HTTP200/受控恢复收发已验。原native全部行hash、
 原ledger inode/context与原Worker不变，完整unit/config/account/一致

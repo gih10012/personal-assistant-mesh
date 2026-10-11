@@ -7,6 +7,23 @@
 后续要求取代：Dots 对标、Codex/Pi、沟通能力多节点承担。当前控制工具
 不能原位修改 native objective；本文件不冒充该操作。
 
+21:52本人要求本轮先收尾、Claw报告，再一起重新plan；因此不再扩
+实施或新生产部署。本片新增三项source交付：免费stock callback+
+私有artifact、原3198 Store只_ingest_in_db提取、可选model_advice入口。
+这些不算生产调用/真实handoff/实际选模。反向SSH当前故障已独立
+定位到间歇新连接重传/timeout，本机→VPS仍认证可达，具体网络层
+原因未证明且未临时改网络。保留全部goal/43task/unknown和原服务。
+下一轮先与本人重新计划，不把本轮收尾当整个goal完成。
+
+21:31续接：上一轮是实质progress，goal仍active。a701001精确CI
+38134520892三版本已独立核对success。新增可选model_advice私有证据
+reader/Worker原上下文projection/本地Mesh只读tool与CLI，12新测试及
+115项相关组通过；未切生产Worker/实际dispatch，周期刷新仍pending。
+免费能力callback、原3198最小Store事务backport正并行实现，不重复
+此前已完成stock模型试验或receiver stop/resume。当前本机→VPS原
+认证A2A可达；reverse SSH出现间歇连接timeout，独立只读诊断中，
+不能沿用19:03双向connected来声称当前双向健康。完整目标不缩小。
+
 19:03新实际交付：最小独立receiver已唯一加载，同真实句柄carrier-only
 stop完整callback归还/HTTP200、原native全行hash与账本inode保持，
 随后唯一受控恢复收发/新socket已核，原Worker未重启。没有grant/
