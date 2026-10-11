@@ -133,3 +133,61 @@ session continuity and artifact outcomes without rewriting unknown histories.
 Keep model/effort changes at supported native idle/settled boundaries. This
 library is not a replacement harness, global allowlist, migration tool, or proof
 that the runtime already follows this policy.
+
+## Manual comparison requested by the owner, 2026-10-11
+
+The approximate intelligence values below are read from the owner's supplied AA
+screenshots, **not a fresh independent AA catalog or a verified endpoint score**.
+Retain the exact effort/mode assumption when using them. Zero is the advertised
+free cash price, not proof that this account/harness can currently submit a call.
+
+| Candidate | Manual quality reference | Actual free-cost comparison and use |
+| --- | --- | --- |
+| Step 5 Preview Free | Step 5 Preview about 44, if the physical variant/effort matches | Re-rate to `(0, about 44)`; a worthwhile general-task candidate, not rejected for its paid-chart position |
+| Muse Spark 1.3 Contributor Free | Muse Spark 1.3 `max` about 48, only if that configuration matches | Re-rate to zero cash, but the contributor program permits training; not a route for private Leader memory |
+| Nemotron 3 Ultra Free | Nemotron 3 Ultra about 23, if the configuration matches | Zero cash does not make its intelligence higher; normally not the complex-task first choice if a stronger zero-cost route is feasible |
+| MiMo-V2.6-Flash Free / MiMo-V2.5 Free | No matching score established by these screenshots | Do not borrow MiMo-V2.6-**Pro** or MiMo-V2.5-**Pro** scores; evaluate a public task or fetch a matching reference |
+| LongCat 2.5 Preview Free / Space Bunny Free | No matching point in these screenshots | Unknown score is not a fabricated low score or permanent rejection; use scoped task evidence |
+
+The owner-preferred subscription Luna `max` and task-appropriate GPT-6.1 Sol can
+also have zero incremental cash price while quota remains available. Several
+zero-cost models can be useful: task difficulty, latency, remaining quota, tools
+and privacy distinguish them. Do not always spend maximum effort merely because
+the cash price is zero. [Zen models, free prices and privacy](https://opencode.ai/docs/zen/)
+
+**Actual availability correction:** the one Pi 1.1.0 LongCat trial made one POST
+through an owned VPS SOCKS5h/TLS route and terminated with HTTP 403,
+`FreeTierError` / free-tier client restriction. There was no successful inference,
+tool or follow-up model call. OpenCode's collaborator explicitly says the free
+tier cannot be used in other harnesses; the general Zen API documentation is not
+permission for that tier. Do not invent an authentication/credit explanation,
+spoof OpenCode identity, or silently switch to a paid endpoint. Keep these free
+points as price/quality candidates **for a legitimately available route**; they
+are not currently verified usable Pi/Codex free routes.
+[OpenCode collaborator's tier-specific policy](https://github.com/anomalyco/opencode/issues/49621)
+
+The policy/source release is
+[4860c17](https://github.com/gih10012/personal-assistant-mesh/commit/4860c170ea367e4676ac62a2ef58193b5ab7eb3f).
+Root's 174 related tests passed; the frozen archive's local 2002 tests passed in
+168.940s and exact-head CI passed on Python 3.8/3.12/3.14. These are source tests,
+not evidence that the production continuous Leader already dispatches through
+this adviser. [Exact source CI](https://github.com/gih10012/personal-assistant-mesh/actions/runs/38129270175)
+The same frozen archive also passed 2002 tests in 177.832s on the VPS's actual
+Python 3.6.8, in a separate directory with no production service/config change.
+
+### Distinct Go route and existing local command
+
+The owner additionally identified `codex-opencode`. Read-only local inspection
+confirmed it ultimately runs native Codex, but its old default selects a Go Pro
+model and its startup can modify configuration and synchronize session/SQLite
+files. Root is not executing that default against the continuous Leader. Existing
+Go authentication is present, not a request for a new login or billing change.
+
+Go is a distinct route: its official documentation validates Codex and Pi,
+requires honest client identity plus a stable conversation header, and lists
+Step/LongCat free models at `/zen/go/v1/chat/completions`. The old direct **Zen**
+403 must not globally exclude those physical models or **Go**. Go's non-free
+Muse Contributor and Space Bunny are not the Zen `*-free` price rows. An isolated
+native Pi Step trial is being prepared using the existing Go key, true Pi UA and
+actual new native session ID; no outcome is claimed before the real tool/session
+results. [Go contract](https://opencode.ai/docs/go/)

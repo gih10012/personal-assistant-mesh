@@ -7,6 +7,32 @@
 后续要求取代：Dots 对标、Codex/Pi、沟通能力多节点承担。当前控制工具
 不能原位修改 native objective；本文件不冒充该操作。
 
+18:02本人追加本机skills/`codex-opencode`，并行继续。本机命令确实
+运行Codex、现有Go认证存在；不是所有免费route都被此前Zen403
+排除。Go官方明确允许Codex/Pi与限时free Step，区分价格0/既有认证/
+原生匿名OpenCode目录。隔离GoStep实际工具续接与底层receiver最小
+overlay准备并行，不能盲跑旧wrapper默认Pro/改原Leader历史或账单。
+
+17:33 owner 新模型合同：以当前能力/单任务成本前沿为参考，按实际
+任务选择模型及推理强度，优先高能力低成本；当前倾向Luna(max)与
+GPT-6.1 Sol，但不是永久白名单。横轴按本人实际可用渠道重定价，
+免费同型号/同推理配置可沿用能力参考并把增量现金成本记0；既有
+订阅额度内也不重复计API费。AA原价图的线下点不能因此永久排除，
+免费模型可进入重定价后的前沿。保留原AA来源/版本/观察时间与
+同配置假设，额度/时效、延迟、工具可靠性、隐私另记；免费不等于
+无限、付费API不因本人有Plus而免费。过期/未知质量不造分，不把
+图表几何或本轮测试变成native功能的闸门，unknown仍不重放。
+
+17:52新证据：4860c17纯实际成本前沿建议与legacy owner私有控制
+源码已公开，同冻结归档本机/VPS各2002项和CI三Python版本通过；
+前者未接live选模，后者未装生产receiver，正式core仍3198c87。
+Pi1.1.0只一次合成LongCat POST，经VPS/TLS实际403/FreeTierError，
+原失败session完整前缀保留，没有推理/工具/产物。上游明确免费层
+限制其他harness，修正此前通用API外推；不伪装或转付费。下一步
+既有Luna/Sol订阅优先，合法免费route另探索。17:37本人日报最初
+已知拒绝，现有恢复桥获得原上下文后仅一次有界补发，同原request
+accepted；不声称手机收件或完整HA。goal继续active，原43依赖不变。
+
 本次新增独立空缓存只读任务已由原Leader同thread完成epoch1、native
 plan三步完成：不是Root代传，实际入口执行/原进程轮询/新文件完整
 读取解码的native记录与目的端字节独立核对。原147270B artifact与

@@ -1,5 +1,53 @@
 # Codex/Pi 多模型接入研究
 
+## 18:02 本机 codex-opencode 与 Go 路线不能被 Zen 拒绝外推
+
+本人追加要求已定位本机`codex-opencode`：最终是原生Codex，不是
+OpenCode Leader。旧wrapper默认Go DeepSeek Pro，现存配置Kimi K3；
+无参数会重写选择，也会同步sessions/SQLite。现有Go认证已找到，
+无需要求新登录；未公开key或验证订阅。旧relay替换UA且丢session
+头，所以本次不运行其带配置/历史副作用的`--help`或盲用默认模型。
+
+Root实际完整读取Go关键合同：官方明确支持Codex/Pi，要求真实
+自身UA及连续session；`/zen/go/v1/chat/completions`下Step5 Preview
+Free与LongCat Preview Free另列限时Free/0天/不训练。因此旧Zen
+403不能推成所有Go/所有免费模型不可用。Go一般订阅价格/认证与
+特定模型的0增量费用分别核，不把Go的非free Muse/SpaceBunny
+当Zen的free别名。原有合法路线可用再按本人图重定价。
+[Go官方客户端、价格、端点及隐私](https://opencode.ai/docs/go/)
+
+另有真实OpenCode匿名目录：上游无密钥时保留零输入价模型并用
+内置`public`标记，不要求新账号；这属于真正OpenCode客户端路线，
+不证明旧Codex Responses relay完整工具兼容，也不是匿名Go订阅。
+不更换Codex/Pi主harness。下一隔离实际试验使用已有Go认证、真正
+Pi UA/原生新session头、严格Step免费ID和无秘密工具/原session
+续接，旧Zen失败会话不换route重试，长期Leader历史/配置不动。
+[上游匿名目录源码](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/provider/provider.ts)
+
+## 17:52 实测修正：Zen 免费层不允许其他 harness
+
+下列较早研究把“Zen 支持通用 API”过度外推到了免费层，现明确修正，
+保留旧记录但不按旧结论部署。Pi 1.1.0 原生 LongCat 免费路径实际只发
+一次合成 POST，经既有 VPS SOCKS5h/TLS 收到 HTTP403/FreeTierError，
+没有推理、工具或成功产物。固定版本 npm 安装仍 incomplete/exit137；
+同包 bundled SDK 可加载并保持原失败 session，不等于安装/推理成功。
+没有再请求、付费切换、新 key、充值或完整 Leader 历史外传。
+[实际记录](PI-ACTUAL-FREE-TRIAL.md)
+
+Root 实际读取官方仓库 issue49621：collaborator 在9月18日明确说明
+免费层不可用于其他 harness，限制仅免费层。这与本次客户端拒绝一致；
+不是仅少一个普通 Pi 参数，不能伪装客户端/会话来源来绕过。
+Zen 一般协议兼容仍可研究，但本人的 key 认证/余额未因此验证，当前
+没有可用 Pi/Codex Zen 免费推理的证据。
+[上游免费层限制](https://github.com/anomalyco/opencode/issues/49621)
+
+本人要求的价格逻辑不变：同物理模型/同推理配置的免费渠道按实际0
+现金重定价，保留能力参考，再看实际授权/可用性/工具/时延/额度/隐私。
+按本人截图，Step5 Preview约44可条件重定价为(0,约44)，不沿用付费
+淘汰线；MiMo Flash不能借Pro分，LongCat未知分不编造。优先既有
+订阅内Luna(max)/Sol；其他合法可用免费渠道继续独立探索，不更换
+Leader harness为OpenCode。[手动比较与策略](MODEL-FRONTIER-POLICY.md)
+
 ## 本次续接：现有认证线索与官方计划内推理候选
 
 Root再次官方docs搜索→实际fetch Other models及SIWC，读取Pi固定

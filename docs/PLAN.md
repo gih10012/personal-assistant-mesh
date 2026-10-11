@@ -7,6 +7,57 @@
 
 ## 最新可执行下一片（协调计划，不是新 runtime receipt）
 
+18:02本人追加本机skills/`codex-opencode`后，三个专员并行：本机
+wrapper/relay只读审计与新明确GoStep免费native工具试验，Go/Zen/
+匿名真实客户端的合同对比，以及原3198 receiver最小私有overlay
+准备/合成验证。wrapper是Codex但有默认Pro/历史同步副作用，不
+修改原文件或执行其副作用help。Go另允Codex/Pi/限时free Step，
+用现有Go认证、自身UA/原native session头、严格免费物理ID；原
+Zen403只保留自身route终态，不限制其他入口/模型或迫使新登录。
+receiver仍唯一原生产，本阶段仅冻结私有candidate不抢收发权。
+
+17:52更新：4860c17公开源码已冻结，两端各2002项实际通过（本机
+168.940s/VPS Python3.6.8 177.832s），精确head CI38129270175的
+3.8/3.12/3.14全success。actual-cost adviser与owner-only legacy IPC
+均源码候选，不称已经live选模或生产交接。唯一正式receiver/Worker
+仍3198c87，未切服务或启第二poller。
+
+Pi1.1.0两次固定隔离安装失败保留，最终exit137/incomplete；同包
+bundled原生SDK经VPS显式SOCKS5h/TLS只一次LongCat合成POST，
+terminal403/FreeTierError/clientrestriction，无推理/tool/产物。
+原session失败前缀/重开保持，owned进程全回收；不再对相同受限免费
+层盲试Step/其他alias、不伪装或转付费。上游协作者明确限制仅免费
+层其他harness；下一合法免费route先独立核准实际访问，现有Luna/
+Sol订阅继续优先，不能由这个拒绝阻止其他mesh任务。
+
+本人17:37日报同原request先known-rejected→既有native bridge原
+context_observed→retry_count1→accepted已从原authority核对，Root
+未新ID重发/另开receiver；accepted不是独立手机确认。保持恢复桥。
+当前最先执行仍009c原唯一receiver最小隔离overlay/真实句柄/仅停
+carrier并核原在途，随后受控交接和authority故障域脱钩；能力组合/
+模型实际费目录与原Leader上下文、Chat/官方Cloud按原task并行。
+
+17:33更新：真实两端认证A2A均connected，laptop可见公网能力、VPS
+可见校园能力；节点/worker/两provider/实际native-recovery服务active。
+误查不存在的laptop-native-recovery unit所得inactive不算故障，原
+assistant-mesh-native-recovery PID904已重新核验active。生产未改，
+只读采样VPS50completed/5failed、outbox101accepted，本机9completed/
+1needs_review/7pending；原guard保持，不用服务active证明完整自主性。
+
+模型选择采用owner实际渠道重定价后的动态前沿：模型+推理强度+
+物理route分别记，免费及订阅内增量现金0可以入选，不照抄AA原API
+价排除免费模型。AA质量匹配可明确作参考假设，参考价/实际费/额度/
+延迟/工具/隐私分开。当前Luna(max)/GPT-6.1 Sol是偏好非永久名单；
+不额外发明强制包络线或令图表不可用阻止native工作。独立专员做
+有限纯决策库/测试，Root再接真实Leader；源码不等于已运行选模。
+
+沟通接管的最小部署路线：独立冻结receiver覆盖层保留3198 Store/
+Worker/native goal，只引入legacy owned-loop及owner私有status/stop。
+receiver初始化不恢复/改写无关Leader steering；不覆盖Worker工作
+目录。真实fenced carrier之前单独移回_ingest_in_db事务接口并验证，
+不能用整份新Store顺带升级goal逻辑。实际停止/状态闭合、受控交接、
+communication authority/state故障域脱钩仍是明确下一交付。
+
 最新独立空缓存只读任务已完成epoch1/原Leader同thread/native plan
 三步完成，原生实际入口→同owned进程结果→新文件完整解码与独立
 字节oracle吻合。原GET/nonce/provider row/count未重放或改变；旧
@@ -25,11 +76,12 @@
    本地thin call、原ID status/result/artifact串成一个薄入口。既有
    原文件不可变重读可用，不重跑已完成业务；日常不让owner手拼JSON
    或逐URL预探。VPS认证Chat/模型出口另验，不替换全局native网络。
-3. **010，多模型**：本机既有OpenCode provider私有凭据记录已找到；
-   Pi未安装，key有效性未验。隔离固定上游版本，凭据只私有引用，
-   选一个已授权免费物理模型做无秘密tool→原session续接→产物实测，
-   不上传Leader完整记忆、不充值。优先原生provider/virtual模型机制，
-   实际physical dispatch的授权/费用/隐私/时效另核，不永久锁排行榜。
+3. **010/007e，多模型与实际成本**：既有凭据的Pi1.1.0/LongCat
+   一次实际请求被免费层harness策略拒绝，安装仍incomplete；原失败
+   保留，不靠换alias/伪装重试。下一允许Pi的合法免费route先核实际
+   可用性，再无秘密tool→原session续接→产物；Luna/Sol订阅继续。
+   已发布actual-cost建议/手动对图，接原Leader上下文与真实选模观察、
+   独立3–5天检查；不永久锁榜/上传私有记忆/充值或限制native功能。
 4. **006d/e，官方入口与临时节点**：Chat补HTTPS Streamable HTTP/
    OAuth、主账号真实模型工具调用；官方Codex Cloud核published环境
    并仅提交一个task-bound job/回收成果/退出后读回。两者都未入网。
