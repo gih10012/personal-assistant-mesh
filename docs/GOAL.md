@@ -1,6 +1,6 @@
 # 持续 owner goal
 
-更新时间：2026-10-10。整个 goal **active，未完成**。本文件是后续 owner
+更新时间：2026-10-11。整个 goal **active，未完成**。本文件是后续 owner
 指令的有效目标合同，与 [PLAN](PLAN.md)、[TASKS](TASKS.json) 一起续接。
 保留原生 goal 创建时间、连续会话、累计使用量和失败身份，不为改措辞
 重建 goal。历史 objective 的 OpenClaw/云端独立入口措辞已被 owner
@@ -69,7 +69,14 @@ Live、微信语音→ChatGPT Live、面板/网页、业务为后续 Mesh 委派
 Codex/Pi 多模型、PAM-006d/e Chat/官方 Cloud。PAM-007 原生 goal
 完整生命周期另验，但不能成为全部基础能力等待的串行闸门。
 风险相称测试和一次有边界实测后继续，不追求先写完所有环境/错误。
-当前没有全局 HA 或整体完成证据，见 [今日报告](STATUS-2026-10-10.md)。
+当前没有全局 HA 或整体完成证据，见 [今日报告](STATUS-2026-10-11.md)。
+
+2026-10-11 owner 日报重新核对：不把 carrier 多节点源码当 VPS 分区
+HA，不把 standalone CLI 安装当新任务执行；优先上线便捷统一能力
+组合、校园选择性路径与沟通权威状态的故障域脱钩。双向互联和原
+HTTPS完成产物再次只读核验，本机旧维护同scope guard仍挡四条维护。
+先核对原效果而非清记录；Chat原生工具、官方Cloud实际job和第三方
+工具续接均仍未验收。保持 native goal/thread/accounting，不重建。
 
 本次续接已实现有限源码：VPS owned SOCKS5h 路径并实测公开 HTTPS；
 Codex/Pi 显式 provider/私有配置与连续性保护；ClawBot 只读通道

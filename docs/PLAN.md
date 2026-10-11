@@ -1,9 +1,29 @@
 # 持续执行计划
 
-更新时间：2026-10-11（收发链路/认证原authority接入与薄调用入口源码推进）。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-11（09:05 owner日报/两端只读核查/多模型primary复核）。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
-[2026-10-10 报告](STATUS-2026-10-10.md)。
+[2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
+
+## 最新可执行下一片（协调计划，不是新 runtime receipt）
+
+| 并行片 | 固定任务 | 下一交付 | 到此推进，不无限补夹具 |
+| --- | --- | --- | --- |
+| 沟通连续 | 009c/d | owned loop监督/renew/原ID对账；真实停止/在途/状态核验后一次受控交接，并设计沟通authority/state脱离VPS单点 | 单次真实交接与故障域边界；same-VPS authority不称分区HA |
+| 一台机器式能力 | 004d/002b | 新明确task实测已装薄CLI；跨authority discover/call/delegate/status/artifact组合，校园选择性能力 | 一个新真实调用与产物；已有GET不重跑，日常不让本人手拼准入 |
+| 单节点恢复 | 003d/007 | 本机旧维护原效果核对；四条同scope epoch0 guard保持，恢复不抹旧unknown | 原身份可续接且新局部工作不全被旧scope堵塞 |
+| 模型/官方入口 | 010/006d/e | 合成无秘密provider工具续接；Chat HTTPS MCP/OAuth主账号调用；官方Cloud published environment/单次job | 各一真实闭环；缺新凭据/费用或访问权限明确问本人 |
+
+09:02–09:05 双向A2A/本机真实projection、原任务epoch16 completed、
+原provider settled/原产物SHA和池held0再次只读核验；服务未改。
+本机13条协调runtime task为8completed/1needs_review/4pending，后四条
+与旧effect guard同scope且epoch0，不能当自主修复已通过。ClawBot
+source的remote错误上报再次抛错会退出poll/send循环，owned监督与
+renew尚缺；先修再部署，不因临时ping/超时复制token开第二收发器。
+路径/容量证据与目标内容真实性分开，已授权日常请求的证据自动维护，
+不逐URL人工预探、不外推认证成功；原生功能继续按native/OS权限运行。
+从08:55上一报告到本次只读日报没有新生产功能，本日新增代码/安装
+与历史实际GET的差异详见今日报告，不把新查询算新执行。
 
 ## 最新 owner 方向
 

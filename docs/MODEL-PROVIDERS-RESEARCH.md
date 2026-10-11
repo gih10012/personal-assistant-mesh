@@ -1,5 +1,43 @@
 # Codex/Pi 多模型接入研究
 
+## 2026-10-11 primary 复核与实施结论
+
+Leader继续原生Codex；Pi作为可选多协议工作harness。接OpenCode Zen的
+模型API不要求运行OpenCode agent。现有custom route/已实测配置版本
+0.162.1和0.159.2只验了Responses；不能从最新网页倒推旧binary能力。
+当前官方文档另有built-in `amazon-bedrock`，这是独立AWS路由/认证，
+不是现有任意Claude中转已经兼容，不能宣称Codex所有provider永远只
+有Responses。[官方配置](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers)
+
+| 服务协议 | 本项目下一实际路径 |
+| --- | --- |
+| Responses | 原生Codex custom provider；验证完整stream/tool IDs/result/原thread |
+| Chat Completions | Pi `openai-completions`，Codex需真实兼容gateway |
+| Anthropic Messages / Claude中转 | Pi `anthropic-messages`，按真实base URL/auth核对 |
+| 非标准协议 | Pi provider extension或合格gateway，不能只改model alias |
+
+Zen primary 页10月10日更新，允许其他coding harness使用；当前
+Space Bunny/LongCat/Step免费路由为Chat Completions，页面声明限时
+免费、zero-retention/不训练。Muse Contributor为Responses，但隐私条款
+明确允许训练；它不是默认传送Leader记忆的安全兜底。免费表/名称仍需
+现有账户key、期限、限流与硬零新增支出实核，不开auto-reload。
+[Endpoints/pricing/privacy](https://opencode.ai/docs/zen/)
+
+Pi新核对上游HEAD `ea448f454af474f3e2fe9733b331e17b0662f5d6`；现有
+研究pin继续保留，未升级/安装。该HEAD和原pin的models.json显式env值
+使用`$NAME`/`${NAME}`，裸`NAME`是literal，不把旧示例的裸key-name
+照搬；provider ambient env auth另核。Mesh adapter不解析/输出secret，
+由native配置读取。[models](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/coding-agent/docs/models.md)、
+[resolver](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/coding-agent/src/core/resolve-config-value.ts)
+
+最小落地：已有授权route/私有认证引用→provider/model/protocol动态候选→
+已授权的VPS路径→合成无秘密tool往返→原session续接→产物读回。模型
+按当前可用性/任务/性能选择，不固定排行；上下文/工具/SSE不兼容的
+模型不能仅因提供HTTP文本就称完整harness兼容。Codex与Pi各保留原
+历史；跨provider/harness无损记忆另证，不复制完整Codex JSONL发给
+免费服务。当前源码候选及零模型配置验收不升级为第三方推理成功；
+`paid_api`尚未开放，未来付费Claude中转需预算/结算接入，非永久禁用。
+
 2026-10-10 核验官方文档和 Pi 上游
 `c5f5b3282d5e4203c085e59837ba17aeaf2829b5`。未创建 key、开账单或调用
 第三方模型；协议可接不代表当前 Mesh/账户已接通。
