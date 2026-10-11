@@ -94,6 +94,9 @@ task已同thread自然completed、native plan三步完成，不是整体联网/�
 原账本若仍仅在VPS，换carrier不等于VPS失联HA。新增能力薄入口组合
 原propose/reserve/link，CLI与native mesh入口由owner配置可选启用；
 未代批准权限、探网或重放调用，实际生产易用性仍需新的明确task验收。
+该接线/薄入口已冻结公开为1ed7ff9，同归档两端1857项与公开CI通过；
+独立VPS薄CLI安装/原worker认证hello已核验，零新模型/task/callback。
+正式核心和唯一receiver不变，实际新任务调用/容灾接管仍继续，非整体完成。
 校园新增本机和VPS经native SSH借本机校内HTTP200证据，未登记通用
 校园代理。普通Chat官方插件路线已重新确认，实际HTTP/OAuth/账号
 工具与官方Cloud job仍推进，不改成本机VPS冒充。

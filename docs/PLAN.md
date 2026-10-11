@@ -34,6 +34,10 @@ propose/reserve/link并接CLI/native mesh可选入口；先冻结双端/CI，再
 独立安装薄入口并用新明确task实测，不重跑已completed的原GET。
 Root集成；clawbot专员拥有Channel/集成测试，egress专员拥有薄helper，
 独立审查专员验证原authority/认证边界。完整原goal/43个task依赖保留。
+本轮已冻结公开为1ed7ff9，同归档双端1857项、CI三个Python版本通过；
+独立VPS薄CLI已安装并用原worker认证hello读回，无新task/model/callback。
+正式core/receiver未改；下一步是新明确task的实际易用性与产物验收，
+不是再跑上一轮completed GET，也不把安装/hello当受管执行成功。
 
 | 阶段 | Task | 当前工作与依赖 | 验收依据 |
 | --- | --- | --- | --- |
