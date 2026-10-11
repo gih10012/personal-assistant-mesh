@@ -30,6 +30,17 @@ model choose among currently accessible models based on work and evidence, not
 a permanent ranking. Upgrades stay within owner authority and zero new spend;
 test in an isolated installation and retain a recovery path.
 
+Owner model preference: compare model + reasoning effort + actual accessible
+route on the current intelligence/cost frontier, preferring useful high-quality,
+low-cost points. Reprice AA reference costs using the owner's actual route:
+free routes and included subscription calls can have zero incremental cash
+cost; track quota, latency, privacy and tool reliability separately. Do not
+reject a free model merely because its paid-price AA point is below the line.
+Use matching physical-model/effort quality as an explicit reference assumption,
+not evidence that every same-name gateway is identical. Current Luna(max)/
+GPT-6.1 Sol preference is revisable; no permanent model list, invented score,
+mandatory geometry gate, native-feature interception or unknown-turn replay.
+
 Do not turn validation into an endless completeness exercise. Test the risk and
 protocol boundaries, document unsupported environments and real limits, then
 advance the next task. Do not call a directory, self-report, fixture, live PID,
