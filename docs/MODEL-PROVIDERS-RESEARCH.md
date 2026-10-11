@@ -1,5 +1,31 @@
 # Codex/Pi 多模型接入研究
 
+## 本次续接：现有认证线索与官方计划内推理候选
+
+Root再次官方docs搜索→实际fetch Other models及SIWC，读取Pi固定
+`ea448f454af474f3e2fe9733b331e17b0662f5d6` models/providers/virtual-models
+原文与Zen当前端点/价格/隐私。Codex custom仍需要兼容Responses；
+Pi可原生接Chat Completions/Anthropic Messages，OpenCode只是API
+provider，不换Leader harness。[Other models](https://learn.chatgpt.com/docs/models#other-models)、
+[Pi models](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/coding-agent/docs/models.md)
+
+实际本机已有OpenCode provider私有认证记录，仅读provider/type/引用
+存在性，未输出或复制key，未调用模型；ambient key未设，Pi目录和
+binary未安装。因此下一步优先复用既有私有引用，不先要求新key，
+但不能把存在性叫有效认证。先一个已授权免费物理模型合成无秘密
+工具/原session续接/完整产物，然后再接原生virtual routing；免费
+alias不能授权实际paid dispatch，原Leader长期历史不外传。Zen有
+限时免费与训练用途例外，且auto-reload可能充值，不能宣称无限免费。
+[Zen端点/价格/隐私](https://opencode.ai/docs/zen/)、
+[Pi providers](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/coding-agent/docs/providers.md)
+
+SIWC官方已有合格Plus/Pro的计划内推理路径，app请求独立consent。
+消耗既有Codex/Work usage，app weekly cap不是新增额度，且不给
+Chat conversations/memories访问。这是候选“计划内Responses推理
+能力”，与Chat模型调用Mesh MCP的入口方向不同；不是任意第三方
+key、普通Chat无限API或已经安装成功。本次只读研究，无新认证/开支。
+[Sign in with ChatGPT](https://learn.chatgpt.com/docs/sign-in-with-chatgpt)
+
 ## 11:42 补充：复用原生机制，不先造第二套harness
 
 两名并行专员分别核对协议/路由与Mesh最小衔接，Root再次实际fetch

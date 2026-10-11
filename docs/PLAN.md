@@ -1,11 +1,43 @@
 # 持续执行计划
 
-更新时间：2026-10-11（12:57完整原产物已回收/原Leader实际消费完成；首轮自动传输失败保留）。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-11（独立空缓存原Leader自行完整传输/消费已验证；legacy载体停止观察源码已发布，生产交接仍未做）。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
 
 ## 最新可执行下一片（协调计划，不是新 runtime receipt）
+
+最新独立空缓存只读任务已完成epoch1/原Leader同thread/native plan
+三步完成，原生实际入口→同owned进程结果→新文件完整解码与独立
+字节oracle吻合。原GET/nonce/provider row/count未重放或改变；旧
+首轮失败保持。不能再把“Leader自己取回此文件”列为未做，也不能
+把本次明确任务升级为所有父子任务自动回传/统一“一台机器”。
+
+下一片并行交付（继续现有task，不新增协调身份）：
+
+1. **009c/d，优先沟通容灾**：697b98c已保留legacy实际收发Thread、
+   完整callback admitted/returned与期限内stop/snapshot。先在唯一
+   原receiver备份边界加载、持有真实句柄，只停carrier并核原在途/
+   canonical状态；不停止Leader/history，不凭PID/timeout签交接。
+   再一次受控换到laptop。authority/state/arbitration还在VPS时不叫
+   VPS分区HA；故障域脱钩必须随后独立验收。
+2. **004d/002b，便捷能力组合**：把已实测的discover、A2A delegate、
+   本地thin call、原ID status/result/artifact串成一个薄入口。既有
+   原文件不可变重读可用，不重跑已完成业务；日常不让owner手拼JSON
+   或逐URL预探。VPS认证Chat/模型出口另验，不替换全局native网络。
+3. **010，多模型**：本机既有OpenCode provider私有凭据记录已找到；
+   Pi未安装，key有效性未验。隔离固定上游版本，凭据只私有引用，
+   选一个已授权免费物理模型做无秘密tool→原session续接→产物实测，
+   不上传Leader完整记忆、不充值。优先原生provider/virtual模型机制，
+   实际physical dispatch的授权/费用/隐私/时效另核，不永久锁排行榜。
+4. **006d/e，官方入口与临时节点**：Chat补HTTPS Streamable HTTP/
+   OAuth、主账号真实模型工具调用；官方Codex Cloud核published环境
+   并仅提交一个task-bound job/回收成果/退出后读回。两者都未入网。
+   新官方Cloud可设置All网络，持久VM有期限且不继承本机登录/skills；
+   由agent自适应，不照搬固定Linux环境。SIWC计划内Responses单列
+   推理候选，不混作普通Chat无限API，也不读取Chat历史。
+
+以下12:57及更早为保留阶段，不覆盖最新实测。
 
 12:57后续consume task completed epoch1/原Leader同thread/三步plan
 完成。Root核对真实native read_bytes、完整base64解码/sha工具调用

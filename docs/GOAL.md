@@ -7,6 +7,21 @@
 后续要求取代：Dots 对标、Codex/Pi、沟通能力多节点承担。当前控制工具
 不能原位修改 native objective；本文件不冒充该操作。
 
+本次新增独立空缓存只读任务已由原Leader同thread完成epoch1、native
+plan三步完成：不是Root代传，实际入口执行/原进程轮询/新文件完整
+读取解码的native记录与目的端字节独立核对。原147270B artifact与
+109356B正文完全一致；原provider完整row及条数不变，未重GET。
+首轮失败及其pending步骤仍保留，单个原文件回收不是全部能力自动
+组合。697b98c新增legacy载体实际Thread/完整callback停止观察源码；
+生产唯一receiver未切换，ClawBot独立故障域HA仍为第一优先欠项。
+并行下一交付是统一跨authority便捷入口、真实载体交接/故障域脱钩、
+既有OpenCode凭据由Pi复用的无秘密tool/session实测，以及主账号Chat
+原生插件/官方Cloud实际job。已有provider凭据仅查元数据，不等于
+认证成功；SIWC计划内Responses候选与Chat→Mesh插件入口分开，均
+不能称无限额度。原goal active和43个协调任务/依赖继续保留。
+
+以下12:57及更早段落保留原阶段/失败，不覆盖本次新空缓存实测。
+
 12:57后续只读消费task真实completed epoch1，原Leader同thread三步
 native plan完成；Root核对实际native read_bytes/base64 decode/sha
 工具调用及对应输出，不仅是final自报。VPS完整文件回收和Leader

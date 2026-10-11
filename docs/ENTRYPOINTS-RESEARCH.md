@@ -1,5 +1,29 @@
 # Chat / 原生 Codex / Codex Cloud 接入研究
 
+## 2026-10-11 当前官方路线补查
+
+Chat原生插件和官方Codex Cloud仍未实际入网。Firefox手动桥、本机
+stdio MCP的已验证往返不外推；内部`cloud`只指Alibaba VPS。
+此前旧CLI repo-scoped环境查询200/[]不能判断全账号无Cloud权益。
+
+最新官方Cloud使用published reusable environment，每个task独立VM/
+workspace，可选All (unrestricted)网络，现有task有自身保存状态；
+默认VM从最后start/resume起最多七天可恢复。它没有computer/browser
+use，不继承本机私人skills/登录/进程。旧internet-access页面已标
+Legacy，不能据旧preset固化新环境。下一片核主账号真实published
+环境，再一个持久Mesh task绑定的job/callback/成果与退出后读回，
+网络范围按owner需求，不把平台自己的边界说成Mesh Shell限制。
+[当前Cloud环境](https://learn.chatgpt.com/docs/environments/cloud-environments)
+
+普通Chat的MCP插件可通过HTTPS Streamable HTTP及OAuth接入，
+需要本人身份映射/作用域。现有三工具只有stdio，尚缺此sidecar与
+真实Chat模型调用。Chat具体模型/工具/定时任务额度必须实核，不
+承诺无限。SIWC另可提供合格计划内Responses推理，但消费既有
+Codex/Work额度、不增加 allowance、不访问Chat历史/memories；它
+不是Chat→Mesh插件入站的同一能力。
+[Custom MCP](https://developers.openai.com/api/docs/guides/custom-mcp-server)、
+[SIWC](https://learn.chatgpt.com/docs/sign-in-with-chatgpt)
+
 初版核对日期：2026-10-09；实际入口补充：2026-10-10。本文区分官方
 已支持的接口、项目设计推论、以及尚未验收的账号能力。初版研究只读
 文档、公开仓库和本项目代码；后续 Root 的实际核验/安装另列如下，
