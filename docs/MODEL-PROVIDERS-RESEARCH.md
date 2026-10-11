@@ -2,6 +2,13 @@
 
 ## 2026-10-11 primary 复核与实施结论
 
+11:25再次按官方docs搜索→实际fetch核对custom provider/Other models，
+并读取Zen当前endpoint/pricing/privacy与Pi固定HEAD原文。当前Codex
+官方明确custom gateway需Responses，不支持`wire_api="chat"`或
+Chat-Completions-only端点；built-in Bedrock例外单列，不能泛化成
+任意Claude中转已经兼容。结论与09:05研究一致，本次只读核对未创建
+第三方key、充值或模型turn。[Other models](https://learn.chatgpt.com/docs/models#other-models)
+
 Leader继续原生Codex；Pi作为可选多协议工作harness。接OpenCode Zen的
 模型API不要求运行OpenCode agent。现有custom route/已实测配置版本
 0.162.1和0.159.2只验了Responses；不能从最新网页倒推旧binary能力。

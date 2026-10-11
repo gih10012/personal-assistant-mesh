@@ -1,31 +1,43 @@
 # 持续执行计划
 
-更新时间：2026-10-11（11:10校园/沟通监督源码与原Leader新薄入口task推进）。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-11（11:21新薄入口实际闭环、校园独立上线及监督源码冻结）。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
 
 ## 最新可执行下一片（协调计划，不是新 runtime receipt）
 
-11:10 新推进：校园通用CIDR/端口HTTP(S) callback源码已交付，
-ClawBot固定本地诊断/可停止backoff/显式原term监督与server启动接线
-已实现；目前聚焦测试通过，尚未部署receiver或宣称VPS分区HA。
-已有第二Codex账号较新本机缓存在同账号核验和完整旧缓存备份后同步，
-零模型account/quota自然0核对可用，历史/正式配置/服务未改。原Leader
-新明确task `PAM-004d-thin-cli-handoff-20261011-v1`已仅提交一次；
-有新独立10384B公开文档实际GET/TLS/Git oracle观测，Root未reserve/
-execute。接下来读实际原task/薄CLIjournal/provider/产物，过期或unknown
-只续接原身份，不重跑旧completed GET或换ID绕过失败。
-校园能力源码不是已经登记的校园出口；随后独立安装/注册/真实任务
-验收，与Chat/官方Cloud入口、沟通故障域脱钩并行继续。
+11:21 新推进：245bc83同一归档本机/VPS各1902项与公开CI成功。
+原Leader的新明确task `PAM-004d-thin-cli-handoff-20261011-v1`
+同thread completed epoch1、native plan三步完成，薄入口原propose/
+reserve/link均confirmed；独立provider自动GET200/TLS0/10384B，Root
+只读原产物与Git oracle SHA一致、原journal settled/池held0。
+不是Root代reserve/execute，不是重新跑旧completed GET，也不证明
+多路径最优、认证模型或跨authority自动组合。第二Codex账号同身份
+较新缓存已保留旧备份并同步，零模型account/quota自然0核对可用；
+没有新key/费用、人工历史变更/guard清理/正式core或receiver切换。
+
+校园CIDR/端口HTTP(S)已独立安装、登记/续租、service active且空闲，
+VPS实际projection可见，仅为declared delegation candidate。下一步
+先在既有owner私有配置绑定独立观测principal，保留备份和原DB/history；
+再一个新明确任务经A2A→校园authority本地薄call→自动provider→成果。
+模型在owner网段/端口范围内选目标，不能每个URL都要求本人手配；
+路径健康/容量与本次内容/认证分别记录，原生任意联网不被阻断。
+校园受管请求尚未执行，不把service或projection当实际调用成功。
+
+ClawBot本地诊断、interruptible backoff、显式same-term owned监督/
+renew及server生命周期接线已测试发布，生产尚未启用。下一片受控
+旧caller停止/在途/原状态闭合验证，并把communication authority/
+state/witness与VPS故障域脱钩；不复制token抢权或称same-VPS renew是HA。
 
 | 并行片 | 固定任务 | 下一交付 | 到此推进，不无限补夹具 |
 | --- | --- | --- | --- |
 | 沟通连续 | 009c/d | owned loop监督/renew/原ID对账；真实停止/在途/状态核验后一次受控交接，并设计沟通authority/state脱离VPS单点 | 单次真实交接与故障域边界；same-VPS authority不称分区HA |
-| 一台机器式能力 | 004d/002b | 新明确task实测已装薄CLI；跨authority discover/call/delegate/status/artifact组合，校园选择性能力 | 一个新真实调用与产物；已有GET不重跑，日常不让本人手拼准入 |
+| 一台机器式能力 | 004d/002b | VPS薄CLI新task已实际闭环；继续跨authority discover/call/delegate/status/artifact组合与校园实际任务 | 一个校园/远端成果闭环；已有GET不重跑，日常不让本人手拼准入 |
 | 单节点恢复 | 003d/007 | 本机旧维护原效果核对；四条同scope epoch0 guard保持，恢复不抹旧unknown | 原身份可续接且新局部工作不全被旧scope堵塞 |
 | 模型/官方入口 | 010/006d/e | 合成无秘密provider工具续接；Chat HTTPS MCP/OAuth主账号调用；官方Cloud published environment/单次job | 各一真实闭环；缺新凭据/费用或访问权限明确问本人 |
 
+以下09:02–09:05为保留的历史日报，不覆盖上面的新部署/执行证据。
 09:02–09:05 双向A2A/本机真实projection、原任务epoch16 completed、
 原provider settled/原产物SHA和池held0再次只读核验；服务未改。
 本机13条协调runtime task为8completed/1needs_review/4pending，后四条
@@ -57,6 +69,11 @@ VPS/Leader 工作区。内建 node ID `cloud` 保留且指 Alibaba VPS，展示
 所有环境都必须照抄的运行方式。
 
 ## 执行顺序与并行分工
+
+最新续接已完成新薄CLI任务验收和校园独立登记（见本页首节），
+新增source245bc83包含校园callback及Channel owned监督，双端1902项/
+公开CI通过；正式core仍3198c87，生产receiver未变。下文保留此前
+1ed7ff9阶段证据，不再将已完成的新薄入口验收列为当前阻塞。
 
 本轮009c已从未接线库推进为实际Channel接口＋专用carrier HTTP＋原
 authority事务/完整结果spool，隔离双承载交接、原身份与unknown保护通过。
