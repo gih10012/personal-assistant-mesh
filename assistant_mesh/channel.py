@@ -5,6 +5,7 @@ Secrets/raw attachment references remain in private runtime state.
 """
 import base64
 import json
+import math
 import os
 import socket
 import struct
@@ -103,8 +104,11 @@ class Channel:
         self.carrier_fence = carrier_fence
         self.stop = threading.Event()
         self._supervisor = None
+        self.loop_lifecycle = None
         self._diagnostics = LocalDiagnostics()
         self._loop_lock, self._running_loops = threading.Lock(), set()
+        self._loop_calls = {lane: {'admitted': 0, 'returned': 0, 'active': False}
+                            for lane in ('poll', 'send')}
         if carrier_fence is not None:
             if not isinstance(carrier_fence, CarrierFence):
                 raise ChannelError('channel_fence_invalid')
@@ -288,8 +292,22 @@ class Channel:
         backoff = BoundedBackoff(interval)
         try:
             while not self.stop.is_set():
+                # Admission and an owner lifecycle's stop request share this
+                # lock. A callback already admitted is not cancelled/replayed;
+                # no NEW callback is admitted after that stop boundary.
+                with self._loop_lock:
+                    if self.stop.is_set():
+                        break
+                    state = self._loop_calls[lane]
+                    state['admitted'] += 1
+                    state['active'] = True
                 try:
-                    operation()
+                    try:
+                        operation()
+                    finally:
+                        with self._loop_lock:
+                            state['returned'] += 1
+                            state['active'] = False
                     self._diagnostics.clear(lane)
                     delay = backoff.reset()
                 except Exception as error:
@@ -307,3 +325,126 @@ class Channel:
 
     def run_send(self):
         self._run_loop('send', self.send_once, 0.5)
+
+    def loop_calls(self):
+        """Actual local loop callback returns, not canonical/external closure."""
+        with self._loop_lock:
+            return {lane: dict(state) for lane, state in self._loop_calls.items()}
+
+
+class ChannelLoopLifecycle:
+    """Owner-held legacy/unsupervised loop handles; no term or proof authority.
+
+    The server still starts the same poll/send callbacks with the same cadence.
+    This group retains their actual Thread objects and observes both callback
+    entry and return. Stop only sets this Channel's existing event and joins
+    these owned threads, never an HTTP server, worker, Leader or history writer.
+    A deadline does not cancel an iLink call or turn an unknown send into success.
+    """
+    def __init__(self, channel):
+        if (getattr(channel, 'loop_lifecycle', None) is not None
+                or getattr(channel, '_supervisor', None) is not None
+                or not isinstance(getattr(channel, 'stop', None), threading.Event)
+                or not all(callable(getattr(channel, 'run_' + lane, None))
+                           for lane in ('poll', 'send'))):
+            raise ChannelError('channel_loop_lifecycle_unavailable')
+        self.channel = channel
+        self._lock = threading.Lock()
+        self._started, self._start_failed = False, False
+        self._threads, self._entered, self._returned, self._failed = {}, set(), set(), set()
+        channel.loop_lifecycle = self
+
+    def _run(self, lane, target):
+        with self._lock:
+            self._entered.add(lane)
+        try:
+            target()
+        except BaseException:
+            with self._lock:
+                self._failed.add(lane)
+            raise
+        finally:
+            with self._lock:
+                self._returned.add(lane)
+
+    def _request_stop(self):
+        lock = getattr(self.channel, '_loop_lock', None)
+        if lock is None:
+            self.channel.stop.set()
+        else:
+            with lock:
+                self.channel.stop.set()
+
+    def start(self):
+        with self._lock:
+            if self._started or self.channel.stop.is_set():
+                raise ChannelError('channel_loop_lifecycle_already_started')
+            loop_lock = getattr(self.channel, '_loop_lock', None)
+            if loop_lock is not None:
+                with loop_lock:
+                    if self.channel._running_loops:
+                        raise ChannelError('channel_loop_already_running')
+            self._threads = {lane: threading.Thread(target=self._run,
+                args=(lane, getattr(self.channel, 'run_' + lane)),
+                name='mesh-channel-' + lane, daemon=True) for lane in ('poll', 'send')}
+            # Keep even a partial start. It cannot become a fresh group or
+            # evidence that an unstarted/missing handle has returned.
+            self._started = True
+            try:
+                for lane in ('poll', 'send'):
+                    self._threads[lane].start()
+            except Exception:
+                self._start_failed = True
+                self._request_stop()
+                raise ChannelError('channel_loop_start_failed') from None
+        return self
+
+    def stop(self, timeout=5):
+        if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                or not math.isfinite(timeout) or not 0 <= timeout <= 60):
+            raise ValueError('channel_loop_stop_timeout_invalid')
+        self._request_stop()
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            threads = list(self._threads.values())
+        for thread in threads:
+            if (isinstance(thread, threading.Thread) and thread.ident is not None
+                    and thread is not threading.current_thread()):
+                thread.join(max(0, deadline - time.monotonic()))
+        return self.snapshot()['owned_threads_stopped']
+
+    def snapshot(self):
+        with self._lock:
+            threads = dict(self._threads)
+            entered, returned, failed = set(self._entered), set(self._returned), set(self._failed)
+            started, start_failed = self._started, self._start_failed
+        actual = (set(threads) == {'poll', 'send'}
+            and all(isinstance(thread, threading.Thread) and thread.ident is not None
+                    for thread in threads.values())
+            and len({id(thread) for thread in threads.values()}) == 2)
+        alive = {lane: thread.is_alive() if isinstance(thread, threading.Thread) else None
+                 for lane, thread in threads.items()}
+        stopped = self.channel.stop.is_set()
+        ended = (started and actual and stopped and not any(alive.values())
+                 and entered == returned == {'poll', 'send'})
+        observe = getattr(self.channel, 'loop_calls', None)
+        calls = observe() if callable(observe) else None
+        loop_lock = getattr(self.channel, '_loop_lock', None)
+        if loop_lock is not None:
+            with loop_lock:
+                running = sorted(self.channel._running_loops)
+        else:
+            running = None
+        callbacks_returned = (stopped and calls is not None and all(
+            not row['active'] and row['admitted'] == row['returned'] for row in calls.values()))
+        return {'scope': 'communication_carrier_only', 'started': started,
+            'start_failed': start_failed, 'stop_requested': stopped,
+            'actual_owned_thread_handles': actual, 'threads_alive': alive,
+            'loop_entries_observed': sorted(entered), 'loop_returns_observed': sorted(returned),
+            'loop_failures_observed': sorted(failed), 'owned_threads_stopped': bool(ended),
+            'running_loops': running, 'loop_calls': calls,
+            'local_callbacks_returned': bool(callbacks_returned),
+            'local_stop_closed': bool(ended and callbacks_returned and running == []),
+            'external_operation_quiescence_verified': False,
+            'canonical_channel_state_closed_verified': False,
+            'handoff_authorized': False, 'native_features_restricted': False}

@@ -7,7 +7,7 @@ from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlsplit
 
 from .allocations import Allocations
-from .channel import Channel, ILink
+from .channel import Channel, ChannelLoopLifecycle, ILink
 from .config import read_secret
 from .ingress import Ingress, validate_config as validate_ingress_config, validate_peer as validate_ingress_peer
 from .ingress_results import IngressResults
@@ -475,8 +475,10 @@ def _start_channel(api, config):
     elif api.ilink is not None:
         channel = Channel(api.store, api.ilink)
     if channel is not None and supervisor is None:
-        for target in (channel.run_poll, channel.run_send):
-            threading.Thread(target=target, daemon=True).start()
+        # Retain actual legacy callback/Thread handles for an owner-controlled
+        # carrier-only stop. No witness, lease, proof or second receiver is
+        # created; the return shape and optional fenced supervisor are unchanged.
+        ChannelLoopLifecycle(channel).start()
     return channel, supervisor
 
 
@@ -541,5 +543,7 @@ def serve(config, ready=None):
             # Bounded local cleanup is not remote iLink quiescence proof.
             supervisor.stop()
         elif channel:
-            channel.stop.set()
+            # A blocked transport remains unclosed when the bounded join ends.
+            # It is never killed/replayed or treated as a migration permission.
+            channel.loop_lifecycle.stop()
         server.server_close()
