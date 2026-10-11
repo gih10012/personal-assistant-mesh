@@ -7,7 +7,23 @@
 后续要求取代：Dots 对标、Codex/Pi、沟通能力多节点承担。当前控制工具
 不能原位修改 native objective；本文件不冒充该操作。
 
-11:21续接：245bc83同归档双端各1902项和公开CI通过。新薄入口task
+11:38续接：校园新明确父task `PAM-002b-campus-handoff-20261011-v1`
+只提交一次，原VPS Leader同thread经A2A委派真实laptop child；child
+completed epoch1，父经原acceptance receipt自动回收并同thread续接
+completed epoch2，两端native plan均三步完成。child本机薄入口原
+propose/reserve/link confirmed，自动校园provider GET200/109356B；
+Root独立读取完整artifact正文，与先前owner独立样本逐字节及SHA一致，
+原provider settled/池held0。HTTP公开校内页不证明TLS、学校登录或
+模型推理；ledger的provider_reported/execution_verified=false保留。
+父端收到摘要/回执，尚未自动取回完整artifact，不把SHA当正文已传。
+仅原本机server配置加入既有operator独立观测绑定，完整旧配置/一致
+SQLite备份保留，旧task/native session/chunk/action逐行hash不变；
+一次受控本机node重启，global worker、校园provider、VPS receiver未重启。
+校园specialist按该类项目新建原生thread并保留，旧unknown未重放。
+下一片优先跨authority成果便捷入口与ClawBot真实停止/状态闭合及
+故障域脱钩；Chat原生/官方Cloud/第三方模型工具续接仍未验收。
+
+以下11:21为保留的上一片：245bc83同归档双端各1902项和公开CI通过。新薄入口task
 已由原Leader同thread真实completed epoch1，原propose/reserve/link
 均confirmed，自动provider GET200/TLS0/10384B产物匹配独立Git oracle，
 原journal settled/池held0。校园通用网段HTTP(S)已独立登记/常驻，VPS

@@ -1,20 +1,61 @@
 # Codex/Pi 多模型接入研究
 
+## 11:42 补充：复用原生机制，不先造第二套harness
+
+两名并行专员分别核对协议/路由与Mesh最小衔接，Root再次实际fetch
+官方配置/Other models/Bedrock并读取Pi固定commit和Zen原文。只读
+研究，没有安装升级、创建key、开账单、调用第三方模型或上传长记忆。
+
+最新Bedrock专页区分`amazon-bedrock-runtime`（Runtime/CRIS）与
+`amazon-bedrock`（Mantle）；它们是AWS认证的支持OpenAI模型路线，
+不是任意Claude/非Responses协议例外。Runtime不支持hosted web
+search。这些是当前上游文档，不证明现部署0.162.1/0.159.2已支持
+新内置provider，也不证明官方Codex Cloud可使用该本地配置。
+[官方Bedrock](https://learn.chatgpt.com/docs/amazon-bedrock)
+
+Pi固定HEAD `ea448f454af474f3e2fe9733b331e17b0662f5d6`已经有
+OpenCode原生provider/`OPENCODE_API_KEY`，可先复用，不必运行OpenCode
+agent或先写协议extension。该版本还有`registerVirtualModel`：每次
+请求选物理模型、记录实际provider/model，route state随原session
+分支持久保存且跨compaction；tool continuation/retry可sticky到
+previous/failed物理模型。这贴合能力化/动态选模方向，不能从读到
+上游功能推断现有Mesh已装好或已跑通。
+[providers](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/coding-agent/docs/providers.md)、
+[virtual models](https://github.com/earendil-works/pi/blob/ea448f454af474f3e2fe9733b331e17b0662f5d6/packages/coding-agent/docs/virtual-models.md)
+
+现Mesh Pi adapter只在同provider内set_model，费用合同核对selected
+provider/model；将virtual alias声明免费不能授权其实际paid physical
+dispatch。下一片先隔离已有授权的单个免费物理模型，完整tool结果/
+原session续接/产物验收；之后把实际dispatch/auth/cost/privacy/时效
+接到原生router，不永久锁模型，也不构造另一套transcript替代Pi。
+Mesh费用合同不改变用户直接运行原生Pi/Shell的能力。
+
+Codex gateway仍需实际alias/catalog及stream/tool/harness续接验收；
+不把HTTP文本或模型自报当上游路由证明。认证、transport和部署版本
+分别核对，不能把所有HTTP续接都强制成WebSocket协议。免费Zen
+Chat Completions候选优先Pi；Claude Messages中转也优先Pi原生协议。
+Muse Contributor训练用途仍排除默认私有长记忆传送，关闭自动充值
+并核对实际账户/key/限流。没有凭据时只报告缺项，不生成新key。
+[gateway](https://learn.chatgpt.com/docs/enterprise/gateway-compatibility)、
+[Zen](https://opencode.ai/docs/zen/)
+
 ## 2026-10-11 primary 复核与实施结论
 
 11:25再次按官方docs搜索→实际fetch核对custom provider/Other models，
 并读取Zen当前endpoint/pricing/privacy与Pi固定HEAD原文。当前Codex
 官方明确custom gateway需Responses，不支持`wire_api="chat"`或
-Chat-Completions-only端点；built-in Bedrock例外单列，不能泛化成
+Chat-Completions-only端点；built-in AWS Bedrock路由单列，不能泛化成
 任意Claude中转已经兼容。结论与09:05研究一致，本次只读核对未创建
 第三方key、充值或模型turn。[Other models](https://learn.chatgpt.com/docs/models#other-models)
 
 Leader继续原生Codex；Pi作为可选多协议工作harness。接OpenCode Zen的
 模型API不要求运行OpenCode agent。现有custom route/已实测配置版本
 0.162.1和0.159.2只验了Responses；不能从最新网页倒推旧binary能力。
-当前官方文档另有built-in `amazon-bedrock`，这是独立AWS路由/认证，
-不是现有任意Claude中转已经兼容，不能宣称Codex所有provider永远只
-有Responses。[官方配置](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers)
+当前官方配置另有built-in `amazon-bedrock`，专页另列`amazon-bedrock-runtime`；
+这是独立AWS认证的支持OpenAI模型路线，不是现有任意Claude中转已经
+兼容，也不能从文档推断部署binary或未来所有协议能力。
+[官方配置](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers)、
+[Bedrock](https://learn.chatgpt.com/docs/amazon-bedrock)
 
 | 服务协议 | 本项目下一实际路径 |
 | --- | --- |

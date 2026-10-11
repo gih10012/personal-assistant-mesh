@@ -1,13 +1,25 @@
 # 持续执行计划
 
-更新时间：2026-10-11（11:21新薄入口实际闭环、校园独立上线及监督源码冻结）。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-11（11:38校园真实A2A/本地薄调用/原Leader回收完成）。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
 
 ## 最新可执行下一片（协调计划，不是新 runtime receipt）
 
-11:21 新推进：245bc83同一归档本机/VPS各1902项与公开CI成功。
+11:38 新推进：新校园父task只提交一次；原VPS Leader经A2A委派
+laptop同类项目specialist，child completed epoch1，父原thread自动
+回收/续接completed epoch2。child原薄call三stage confirmed、自动
+provider GET200/109356B，Root独立读取完整artifact与owner样本逐
+字节匹配，原journal settled/池held0。两端native plan三步完成。
+本机原owner operator作为独立观测principal绑定已生效，完整旧配置/
+一致DB备份及旧task/native session/chunk/action逐行hash保留；只
+受控重启本机node，既有global worker/provider与VPS receiver未重启。
+真实HTTP没有TLS/学校登录，provider_reported仍非ledger execution_verified。
+父端只收到真实receipt/摘要，完整正文未自动回传；不能称跨authority
+统一call/artifact已完成。下一片读原artifact，不重复GET或改原operation。
+
+以下11:21为上一片保留记录：245bc83同一归档本机/VPS各1902项与公开CI成功。
 原Leader的新明确task `PAM-004d-thin-cli-handoff-20261011-v1`
 同thread completed epoch1、native plan三步完成，薄入口原propose/
 reserve/link均confirmed；独立provider自动GET200/TLS0/10384B，Root
@@ -25,6 +37,13 @@ VPS实际projection可见，仅为declared delegation candidate。下一步
 路径健康/容量与本次内容/认证分别记录，原生任意联网不被阻断。
 校园受管请求尚未执行，不把service或projection当实际调用成功。
 
+上段为11:21保留记录，其“尚未执行”已由11:38实际校园任务更新。
+11:42 primary补查：Pi上游有原生OpenCode provider和逐请求virtual
+model/state/actual dispatch；先隔离单个已授权免费物理模型tool+
+原session验收，再接实际dispatch费用/隐私/期限，不能把免费virtual
+alias当所有物理调用已授权。Bedrock最新Runtime/Mantle是AWS认证
+OpenAI模型路线，不是Claude协议例外。详见模型研究；未创建key/升级。
+
 ClawBot本地诊断、interruptible backoff、显式same-term owned监督/
 renew及server生命周期接线已测试发布，生产尚未启用。下一片受控
 旧caller停止/在途/原状态闭合验证，并把communication authority/
@@ -33,7 +52,7 @@ state/witness与VPS故障域脱钩；不复制token抢权或称same-VPS renew是
 | 并行片 | 固定任务 | 下一交付 | 到此推进，不无限补夹具 |
 | --- | --- | --- | --- |
 | 沟通连续 | 009c/d | owned loop监督/renew/原ID对账；真实停止/在途/状态核验后一次受控交接，并设计沟通authority/state脱离VPS单点 | 单次真实交接与故障域边界；same-VPS authority不称分区HA |
-| 一台机器式能力 | 004d/002b | VPS薄CLI新task已实际闭环；继续跨authority discover/call/delegate/status/artifact组合与校园实际任务 | 一个校园/远端成果闭环；已有GET不重跑，日常不让本人手拼准入 |
+| 一台机器式能力 | 004d/002b | VPS薄CLI及校园A2A/本地薄调用/自动摘要回收已实测；下一片跨authority discover/call/delegate/status/artifact组合及读取原完整正文 | 原产物回收与便捷入口；已有GET不重跑，日常不让本人手拼准入 |
 | 单节点恢复 | 003d/007 | 本机旧维护原效果核对；四条同scope epoch0 guard保持，恢复不抹旧unknown | 原身份可续接且新局部工作不全被旧scope堵塞 |
 | 模型/官方入口 | 010/006d/e | 合成无秘密provider工具续接；Chat HTTPS MCP/OAuth主账号调用；官方Cloud published environment/单次job | 各一真实闭环；缺新凭据/费用或访问权限明确问本人 |
 
