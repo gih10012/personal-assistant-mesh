@@ -1,0 +1,50 @@
+diff --git a/assistant_mesh/server.py b/assistant_mesh/server.py
+index 31de7d2..2b66634 100644
+--- a/assistant_mesh/server.py
++++ b/assistant_mesh/server.py
+@@ -7,7 +7,7 @@ from socketserver import ThreadingMixIn
+ from urllib.parse import parse_qs, urlsplit
+ 
+ from .allocations import Allocations
+-from .channel import Channel, ILink
++from .channel import Channel, ChannelLoopLifecycle, ILink
+ from .config import read_secret
+ from .ingress import Ingress, validate_config as validate_ingress_config, validate_peer as validate_ingress_peer
+ from .ingress_results import IngressResults
+@@ -423,6 +423,16 @@ class API:
+         return getattr(self.allocations, action)(actor, **dict(arguments))
+ 
+ 
++def _start_channel(api, config):
++    """Private legacy-only overlay; no carrier authority or fenced bootstrap."""
++    if 'channel_carrier' in config or getattr(api, 'channel_authority', None) is not None:
++        raise ValueError('legacy_owner_overlay_requires_legacy_channel')
++    channel = Channel(api.store, api.ilink) if api.ilink is not None else None
++    if channel is not None:
++        ChannelLoopLifecycle(channel).start()
++    return channel, None
++
++
+ def serve(config, ready=None):
+     api = API(config)
+     class Handler(BaseHTTPRequestHandler):
+@@ -469,15 +479,12 @@ def serve(config, ready=None):
+     server = ThreadingHTTPServer(('127.0.0.1', config.get('port', 17680)), Handler)
+     server.daemon_threads = True
+     channel = None
+-    if api.ilink is not None:
+-        channel = Channel(api.store, api.ilink)
+-        for target in (channel.run_poll, channel.run_send):
+-            threading.Thread(target=target, daemon=True).start()
+-    if ready:
+-        ready(server, api, channel)
+     try:
++        channel, _ = _start_channel(api, config)
++        if ready:
++            ready(server, api, channel)
+         server.serve_forever(poll_interval=0.5)
+     finally:
+         if channel:
+-            channel.stop.set()
++            channel.loop_lifecycle.stop()
+         server.server_close()

@@ -1,6 +1,6 @@
 # Legacy carrier 的私有 owner 控制层
 
-这是 PAM-009c 的 Linux 部署适配器**源码**，不是已部署的生产接管、
+这是 PAM-009c 的 Linux 部署适配器，不是已部署的生产跨节点接管、
 bootstrap witness 或 VPS 分区 HA。其合同也不要求 Windows、手机、
 官方 Cloud 节点照搬 Unix socket。现有原生工具、网络和权限保持原样。
 
@@ -118,3 +118,12 @@ Python 3.6 语法解析通过不代替 VPS 运行验证；双端冻结/CI由 Roo
 旧 receiver instrumentation、carrier 换到 laptop 或 VPS 分区 HA。
 安装/受控停止/外部状态证明由 Root 后续在唯一收发器边界实测；在此
 之前保留“source-only，production pending”的状态。
+
+2026-10-11 Root后续已在保留3198 Store/Worker的独立receiver覆盖层
+实际加载本IPC，完成真实句柄carrier-only停止/完整callbacks归还/
+HTTP继续和唯一受控恢复；原native完整行hash/ledger inode保持。
+因此legacy IPC不再是production pending，但fenced handoff/外部与
+canonical proof/跨节点迁移/独立故障域HA仍未完成。风险相称117项
+混合版本双端与实际systemd runtime恢复、备份边界见
+[真实部署记录](LEGACY-RECEIVER-DEPLOYMENT.md)，不把旧source-only
+阶段或fixture结论冒充当前全部完成。

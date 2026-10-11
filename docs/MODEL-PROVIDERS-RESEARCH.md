@@ -1,5 +1,34 @@
 # Codex/Pi 多模型接入研究
 
+## 19:03 真实匿名stock内置客户端的工具/原session验证成功
+
+原自定义read/edit-only试验403不能外推所有真实匿名客户端。下一
+明确stock builtin build/default prompt/all真实tools任务在独立OS
+namespace成功：无auth，Step免费，真实read+bash产生/回读11B产物，
+同session后续read+只读bash完整验证，完整旧消息不变/export一致，
+native cost0/errors0/观察retry0；owned进程回收，没有伪装headers/
+升级或新费用。actual POST count无wire证据仍unknown。
+[正常builtin实际闭环](ANONYMOUS-STOCK-FREE-TRIAL.md)
+
+这证明本机合法临时执行候选可用，不证明裁剪tools是403的唯一原因，
+不证明Pi/Go或Codex Responses免费推理成功。Leader仍Codex/Pi，
+免费执行可按0增量现金纳入动态比较；AA型号/effort匹配明确作假设，
+不会由两条小文件任务造智能分。下一Mesh能力入口/成本时效目录另接。
+
+## 18:45 Go免费ID实际要求订阅，匿名客户端单列
+
+既有Go认证用于真实Pi/Step新明确试验，只有一次POST，实际403/
+server_error、GO_ACTIVE_SUBSCRIPTION_REQUIRED；自身UA/native session
+头正确，工具/产物0。该终态与Zen客户端限制分开，不推断所有免费
+模型不可用，也不由key存在推断当前订阅有效，不改账单。
+[实际Go终态](PI-GO-FREE-TRIAL.md)、[Go官方合同](https://opencode.ai/docs/go/)
+
+Owner“看着办”允许真实OpenCode匿名运行作为临时外部能力，不替换
+Codex/Pi Leader或传长期记忆。隔离preflight先读取公共目录；空/旧
+cache没有Step不等于模型403，目录刷新与inference分开。原生session
+层可能重试，须实际观察并终止原session，不能把SDK retries=0误写
+成整个harness严密零重试。成功工具/原session产物另验，尚未称入网。
+
 ## 18:02 本机 codex-opencode 与 Go 路线不能被 Zen 拒绝外推
 
 本人追加要求已定位本机`codex-opencode`：最终是原生Codex，不是

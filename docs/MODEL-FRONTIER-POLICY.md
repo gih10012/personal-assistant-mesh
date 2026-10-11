@@ -191,3 +191,23 @@ Muse Contributor and Space Bunny are not the Zen `*-free` price rows. An isolate
 native Pi Step trial is being prepared using the existing Go key, true Pi UA and
 actual new native session ID; no outcome is claimed before the real tool/session
 results. [Go contract](https://opencode.ai/docs/go/)
+
+18:30 actual result: the distinct Pi Go Step trial made exactly one POST and
+settled with HTTP403 requiring an active Go subscription, with zero tools or
+successful artifacts. This is not the prior Zen client restriction and not proof
+that all free routes fail. Do not ask for a new key or enable billing merely to
+repeat it. Owner subsequently accepted a real anonymous OpenCode session only
+as a temporary external execution capability; Codex/Pi remain the Leader.
+Isolation/catalog preflight is not inference availability or a quality score.
+[Actual Go trial](PI-GO-FREE-TRIAL.md)
+
+19:03 the distinct genuine OpenCode stock builtin fixture actually succeeded
+without login: read/bash artifact generation and verification, followed by
+read-only verification in the same native session with complete prior messages
+preserved. Native cost fields were zero and no owner credential was available.
+This legal temporary external execution route can now be compared at zero
+incremental cash, without making OpenCode the Leader or claiming direct Pi/Go
+API success. Matching the screenshot's Step score/effort remains an explicit
+reference assumption, not a new benchmark. Availability expires and must be
+observed; synthetic success is not production capability registration.
+[Stock builtin proof](ANONYMOUS-STOCK-FREE-TRIAL.md)

@@ -7,6 +7,49 @@
 
 ## 最新可执行下一片（协调计划，不是新 runtime receipt）
 
+19:03实际进展：唯一receiver独立加载/真实IPC/原carrier-only stop/
+完整callback归还/HTTP200/受控恢复收发已验。原native全部行hash、
+原ledger inode/context与原Worker不变，完整unit/config/account/一致
+DB备份保留；不把本地stop称canonical/external grant或分区HA。
+下一009c/d最小fenced事务backport与实际一次交接，communication
+authority/state/arbitration独立故障域方案/实测随后推进。
+
+新stock builtin免费试验27.648s成功，同一原native session实际
+read+bash生成/回读11B文件，再read+只读bash逐字节验证，export与
+完整7条messages一致，原4条消息完整保持、native cost0/errors0/
+观察retry0，无auth/新费用/私人history。前一自定义工具fixture403
+保留，不因它外推匿名客户端不可用；同模型正常builtin合同现在已
+有工具/续接证据。下一把合法免费执行候选做成便捷Mesh能力入口、
+绑定真实模型/effort/费用/privacy/时效，Codex/Pi保持Leader；不能
+让HTTP POST unknown被turn数替代，不能把fixture当已生产登记。
+[正常内置试验](ANONYMOUS-STOCK-FREE-TRIAL.md)
+
+006d/e Chat原生HTTPS/OAuth和官方Cloud task job仍未入网；004d
+能力组合/007e真实选模与周期检查继续并行。不是整体完工。
+以下18:45是保留阶段。
+
+18:45更新：独立GoStep只一次实际POST403/需要有效Go订阅，Pi自然
+settled error、tools/产物0、原session/已有auth保持，不重复同route
+或开启费用。真实OpenCode匿名客户端按owner“看着办”作为临时外部
+执行能力验收，空XDG/auth/无私人history/plugins，只合成文件；
+Leader仍Codex/Pi。公共模型目录已原生读回，模型成功未宣称。
+[Go真实终态](PI-GO-FREE-TRIAL.md)
+
+3198最小receiver overlay117项本机9.424s/VPS3.6.8 12.807s通过，
+归档116bacc2…da01，原Store/Worker/其他187文件保持。第二专员独立
+审查指出正常SIGTERM会残留socket导致重启失效，且authority短断
+可能abort正在跑的native turn；Root已核当前实际idle/native child0、
+绝对私有state路径与原cursor/context。先实际验证systemd239 user
+RuntimeDirectory停止/崩溃清理，然后完整unit/一致DB备份，仅切唯一
+receiver独立cwd/入口，原Worker不动。只carrier stop必须真实句柄/
+完整callback归还及原状态观测，不能由PID或IPC ok签grant；回退不
+回灌旧DB，旧Store recovery会保守重分类submitting风险另记。
+
+本机能力盘点已经完成：symlinked registry/已有CLI能力可能大于MCP
+工具面；wrapper help也可能有历史/配置副作用。先元数据/相关契约/
+已有认证再造tool或问登录，不把历史registry当live能力。这是持续
+发现习惯，不是固定工具清单或native限制。以下18:02为保留记录。
+
 18:02本人追加本机skills/`codex-opencode`后，三个专员并行：本机
 wrapper/relay只读审计与新明确GoStep免费native工具试验，Go/Zen/
 匿名真实客户端的合同对比，以及原3198 receiver最小私有overlay

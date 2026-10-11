@@ -7,6 +7,35 @@
 后续要求取代：Dots 对标、Codex/Pi、沟通能力多节点承担。当前控制工具
 不能原位修改 native objective；本文件不冒充该操作。
 
+19:03新实际交付：最小独立receiver已唯一加载，同真实句柄carrier-only
+stop完整callback归还/HTTP200、原native全行hash与账本inode保持，
+随后唯一受控恢复收发/新socket已核，原Worker未重启。没有grant/
+跨节点交接/独立故障域HA；下一最小fenced事务兼容与authority脱钩。
+
+真实OpenCode stock builtin/全部原生tools的独立OS隔离试验成功：
+无需登录/新key，两轮同session实际read+bash生成并逐字节验证11B
+产物，原完整messages不变、export重开一致，native成本0、errors/
+观察retry0，owned进程回收。不是此前裁剪tools的拒绝或Pi/Go成功，
+不是OpenCode替换Leader。免费Step现可作为临时外部执行候选按实际
+0费用比较；未登记生产Mesh能力/证明全部任务或AA effort匹配。
+前面已知失败保留，goal和43依赖仍active。以下18:45为保留阶段。
+
+18:45续接：GoStep独立试验实际只一次POST403，分类为需要有效Go
+订阅，不是Zen的客户端限制；Pi自然error，tools/产物0，owned进程
+全回收/原失败session保留，不开账单或新登录。Owner“看着办”后选择
+真实OpenCode匿名客户端仅临时外部执行能力，Leader仍Codex/Pi；
+只公开合成文件，隔离公共目录已真实读回，工具推理终态尚待核。
+本机skills/包装器审计完成，先查symlink registry/CLI/private认证
+元数据的习惯已写AGENTS，不能用历史能力声明冒充当前入网。
+
+独立3198最小receiver overlay同归档双端117项通过；187/189原文件
+不变，仅Channel/server更改并新增3依赖/3tests，Store/Worker保持。
+独立审查发现socket残留/active native turn在重启时可中断两项真实
+风险，正在验证systemd runtime目录恢复边界。原生产唯一receiver
+未切，实际idle/no native child、原cursor/context/绝对私有路径已核；
+不把源码/停止本地线程叫canonical closure、handoff或故障域HA。
+以下18:02记录保留原准备阶段。
+
 18:02本人追加本机skills/`codex-opencode`，并行继续。本机命令确实
 运行Codex、现有Go认证存在；不是所有免费route都被此前Zen403
 排除。Go官方明确允许Codex/Pi与限时free Step，区分价格0/既有认证/

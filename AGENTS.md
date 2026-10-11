@@ -20,6 +20,16 @@ Keep all native Shell/files/network/MCP features available. Mesh adds managed
 capability contracts; it is not a host-wide allowlist. Let node agents adapt
 Windows/mobile/cloud environments rather than imposing the Linux examples.
 
+Discover the current terminal's existing skills, symlinked capability registries,
+commands, and private credential metadata before building replacements or asking
+the owner to log in. Read only the relevant contracts progressively; a historical
+registry claim is not live availability. Inspect wrapper code before even running
+help: configuration, session/history sync, retries and paid defaults may have
+side effects. Reuse compatible mechanisms without rewriting the continuous
+Leader's history or exposing credentials. Real anonymous OpenCode may be an
+explicitly selected temporary external execution capability; it is not the
+Codex/Pi Leader or a reason to impersonate clients or convert free calls to paid.
+
 Use parallel specialists for independent work when useful; assign non-overlapping
 file ownership and integrate/review their actual changes. Continue the Leader's
 native context and project specialist threads, using native compression/memory.
