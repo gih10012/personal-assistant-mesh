@@ -300,6 +300,30 @@ class Worker:
                     or not isinstance(arguments.get('arguments', {}), dict)):
                 return result({'error': 'invalid_mesh_gateway_arguments'}, False)
             action, nested = arguments['action'], arguments.get('arguments', {})
+            if action in ('capability_call', 'capability_status', 'capability_result'):
+                allowed = ({'operation_id', 'decision_id', 'selection', 'candidates', 'rationale', 'lease_seconds'}
+                           if action == 'capability_call' else {'operation_id'})
+                if set(nested) - allowed or not self.current:
+                    return result({'error': 'capability_call_runtime_identity_invalid'}, False)
+                binding = self.config.get('capability_calls')
+                if not isinstance(binding, dict) or set(binding) != {'authority', 'journal_path'}:
+                    return result({'error': 'capability_call_not_configured', 'native_tools_intercepted': False}, False)
+                try:
+                    from .capability_call import TaskCapabilityCalls
+                    journal = Path(binding['journal_path']).expanduser()
+                    if any((parent / '.git').exists() for parent in journal.parents):
+                        raise ValueError('private journal required')
+                    calls = TaskCapabilityCalls(self.client, str(journal), binding['authority'],
+                        self.config.get('node_id'), self.current['id'], self.current['epoch'])
+                    method = {'capability_call': 'call', 'capability_status': 'status',
+                              'capability_result': 'result'}[action]
+                    output = getattr(calls, method)(**nested)
+                except Exception:
+                    return result({'error': 'capability_call_unavailable', 'outcome': 'unknown',
+                        'automatic_invocation_replay': False, 'retry_with_new_id': False,
+                        'native_tools_intercepted': False}, False)
+                return result(output, output.get('phase') not in ('unresolved', 'original_epoch_read_only')
+                              and output.get('operation_state') != 'unknown')
             routing_actions = {'routing_context': ('context', {'kind', 'issuer', 'include_unavailable', 'limit', 'observation_max_age_seconds'}),
                                'route_propose': ('propose', {'decision'}), 'route_inspect': ('inspect', {'decision_id'}),
                                'route_list': ('list', {'limit'}), 'route_link': ('link', {'decision_id', 'kind', 'reference_id'})}
@@ -440,6 +464,17 @@ class Worker:
                        'unknown保留原operation/child ID查证，不换节点新ID重放；原生功能不受影响。',
             'cli_command': 'routing', 'historical_owner_read': 'route-decisions (operator/viewer only)',
             'model_selection_verified': False, 'managed_invocation_authorized': False}
+        binding = self.config.get('capability_calls')
+        reference['capability_call'] = {
+            'configured': isinstance(binding, dict) and set(binding) == {'authority', 'journal_path'},
+            'tool': 'mesh(action="capability_call", arguments={operation_id,decision_id,selection,candidates,rationale,lease_seconds})',
+            'status': 'mesh(action="capability_status", arguments={operation_id})',
+            'result': 'mesh(action="capability_result", arguments={operation_id})',
+            'cli_commands': ['capability-call', 'capability-status', 'capability-result'],
+            'purpose': '薄入口组合原propose/reserve/link；模型仍决定scope/workload与实际观测引用，'
+                       '原身份在私有journal中保持，未知仅查原ID。认证/task/epoch来自当前运行环境；'
+                       'provider自行执行，不自动批准权限、探网、读取远端私有文件或重放调用。',
+            'native_tools_intercepted': False, 'execution_verified': False}
         # Only fixed host states enter the prompt, never exception messages or
         # private response bodies. This is advisory, not a native-tool gate.
         steering = (self.current or {}).get('checkpoint', {}).get('mesh_steering_status', {})

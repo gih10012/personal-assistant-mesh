@@ -87,8 +87,13 @@ checkpoint。正式核心未替换，Chat/官方 Cloud、校园出口、ClawBot
 task已同thread自然completed、native plan三步完成，不是整体联网/认证模型/多候选性能验收。
 同账号较新native认证已备份同步，零模型account/quota核验通过，
 严格旧前缀历史已保留完整备份并同路径原子刷新，权威行未变；
-仍不换原task/thread、不清历史或重放旧unknown。ClawBot fence还未
-接入真实Channel/API/Store，仍是VPS唯一收发器，不冒称多节点HA。
+仍不换原task/thread、不清历史或重放旧unknown。2026-10-11 ClawBot fence
+已在源码接入实际Channel接口、node-bound HTTP和原authority事务/完整私有
+结果spool；隔离真实loopback HTTP双承载原身份交接通过，iLink与交接proof
+仍为synthetic，不证明生产停止/在途闭合。生产仍是VPS唯一收发器，
+原账本若仍仅在VPS，换carrier不等于VPS失联HA。新增能力薄入口组合
+原propose/reserve/link，CLI与native mesh入口由owner配置可选启用；
+未代批准权限、探网或重放调用，实际生产易用性仍需新的明确task验收。
 校园新增本机和VPS经native SSH借本机校内HTTP200证据，未登记通用
 校园代理。普通Chat官方插件路线已重新确认，实际HTTP/OAuth/账号
 工具与官方Cloud job仍推进，不改成本机VPS冒充。

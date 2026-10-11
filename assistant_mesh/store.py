@@ -252,109 +252,113 @@ class Store:
         return task_id
 
     def ingest(self, messages, cursor, owner, bot):
-        """Persist whole batch, owner context, business tasks and cursor in ONE transaction."""
+        """Persist batch and cursor together; compose with a durable receipt."""
+        with self.transaction() as db:
+            return self._ingest_in_db(db, messages, cursor, owner, bot)
+
+    def _ingest_in_db(self, db, messages, cursor, owner, bot):
+        """Original semantics on a caller-owned authority transaction."""
         if not isinstance(messages, list) or not all(isinstance(m, dict) for m in messages) or not isinstance(cursor, str):
             raise ValueError('invalid_updates')
         accepted = 0
-        with self.transaction() as db:
-            for msg in messages:
-                if msg.get('from_user_id') != owner or msg.get('to_user_id') != bot or msg.get('group_id') or msg.get('message_type') != 1:
+        for msg in messages:
+            if msg.get('from_user_id') != owner or msg.get('to_user_id') != bot or msg.get('group_id') or msg.get('message_type') != 1:
+                continue
+            raw_id = msg.get('message_id')
+            message_id = hashlib.sha256(json.dumps([bot, raw_id, msg if raw_id is None else None], sort_keys=True).encode()).hexdigest()
+            if db.execute('SELECT 1 FROM inbox WHERE id=?', (message_id,)).fetchone():
+                continue
+            db.execute('INSERT INTO inbox VALUES(?,?,?)', (message_id, json.dumps(msg), self.clock()))
+            context = msg.get('context_token')
+            if context:
+                previous = self._meta(db, 'owner_context', {})
+                created = msg.get('create_time_ms', 0)
+                if created >= previous.get('created', 0):
+                    self._set(db, 'owner_context', {'token': context, 'version': message_id, 'created': created})
+            # First activation may replay older server-held input. Archive it,
+            # never treat an old command as fresh execution authorization.
+            cutoff = self._meta(db, 'activate_after_ms', 0)
+            if cutoff and msg.get('create_time_ms', 0) < cutoff:
+                continue
+            items = msg.get('item_list', [])
+            if not isinstance(items, list):
+                raise ValueError('invalid_items')
+            text = '\n'.join(str(i.get('text_item', {}).get('text', '')) for i in items if isinstance(i, dict) and i.get('type') == 1).strip()
+            if text.startswith('ClawBot 自动刷新'):
+                db.execute("UPDATE renewals SET status='context_observed' WHERE marker=? AND status='reserved'", (text,))
+                continue
+            if text in ('/status', '状态', '助理状态'):
+                self._enqueue(db, 'status-' + message_id, self._status_text(db))
+            elif text.startswith('/answer ') or text.startswith('/approve ') or text.startswith('/deny '):
+                parts = text.split(' ', 2)
+                identity = parts[1]
+                interaction = db.execute('SELECT * FROM interactions WHERE id=?', (identity,)).fetchone()
+                task = db.execute('SELECT * FROM tasks WHERE id=?', (interaction['task_id'],)).fetchone() if interaction else None
+                if not self._interaction_is_live(db, task, interaction) or interaction['answer'] is not None:
+                    self._enqueue(db, 'control-' + message_id, '请求不存在、已回答或原会话已经中断。')
                     continue
-                raw_id = msg.get('message_id')
-                message_id = hashlib.sha256(json.dumps([bot, raw_id, msg if raw_id is None else None], sort_keys=True).encode()).hexdigest()
-                if db.execute('SELECT 1 FROM inbox WHERE id=?', (message_id,)).fetchone():
-                    continue
-                db.execute('INSERT INTO inbox VALUES(?,?,?)', (message_id, json.dumps(msg), self.clock()))
-                context = msg.get('context_token')
-                if context:
-                    previous = self._meta(db, 'owner_context', {})
-                    created = msg.get('create_time_ms', 0)
-                    if created >= previous.get('created', 0):
-                        self._set(db, 'owner_context', {'token': context, 'version': message_id, 'created': created})
-                # First activation may replay older server-held input. Archive it,
-                # never treat an old command as fresh execution authorization.
-                cutoff = self._meta(db, 'activate_after_ms', 0)
-                if cutoff and msg.get('create_time_ms', 0) < cutoff:
-                    continue
-                items = msg.get('item_list', [])
-                if not isinstance(items, list):
-                    raise ValueError('invalid_items')
-                text = '\n'.join(str(i.get('text_item', {}).get('text', '')) for i in items if isinstance(i, dict) and i.get('type') == 1).strip()
-                if text.startswith('ClawBot 自动刷新'):
-                    db.execute("UPDATE renewals SET status='context_observed' WHERE marker=? AND status='reserved'", (text,))
-                    continue
-                if text in ('/status', '状态', '助理状态'):
-                    self._enqueue(db, 'status-' + message_id, self._status_text(db))
-                elif text.startswith('/answer ') or text.startswith('/approve ') or text.startswith('/deny '):
-                    parts = text.split(' ', 2)
-                    identity = parts[1]
-                    interaction = db.execute('SELECT * FROM interactions WHERE id=?', (identity,)).fetchone()
-                    task = db.execute('SELECT * FROM tasks WHERE id=?', (interaction['task_id'],)).fetchone() if interaction else None
-                    if not self._interaction_is_live(db, task, interaction) or interaction['answer'] is not None:
-                        self._enqueue(db, 'control-' + message_id, '请求不存在、已回答或原会话已经中断。')
-                        continue
-                    if parts[0] == '/answer' and interaction['kind'] == 'question' and len(parts) == 3:
-                        questions = json.loads(interaction['params']).get('questions', [])
-                        if len(questions) == 1:
-                            answer = {'answers': {questions[0]['id']: {'answers': [parts[2]]}}}
-                        else:
-                            try:
-                                answer = json.loads(parts[2])
-                            except ValueError:
-                                self._enqueue(db, 'control-' + message_id, '多个问题请使用 answers JSON 按问题 ID 回答。')
-                                continue
-                    elif parts[0] in ('/approve', '/deny') and interaction['kind'] == 'approval':
-                        answer = {'decision': 'accept' if parts[0] == '/approve' else 'decline'}
+                if parts[0] == '/answer' and interaction['kind'] == 'question' and len(parts) == 3:
+                    questions = json.loads(interaction['params']).get('questions', [])
+                    if len(questions) == 1:
+                        answer = {'answers': {questions[0]['id']: {'answers': [parts[2]]}}}
                     else:
-                        self._enqueue(db, 'control-' + message_id, '回答类型不匹配。')
-                        continue
-                    try:
-                        self._validate_interaction_answer(interaction, answer)
-                    except ValueError:
-                        # A user typo is an archived invalid command, not a bad
-                        # transport batch. Keep its inbox entry and continue so
-                        # following commands and the cursor still commit.
-                        self._enqueue(db, 'control-' + message_id, '回答格式无效；请按原问题 ID 提交完整的 answers JSON。')
-                        continue
-                    db.execute('UPDATE interactions SET answer=? WHERE id=?', (json.dumps(answer), identity))
-                    self._enqueue(db, 'control-' + message_id, '回答已交给原生 Codex 会话。')
-                elif text.startswith('/steer '):
-                    parts = text.split(' ', 2)
-                    target = db.execute('SELECT epoch,status FROM tasks WHERE id=?', (parts[1],)).fetchone() if len(parts) == 3 else None
-                    if target and target['status'] == 'running':
-                        db.execute('INSERT OR IGNORE INTO steering(id,task_id,epoch,text) VALUES(?,?,?,?)', (message_id, parts[1], target['epoch'], parts[2]))
-                        self._enqueue(db, 'control-' + message_id, '补充要求已保存，将插入当前运行轮次。')
-                    else:
-                        self._enqueue(db, 'control-' + message_id, '仅运行中的任务可接收 /steer；请指定完整任务 ID。')
-                elif text.startswith('/pause ') or text.startswith('/resume '):
-                    command, target = text.split(' ', 1)
-                    try:
-                        control = self._control_task(db, target.strip(), command[1:])
-                    except Conflict:
-                        self._enqueue(db, 'control-' + message_id, '任务可能已产生外部效果，需要先核对实际执行状态；未重新运行。')
-                    except ValueError:
-                        self._enqueue(db, 'control-' + message_id, '任务不存在或已经结束。')
-                    else:
-                        self._enqueue(db, 'control-' + message_id, '任务 ' + target.strip() + ' 当前状态：' + control['status'])
-                elif text:
-                    context = {}
-                    if text.startswith('/goal '):
-                        objective = text[len('/goal '):].strip()
-                        if not objective or len(objective) > 4000:
-                            self._enqueue(db, 'control-' + message_id, '目标不能为空且最多 4000 字。')
+                        try:
+                            answer = json.loads(parts[2])
+                        except ValueError:
+                            self._enqueue(db, 'control-' + message_id, '多个问题请使用 answers JSON 按问题 ID 回答。')
                             continue
-                        context['goal'] = {'objective': objective, 'status': 'active'}
-                    elif text.startswith('/plan '):
-                        context['mode'] = 'plan'
-                    db.execute('INSERT INTO tasks(id,input,required,status,created,context) VALUES(?,?,?,?,?,?)',
-                               (message_id, text, '["leader"]', 'pending', self.clock(), json.dumps(context)))
-                    self._enqueue(db, 'ack-' + message_id, '已收到并保存任务 ' + message_id[:8] + '。正在交给可用的 Leader。')
+                elif parts[0] in ('/approve', '/deny') and interaction['kind'] == 'approval':
+                    answer = {'decision': 'accept' if parts[0] == '/approve' else 'decline'}
                 else:
-                    # Retain media raw references privately; don't silently pretend understood.
-                    self._enqueue(db, 'media-' + message_id, '附件已保存，当前网关尚未接通附件理解；请补充文字说明。')
-                accepted += 1
-            self._set(db, 'cursor', cursor)
-            self._set(db, 'last_poll', self.clock())
+                    self._enqueue(db, 'control-' + message_id, '回答类型不匹配。')
+                    continue
+                try:
+                    self._validate_interaction_answer(interaction, answer)
+                except ValueError:
+                    # A user typo is an archived invalid command, not a bad
+                    # transport batch. Keep its inbox entry and continue so
+                    # following commands and the cursor still commit.
+                    self._enqueue(db, 'control-' + message_id, '回答格式无效；请按原问题 ID 提交完整的 answers JSON。')
+                    continue
+                db.execute('UPDATE interactions SET answer=? WHERE id=?', (json.dumps(answer), identity))
+                self._enqueue(db, 'control-' + message_id, '回答已交给原生 Codex 会话。')
+            elif text.startswith('/steer '):
+                parts = text.split(' ', 2)
+                target = db.execute('SELECT epoch,status FROM tasks WHERE id=?', (parts[1],)).fetchone() if len(parts) == 3 else None
+                if target and target['status'] == 'running':
+                    db.execute('INSERT OR IGNORE INTO steering(id,task_id,epoch,text) VALUES(?,?,?,?)', (message_id, parts[1], target['epoch'], parts[2]))
+                    self._enqueue(db, 'control-' + message_id, '补充要求已保存，将插入当前运行轮次。')
+                else:
+                    self._enqueue(db, 'control-' + message_id, '仅运行中的任务可接收 /steer；请指定完整任务 ID。')
+            elif text.startswith('/pause ') or text.startswith('/resume '):
+                command, target = text.split(' ', 1)
+                try:
+                    control = self._control_task(db, target.strip(), command[1:])
+                except Conflict:
+                    self._enqueue(db, 'control-' + message_id, '任务可能已产生外部效果，需要先核对实际执行状态；未重新运行。')
+                except ValueError:
+                    self._enqueue(db, 'control-' + message_id, '任务不存在或已经结束。')
+                else:
+                    self._enqueue(db, 'control-' + message_id, '任务 ' + target.strip() + ' 当前状态：' + control['status'])
+            elif text:
+                context = {}
+                if text.startswith('/goal '):
+                    objective = text[len('/goal '):].strip()
+                    if not objective or len(objective) > 4000:
+                        self._enqueue(db, 'control-' + message_id, '目标不能为空且最多 4000 字。')
+                        continue
+                    context['goal'] = {'objective': objective, 'status': 'active'}
+                elif text.startswith('/plan '):
+                    context['mode'] = 'plan'
+                db.execute('INSERT INTO tasks(id,input,required,status,created,context) VALUES(?,?,?,?,?,?)',
+                           (message_id, text, '["leader"]', 'pending', self.clock(), json.dumps(context)))
+                self._enqueue(db, 'ack-' + message_id, '已收到并保存任务 ' + message_id[:8] + '。正在交给可用的 Leader。')
+            else:
+                # Retain media raw references privately; don't silently pretend understood.
+                self._enqueue(db, 'media-' + message_id, '附件已保存，当前网关尚未接通附件理解；请补充文字说明。')
+            accepted += 1
+        self._set(db, 'cursor', cursor)
+        self._set(db, 'last_poll', self.clock())
         return accepted
 
     @staticmethod

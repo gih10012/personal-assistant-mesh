@@ -15,6 +15,9 @@ import urllib.parse
 import urllib.request
 
 from .config import private_json
+from .channel_carrier import CarrierError, CarrierFence
+from .networking import digest
+from .remote_notifications import PROTOCOL as NOTIFY_PROTOCOL
 
 
 class ChannelError(ValueError):
@@ -78,7 +81,8 @@ class ILink:
     def poll(self, cursor):
         return self.request('getupdates', {'get_updates_buf': cursor}, 40)
 
-    def send(self, row):
+    def send_body(self, row):
+        """One shared body builder for the wire call and its fenced fingerprint."""
         message = {'from_user_id': '', 'to_user_id': self.account['ilink_user_id'], 'client_id': row['client_id'],
                    'message_type': 2, 'message_state': 2,
                    'item_list': [{'type': 1, 'text_item': {'text': row['body']}}]}
@@ -86,13 +90,40 @@ class ILink:
             message['item_list'] = json.loads(row['media_items'])
         if row.get('context_token'):
             message['context_token'] = row['context_token']
-        return self.request('sendmessage', {'msg': message}, 15)
+        return {'msg': message}
+
+    def send(self, row):
+        return self.request('sendmessage', self.send_body(row), 15)
 
 
 class Channel:
-    def __init__(self, store, transport):
+    def __init__(self, store, transport, carrier_fence=None):
         self.store, self.transport = store, transport
+        self.carrier_fence = carrier_fence
         self.stop = threading.Event()
+        if carrier_fence is not None:
+            if not isinstance(carrier_fence, CarrierFence):
+                raise ChannelError('channel_fence_invalid')
+            account = transport.account
+            binding = digest([NOTIFY_PROTOCOL, getattr(transport, 'base', None),
+                              account.get('ilink_user_id'), account.get('ilink_bot_id')])
+            previous = store.get('owner_notification_channel_binding')
+            if (binding != carrier_fence.term['account_binding']
+                    or (previous is not None and previous != binding)):
+                raise ChannelError('channel_fence_account_mismatch')
+            if not isinstance(store.get('cursor'), str):
+                raise ChannelError('channel_fence_checkpoint_required')
+            required = ('channel_prepare_poll', 'channel_prepare_send', 'channel_mark_dispatched',
+                        'channel_record_result', 'channel_commit_poll', 'channel_commit_send',
+                        'channel_mark_uncertain')
+            if not all(callable(getattr(store, name, None)) for name in required):
+                raise ChannelError('channel_fence_store_unavailable')
+            if not callable(getattr(transport, 'send_body', None)):
+                raise ChannelError('channel_fence_transport_unavailable')
+            # The proof-bound canonical checkpoint must already be installed.
+            # A candidate must NEVER execute old account.pending commands or
+            # overwrite the original context by constructing another Channel.
+            return
         if self.store.get('cursor') is None:
             account = transport.account
             self.store.ingest(account.get('pending', []), account.get('cursor', ''), account['ilink_user_id'], account['ilink_bot_id'])
@@ -103,6 +134,8 @@ class Channel:
                                                'created': context.get('message_created_at_ms', 0)})
 
     def poll_once(self):
+        if self.carrier_fence is not None:
+            return self._poll_fenced()
         account = self.transport.account
         batch = self.transport.poll(self.store.get('cursor', account.get('cursor', '')))
         result = self.store.ingest(batch.get('msgs'), batch.get('get_updates_buf'), account['ilink_user_id'], account['ilink_bot_id'])
@@ -110,6 +143,8 @@ class Channel:
         return result
 
     def send_once(self):
+        if self.carrier_fence is not None:
+            return self._send_fenced()
         row = self.store.next_send()
         if not row:
             return False
@@ -121,6 +156,97 @@ class Channel:
             self.store.finish_send(row['id'], status, {'code': exc.code, 'delivery_verified': False})
         except Exception:
             self.store.finish_send(row['id'], 'unknown', {'code': 'transport_failed', 'delivery_verified': False})
+        return True
+
+    @staticmethod
+    def _transport_error(error):
+        code = error.code if isinstance(error, ChannelError) else 'transport_failed'
+        if code not in ('business_-2', 'auth_required', 'network_timeout', 'network_error',
+                        'response_too_large', 'invalid_response', 'redirect_refused'):
+            code = 'transport_failed'
+        status = 'rejected' if code == 'business_-2' else 'waiting_auth' if code == 'auth_required' else 'unknown'
+        return {'status': status, 'detail': {'code': code, 'delivery_verified': False}}
+
+    def _run_fenced(self, operation_id, kind, identity, body, call, persist):
+        def admitted(ticket):
+            # The token is only available after a fresh dispatch ACK. This
+            # original local intent must be durable BEFORE the iLink call.
+            self.store.channel_mark_dispatched(operation_id, ticket)
+        try:
+            return self.carrier_fence.run(operation_id, kind, identity,
+                digest({'endpoint': 'getupdates' if kind == 'poll' else 'sendmessage', 'body': body}),
+                call, persist, on_dispatch=admitted,
+                uncertain=lambda result: result['status'] == 'unknown')
+        except Exception:
+            # This only records the original guard; it never rolls pending
+            # back, changes client_id, repeats IO, or calls bare finish_send.
+            try:
+                self.store.channel_mark_uncertain(operation_id)
+            except Exception:
+                pass
+            raise ChannelError('channel_fence_unconfirmed') from None
+
+    def _poll_fenced(self):
+        account, term = self.transport.account, self.carrier_fence.term
+        cursor = self.store.get('cursor')
+        if not isinstance(cursor, str):
+            raise ChannelError('channel_fence_checkpoint_required')
+        prepared = self.store.channel_prepare_poll(term, cursor)
+        if prepared is None:
+            raise ChannelError('channel_fence_pending')
+        operation_id, accepted = prepared['operation_id'], [None]
+
+        def call():
+            try:
+                outcome = {'status': 'updates', 'batch': self.transport.poll(cursor)}
+            except Exception as error:
+                outcome = self._transport_error(error)
+            # Full private batch/status is preserved before a remote outcome
+            # ACK can be lost. No cursor/context/task write occurs here.
+            self.store.channel_record_result(operation_id, outcome)
+            return outcome
+
+        def persist(outcome, ticket):
+            receipt = self.store.channel_commit_poll(operation_id, ticket, outcome,
+                account['ilink_user_id'], account['ilink_bot_id'])
+            accepted[0] = receipt['accepted']
+            return receipt['sha256']
+
+        outcome = self._run_fenced(operation_id, 'poll',
+            {'authority': term['canonical_authority'], 'cursor_sha256': digest(cursor)},
+            {'get_updates_buf': cursor}, call, persist)
+        if outcome['status'] != 'updates':
+            raise ChannelError(outcome['detail']['code'])
+        return accepted[0]
+
+    def _send_fenced(self):
+        term = self.carrier_fence.term
+        prepared = self.store.channel_prepare_send(term)
+        if prepared is None:
+            return False
+        operation_id, row = prepared['operation_id'], prepared['row']
+        try:
+            body = self.transport.send_body(row)
+        except Exception:
+            self.store.channel_mark_uncertain(operation_id)
+            raise ChannelError('channel_fence_request_invalid') from None
+
+        def call():
+            try:
+                value = self.transport.send(row)
+                outcome = {'status': 'accepted', 'response': value,
+                           'detail': {'delivery_verified': False, 'message_id': value.get('message_id')}}
+            except Exception as error:
+                outcome = self._transport_error(error)
+            self.store.channel_record_result(operation_id, outcome)
+            return outcome
+
+        def persist(outcome, ticket):
+            return self.store.channel_commit_send(operation_id, ticket,
+                                                  outcome['status'], outcome['detail'])
+
+        self._run_fenced(operation_id, 'send', {'authority': term['canonical_authority'],
+            'outbox_id': row['id'], 'client_id': row['client_id']}, body, call, persist)
         return True
 
     def run_poll(self):
@@ -139,5 +265,8 @@ class Channel:
 
     def run_send(self):
         while not self.stop.is_set():
-            self.send_once()
+            try:
+                self.send_once()
+            except (ChannelError, CarrierError):
+                self.store.set('channel_error', {'code': 'channel_fence_blocked', 'at': time.time()})
             self.stop.wait(0.5)

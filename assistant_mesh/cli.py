@@ -302,13 +302,57 @@ def allocation_payload(path, action=None, task_id=None, epoch=None):
     return payload
 
 
+def _capability_command(args):
+    from .capability_call import TaskCapabilityCalls
+    from .worker import Client
+    foreign = ('text', 'request_id', 'action', 'kind', 'principal', 'limit', 'after', 'id',
+               'call_id', 'owner_config', 'max_cycles', 'state_dir', 'candidate_config',
+               'publication_config', 'retained_operation_id', 'issuer')
+    if (any(getattr(args, field) is not None for field in foreign) or args.include_unavailable
+            or not args.operation_id or not args.task_id or not args.task_id.strip()
+            or type(args.epoch) is not int or args.epoch <= 0
+            or (args.command == 'capability-call') != bool(args.payload_file)):
+        parser_error = {'status': 'error', 'diagnostics': ['capability_call_arguments_invalid'],
+                        'automatic_invocation_replay': False, 'native_tools_intercepted': False}
+        print(json.dumps(parser_error), flush=True)
+        raise SystemExit(2)
+    try:
+        config = private_json(args.config)
+        binding = config.get('capability_calls')
+        if not isinstance(binding, dict) or set(binding) != {'authority', 'journal_path'}:
+            raise ValueError('owner binding missing')
+        journal = Path(binding['journal_path']).expanduser()
+        if any((parent / '.git').exists() for parent in journal.parents):
+            raise ValueError('journal inside public worktree')
+        calls = TaskCapabilityCalls(Client(config), str(journal), binding['authority'],
+                                    config.get('node_id'), args.task_id, args.epoch)
+        if args.command == 'capability-call':
+            arguments = resource_payload(args.payload_file, 'capability-call')['arguments']
+            if set(arguments) - {'decision_id', 'selection', 'candidates', 'rationale', 'lease_seconds'}:
+                raise ValueError('caller identity is runtime-bound')
+            value = calls.call(operation_id=args.operation_id, **arguments)
+        else:
+            value = getattr(calls, 'status' if args.command == 'capability-status' else 'result')(args.operation_id)
+    except Exception:
+        # Never print exception strings, auth configuration or private paths.
+        print(json.dumps({'status': 'error', 'diagnostics': ['capability_call_unavailable'],
+            'automatic_invocation_replay': False, 'retry_with_new_id': False,
+            'native_tools_intercepted': False}), flush=True)
+        raise SystemExit(2) from None
+    print(json.dumps(value, ensure_ascii=False), flush=True)
+    if value.get('phase') in ('unresolved', 'original_epoch_read_only') or value.get('operation_state') == 'unknown':
+        raise SystemExit(2)
+    return 0
+
+
 def main():
     os.umask(0o077)
     parser = _CLIParser(description='Durable personal-assistant mesh')
     parser.add_argument('--config', help='Required private configuration except for local network-inventory')
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
                                           'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'ingress-submit', 'ingress-status', 'ingress-result', 'ingress-publish', 'capability-events', 'resource-graph', 'node',
-                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export', 'provider', 'tool-release', 'network-inventory'])
+                                          'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export', 'provider', 'tool-release', 'network-inventory',
+                                          'capability-call', 'capability-status', 'capability-result'])
     parser.add_argument('--text')
     parser.add_argument('--request-id')
     parser.add_argument('--action', help='Resource API method, not a native terminal restriction')
@@ -341,6 +385,8 @@ def main():
         parser.error('the following arguments are required: --config')
     if args.issuer is not None and args.command != 'mesh-capabilities':
         parser.error('issuer_option_requires_mesh_capabilities_command')
+    if args.command in ('capability-call', 'capability-status', 'capability-result'):
+        return _capability_command(args)
     if args.command in ('routing', 'route-decisions'):
         if (any(getattr(args, key) is not None for key in ('principal', 'kind', 'after', 'call_id'))
                 or args.include_unavailable):

@@ -427,10 +427,11 @@ class CarrierWitness:
         """
         transitions = {'returned': ('dispatched', 'returned', 'outcome_sha256'),
                        'commit_authorize': ('returned', 'committing', None),
-                       'committed': ('committing', 'committed', 'persistence_sha256')}
+                       'committed': ('committing', 'committed', 'persistence_sha256'),
+                       'committed_unknown': ('committing', 'unknown', 'persistence_sha256')}
         if action != 'unknown' and action not in transitions:
             raise CarrierError('carrier_transition_invalid')
-        if action in ('returned', 'committed'):
+        if action in ('returned', 'committed', 'committed_unknown'):
             _sha(sha256)
         elif sha256 is not None:
             raise CarrierError('carrier_protocol_invalid')
@@ -527,8 +528,8 @@ class CarrierWitness:
         if action == 'dispatch':
             _shape(payload, ('ticket',))
             return self.dispatch(actor, **payload)
-        if action in ('returned', 'commit_authorize', 'committed', 'unknown'):
-            keys = ('ticket', 'sha256') if action in ('returned', 'committed') else ('ticket',)
+        if action in ('returned', 'commit_authorize', 'committed', 'committed_unknown', 'unknown'):
+            keys = ('ticket', 'sha256') if action in ('returned', 'committed', 'committed_unknown') else ('ticket',)
             _shape(payload, keys)
             return self.transition(actor, action=action, **payload)
         raise CarrierError('carrier_route_not_authorized')
@@ -586,8 +587,11 @@ class CarrierFence:
         except CarrierError:
             pass  # The original dispatched/returned/committing intent remains.
 
-    def run(self, operation_id, kind, identity, request_sha256, call, persist):
-        if not callable(call) or not callable(persist):
+    def run(self, operation_id, kind, identity, request_sha256, call, persist,
+            on_dispatch=None, uncertain=None):
+        if (not callable(call) or not callable(persist)
+                or (on_dispatch is not None and not callable(on_dispatch))
+                or (uncertain is not None and not callable(uncertain))):
             raise CarrierError('carrier_callback_invalid')
         expected = {key: self.term[key] for key in ('protocol', 'witness_id', 'incarnation',
                     'account_binding', 'canonical_authority', 'holder', 'epoch')}
@@ -602,6 +606,8 @@ class CarrierFence:
         # A pause/ACK loss after admission cannot cause a second carrier to
         # dispatch: this exact unresolved intent continues to block grant.
         try:
+            if on_dispatch is not None:
+                on_dispatch(json.loads(canonical(ticket)))
             result = call()
             encoded = canonical(result).encode('utf8')
             if len(encoded) > 8 * 1024 * 1024:
@@ -620,8 +626,14 @@ class CarrierFence:
             if receipt['outcome_sha256'] != outcome:
                 raise CarrierError('carrier_receipt_invalid')
             persistence = _sha(persist(result, json.loads(canonical(ticket))))
-            receipt = self._rpc('committed', {'ticket': ticket, 'sha256': persistence})
-            self._check(receipt, ticket, 'committed')
+            ambiguous = uncertain(result) if uncertain is not None else False
+            if type(ambiguous) is not bool:
+                raise CarrierError('carrier_callback_invalid')
+            # Persist the original ambiguous outcome but retain the handoff
+            # barrier. A durable local "unknown" is not external quiescence.
+            action = 'committed_unknown' if ambiguous else 'committed'
+            receipt = self._rpc(action, {'ticket': ticket, 'sha256': persistence})
+            self._check(receipt, ticket, 'unknown' if ambiguous else 'committed')
             if receipt['persistence_sha256'] != persistence or receipt['outcome_sha256'] != outcome:
                 raise CarrierError('carrier_receipt_invalid')
         except Exception:

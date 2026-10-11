@@ -1,6 +1,6 @@
 # 持续执行计划
 
-更新时间：2026-10-11（10日实施结果与次日通知读回）。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-11（收发链路/认证原authority接入与薄调用入口源码推进）。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-10 报告](STATUS-2026-10-10.md)。
@@ -25,6 +25,15 @@ VPS/Leader 工作区。内建 node ID `cloud` 保留且指 Alibaba VPS，展示
 所有环境都必须照抄的运行方式。
 
 ## 执行顺序与并行分工
+
+本轮009c已从未接线库推进为实际Channel接口＋专用carrier HTTP＋原
+authority事务/完整结果spool，隔离双承载交接、原身份与unknown保护通过。
+当前production仍只有VPS legacy收发，未装grant/reconcile核验器；same
+authority受控交接不等于VPS分区HA。004d新增薄call/status/result组成原
+propose/reserve/link并接CLI/native mesh可选入口；先冻结双端/CI，再
+独立安装薄入口并用新明确task实测，不重跑已completed的原GET。
+Root集成；clawbot专员拥有Channel/集成测试，egress专员拥有薄helper，
+独立审查专员验证原authority/认证边界。完整原goal/43个task依赖保留。
 
 | 阶段 | Task | 当前工作与依赖 | 验收依据 |
 | --- | --- | --- | --- |

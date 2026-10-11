@@ -1,9 +1,10 @@
 # Channel carrier candidate and once-only fence (PAM-009a/009c)
 
-2026-10-10 source slice, **not integrated into production Channel/API/config,
-not deployed HA and not an import/handoff implementation**. Existing production
-VPS-only poll/send is unchanged. Synthetic tests establish state-machine
-boundaries, not actual iLink, old-holder shutdown, or another node's admission.
+2026-10-11: source now connects the fence to Channel, original-authority
+transactions and authenticated carrier RPC. **Not installed in production,
+not partition HA and not a Leader/task migration implementation**. Existing
+production VPS-only poll/send is unchanged. Real loopback HTTP tests use a
+synthetic iLink transport and test-only proof, not actual old-holder shutdown.
 ClawBot remains an owner↔Leader capability, not the Leader workspace.
 
 ## One designated authority, several possible carriers
@@ -99,7 +100,7 @@ Known business errors should be normalized outcomes; a callback exception is
 unknown. Accepted send is still not verified phone delivery.
 
 `CarrierFence(client, term).run(operation_id, kind, identity, request_sha256,
-call, persist)` performs these gates, checks witness/incarnation/account/holder/
+call, persist, on_dispatch=None, uncertain=None)` performs these gates, checks witness/incarnation/account/holder/
 epoch/identity receipts, and never retries either callback. Client must implement
 `request(path, body)` against the configured witness with the holder's credential.
 `persist(result, ticket)` must atomically store the original cursor/inbox/task/
@@ -108,6 +109,10 @@ turn an old message into a new task/authority. Raw returned batches and original
 native histories require private recovery storage; a digest is not their copy.
 If a canonical write happened but its ACK is lost, the wrapper reports unconfirmed
 and does not repeat it. Original journal readback is the reconciliation path.
+`on_dispatch(ticket)` durably records the original admitted attempt before
+transport. `uncertain(outcome)` preserves a committed unknown receipt through
+`committed_unknown`, without treating it as external quiescence or allowing a
+new holder. Neither optional hook changes legacy unfenced Channel behavior.
 
 Unknown sends retain their original identity and block handoff, but do not block
 unrelated new sends **under the same holder/term**. An unknown poll blocks another
@@ -149,13 +154,57 @@ or automatic failover is claimed here.
 No active HTTP socket is not enough: a paused caller holding a dispatch ACK must
 be proven unable to resume its admitted callback, including a delayed local write.
 
-## Minimum integration owned by Root (still pending)
+## Opt-in source integration (not production deployment)
+
+`ChannelState(store, witness, account=validated_account)` retains original
+cursor/inbox/tasks/context/outbox/client ID in the SAME authority DB. Poll
+ingestion and its receipt share one transaction (`Store._ingest_in_db`); send
+commit verifies original text/media/route/context/client identity. Full raw
+outcomes are stored privately before canonical commit. A lost ACK is queried
+by its original receipt, never converted to pending or a new client ID.
+
+`ChannelAuthority` adds dedicated `channel_carrier` authentication, isolated
+before global status/catalogue/task/operator/worker routes. Credentials cannot
+alias other roles. Private peer binding fixes node, owner/account and canonical
+authority. `begin` rebuilds the exact original wire body; `returned` and
+`committed*` are checked against the authority's actual full-result spool and
+durable canonical receipt, not accepted merely because a carrier posts a SHA.
+
+Authority configuration is explicitly opt-in:
+
+```json
+{"channel_carrier": {"witness_id": "owner-witness", "owner_ref": "owner-reference",
+                     "transport_mode": "disabled"}}
+```
+
+`disabled` retains the original iLink account/notification route/receiver
+incarnation, but does not create local poll/send threads. `fenced` can start
+local Channel only with an already granted local term and installed original
+cursor. No opt-in preserves legacy behavior. This configuration does NOT stop
+an already running old process. No default verifier or remote grant endpoint
+is installed; copying synthetic test proofs into deployment is not permitted.
+
+`RemoteChannelState(client, journal_path)` is a state proxy, not a new Store:
+every canonical read/write reaches that original authority. Its separate owned
+0700/0600 SQLite spool pins witness/incarnation/account/authority and saves the
+full original return with FULL synchronous transactions before posting it.
+It never imports `account.pending` or creates another business inbox/task DB.
+Outcome endpoints alone accept a bounded 8 MiB + envelope; other API budgets
+remain 128 KiB. No truncated batch can be committed.
+
+This permits controlled carrier-only placement while original Leader/history
+remain in place. If authority/witness are on VPS, losing VPS still prevents
+new shared-account IO/commits: **moving only the receiver is not VPS HA**.
+Original-state availability, independent arbitration and actual old-call
+quiescence remain required for fault-domain recovery.
+
+## Remaining deployment and recovery work
 
 1. Configure one witness and private account/authority binding explicitly.
    Keep it opt-in, pin identity/incarnation; do not mirror a writable witness.
    Operator bootstrap/handoff verifier must use actual stop/drain and closed
    original history/execution evidence, not the audit-only export or posted flags.
-2. Authenticate a dedicated node-bound carrier role and route
+2. Install the implemented dedicated node-bound carrier role and route
    `/channel-carrier/{candidate,renew,begin,dispatch,returned,commit_authorize,committed,unknown}`
    to `witness.request(authenticated_node, action, payload)`. These payloads cannot
    claim `actor`. Enrollment/freeze/grant/reconcile are not exposed by this method.
@@ -165,8 +214,8 @@ be proven unable to resume its admitted callback, including a delayed local writ
 4. Channel send: reserve one original outbox/client identity before dispatch;
    preserve a local intent alongside the witness intent. Coordinate `next_send`
    claiming with admission so an unavailable witness never silently turns pending
-   into replayable submitting. Preserve `finish_send` known/unknown semantics and
-   canonical authority. The callback wrapper alone is not this Store integration.
+   into replayable submitting. The source now preserves original intents and
+   known/unknown semantics; production installation/readback remains separate.
 5. Prove old receiver loss-of-authority, original outcome/cursor/history closure,
    private checkpoint install and single-carrier runtime admission in isolation;
    then controlled real handoff. No second production poller for testing.

@@ -26,10 +26,18 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 class API:
     def __init__(self, config):
         self.config = config
+        from .channel_authority import validate_config as validate_carrier_config, validate_peer as validate_carrier_peer
+        carrier_config = validate_carrier_config(config['channel_carrier']) if 'channel_carrier' in config else None
+        if carrier_config is not None and (not config.get('node_id') or not config.get('ilink_account')):
+            raise ValueError('channel_carrier_requires_original_authority_account')
         ingress_config = validate_ingress_config(config['ingress']) if 'ingress' in config else None
         if ingress_config is not None and not config.get('node_id'):
             raise ValueError('ingress_requires_authority_identity')
         for peer in config['peers']:
+            if peer.get('role') == 'channel_carrier':
+                if carrier_config is None:
+                    raise ValueError('channel_carrier_not_configured')
+                validate_carrier_peer(peer, carrier_config['owner_ref'], config['node_id'])
             if peer.get('role') == 'ingress':
                 if ingress_config is None:
                     raise ValueError('ingress_not_configured')
@@ -37,6 +45,9 @@ class API:
         self.peers = [(read_secret(peer['token_file']), peer) for peer in config['peers']]
         for index, (secret, peer) in enumerate(self.peers):
             for previous_secret, previous_peer in self.peers[:index]:
+                if ('channel_carrier' in (peer.get('role'), previous_peer.get('role'))
+                        and hmac.compare_digest(secret, previous_secret)):
+                    raise ValueError('ambiguous_channel_carrier_credential')
                 if ('ingress' in (peer.get('role'), previous_peer.get('role'))
                         and hmac.compare_digest(secret, previous_secret)):
                     # Ambiguous role/source/subject mappings are never resolved
@@ -79,6 +90,16 @@ class API:
                                       self.ilink.account['ilink_user_id'], self.ilink.account['ilink_bot_id']])
         self.notifications = (RemoteNotifications(self.store, config['node_id'], route_id=account_binding)
                               if config.get('node_id') else None)
+        self.channel_authority = None
+        if carrier_config is not None:
+            if self.ilink is None:
+                raise ValueError('channel_carrier_requires_channel_notification_route')
+            for _, peer in self.peers:
+                if peer.get('role') == 'channel_carrier' and peer['channel']['account_binding'] != account_binding:
+                    raise ValueError('channel_carrier_account_binding_changed')
+            from .channel_authority import ChannelAuthority
+            self.channel_authority = ChannelAuthority(self.store, carrier_config,
+                config['node_id'], self.ilink, account_binding)
         if self.network:
             from .remote import Remote
             self.remote = Remote(self.store, self.network)
@@ -96,6 +117,19 @@ class API:
         worker = role == 'worker' and bool(node)
         parsed = urlsplit(path)
         query = parse_qs(parsed.query, keep_blank_values=True)
+        if role == 'channel_carrier' or parsed.path.startswith('/channel-carrier/'):
+            # Isolate before even global status/catalogue routes. A carrier's
+            # node field never confers worker/operator/ingress privileges.
+            if (role != 'channel_carrier' or self.channel_authority is None
+                    or method != 'POST' or parsed.query or parsed.fragment
+                    or not parsed.path.startswith('/channel-carrier/')):
+                raise PermissionError('channel_carrier_route_not_authorized')
+            binding = peer['channel']
+            if (binding['account_binding'] != self.channel_authority.binding
+                    or binding['owner_ref'] != self.channel_authority.owner_ref
+                    or binding['canonical_authority'] != self.channel_authority.authority):
+                raise PermissionError('channel_carrier_binding_changed')
+            return self.channel_authority.dispatch(node, parsed.path[len('/channel-carrier/'):], payload)
         if role == 'ingress' or parsed.path.startswith('/v1/ingress/'):
             # Scoped entrypoints must not fall through to existing global
             # status/discovery/operator/worker routes, even with a node field.
@@ -447,7 +481,12 @@ def serve(config, ready=None):
                 return self.send_json(401, {'error': 'authentication_required'})
             try:
                 size = int(self.headers.get('Content-Length', '0'))
-                if size < 0 or size > 128 * 1024:
+                # Only authenticated carrier outcome writes may carry a full
+                # bounded iLink batch. Other API budgets are unchanged.
+                large_channel = (peer.get('role') == 'channel_carrier' and self.command == 'POST'
+                    and self.path in ('/channel-carrier/state/record_result', '/channel-carrier/state/commit_poll'))
+                maximum = 8 * 1024 * 1024 + 65536 if large_channel else 128 * 1024
+                if size < 0 or size > maximum:
                     return self.send_json(413, {'error': 'body_too_large'})
                 payload = json.loads(self.rfile.read(size)) if size else {}
                 if not isinstance(payload, dict):
@@ -469,8 +508,18 @@ def serve(config, ready=None):
     server = ThreadingHTTPServer(('127.0.0.1', config.get('port', 17680)), Handler)
     server.daemon_threads = True
     channel = None
-    if api.ilink is not None:
+    if api.channel_authority is not None:
+        if api.channel_authority.config['transport_mode'] == 'fenced':
+            from .channel_carrier import CarrierFence
+            term = api.channel_authority.witness.inspect(api.channel_authority.binding)
+            if term['holder'] != config['node_id'] or term['frozen']:
+                server.server_close()
+                raise ValueError('channel_carrier_local_term_not_granted')
+            fence = CarrierFence(api.channel_authority.bound_client(config['node_id']), term)
+            channel = Channel(api.channel_authority.state, api.ilink, fence)
+    elif api.ilink is not None:
         channel = Channel(api.store, api.ilink)
+    if channel is not None:
         for target in (channel.run_poll, channel.run_send):
             threading.Thread(target=target, daemon=True).start()
     if ready:
