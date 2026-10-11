@@ -45,10 +45,17 @@ def validate_peer(peer, owner_ref, authority):
 
 
 class ChannelAuthority:
-    def __init__(self, store, config, authority, transport, account_binding):
+    def __init__(self, store, config, authority, transport, account_binding,
+                 handoff_verifier=None, operation_verifier=None):
+        # Trusted owner code injection only, not JSON/module loading or a
+        # carrier RPC. Missing hooks deliberately keep grant/reconcile closed.
+        if any(hook is not None and not callable(hook)
+               for hook in (handoff_verifier, operation_verifier)):
+            raise CarrierError('channel_owner_verifier_invalid')
         self.config, self.authority, self.transport = config, authority, transport
         self.binding, self.owner_ref = account_binding, config['owner_ref']
-        self.witness = CarrierWitness(store, config['witness_id'])
+        self.witness = CarrierWitness(store, config['witness_id'],
+            handoff_verifier=handoff_verifier, operation_verifier=operation_verifier)
         self.witness.enroll(account_binding, self.owner_ref, authority)
         self.state = ChannelState(store, self.witness, account=transport.account)
 
