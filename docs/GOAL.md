@@ -7,6 +7,36 @@
 后续要求取代：Dots 对标、Codex/Pi、沟通能力多节点承担。当前控制工具
 不能原位修改 native objective；本文件不冒充该操作。
 
+12:57后续只读消费task真实completed epoch1，原Leader同thread三步
+native plan完成；Root核对实际native read_bytes/base64 decode/sha
+工具调用及对应输出，不仅是final自报。VPS完整文件回收和Leader
+真实消费已通过，但首轮agent-owned二进制传输失败仍保留，完整
+自动回收/统一能力组合仍待后续实测。长期goal未完成/active。
+
+12:54更新：首轮原Leader同thread只读task完成epoch6，但传输失败/
+完整文件读取plan仍pending，不能算自动成果回收成功。Root随后沿
+同原message/op/cap读取不可变原artifact，VPS收到完整147270B、
+body109356B，目的端全正文独立逐字节与owner样本相同；原provider
+完整row/nonce/条数不变，未重GET。初次失败原因未证明。新明确
+只读消费task仅提交一次，原Leader实际读取已保存文件仍待核验；
+旧失败不抹除，独立固定SSH wrapper child stdin隔离保留旧备份。
+
+12:49续接：4e35406新增原产物完整只读传输/CLI及owner-only通道
+核验器，冻结同归档两端各1944项和公开CI三版本通过。独立入口两端
+256个regular source file逐一一致；实际原账本/provider/完整原文件
+manifest核验通过，不再GET。新只读task只提交一次，先遇native
+account-hop旧历史冲突；独立证明旧10803733B是原15385893B严格
+完整行前缀、完整新文件与权威130chunk artifact一致，idle/no native
+writer边界保留两份完整历史/一致DB备份后原子同步，原task/session/
+chunk账本未人工改写。VPS worker受控stop/start一次，receiver/core
+不变；原Leader同thread现在epoch6/plan运行，完整产物目的端消费待核。
+原restore失败身份仍保留，不把自动restore失败重试当模型已重复执行。
+本机12:35实际boot，既有服务恢复active，Root没有重启该主机；启动
+恢复不单独证明分区智能或端到端能力。ClawBot核验器只是source，
+不能凭报告/不存在的witness或全局历史静止要求接管；carrier-only不
+停无关Leader任务，生产仍VPS单收发。下一片便捷成果/组合与真实
+沟通交接、故障域独立authority；Chat/官方Cloud/第三方模型另验。
+
 11:38续接：校园新明确父task `PAM-002b-campus-handoff-20261011-v1`
 只提交一次，原VPS Leader同thread经A2A委派真实laptop child；child
 completed epoch1，父经原acceptance receipt自动回收并同thread续接

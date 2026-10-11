@@ -1,11 +1,50 @@
 # 持续执行计划
 
-更新时间：2026-10-11（11:38校园真实A2A/本地薄调用/原Leader回收完成）。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-11（12:57完整原产物已回收/原Leader实际消费完成；首轮自动传输失败保留）。长期 goal 仍 active；以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
 
 ## 最新可执行下一片（协调计划，不是新 runtime receipt）
+
+12:57后续consume task completed epoch1/原Leader同thread/三步plan
+完成。Root核对真实native read_bytes、完整base64解码/sha工具调用
+与输出及独立目的端全正文oracle，保存成果已能被Leader消费。
+首轮agent-owned传输失败不由后续成功覆盖；下一片一个有固定本地
+诊断/owned SSH期限/独立stdin的新明确cache-miss只读任务，验证
+模型自己完整回收原文件，不重新GET，不搬走/删除已验证缓存。
+随后统一discover/delegate/status/result，与009c/d真实沟通交接并行；
+不把所有能力等待在全局HA或007之前。当前43 task依赖保留。
+
+12:54实际状态更新：首轮原Leader同thread读取task完成epoch6但
+传输exit2、完整读取步骤pending；Root后续同原身份不可变文件读取
+成功，VPS完整147270B/正文109356B独立逐字节oracle一致，原provider
+row/nonce/count未变。初次失败原因未证明，不称自动回收完成。
+新只读消费task仅提交一次，先核原Leader实际读取保存成果；旧首轮
+失败task/result/plan保留。之后改进有固定本地诊断/owned lifetime/
+stdin隔离的原文件入口，而非新operation或重新业务GET。
+
+12:49新增片：4e35406原产物传输/CLI与owner-only verifier注入及
+只读通道盘点已公开。冻结归档SHA01d4f1c5…07bed34，本机1944项
+171.207s/VPS Python3.6.8 1944项176.259s及CI38112274853
+3.8/3.12/3.14实际成功；独立安装两端256个source file一致，正式
+core仍3198c87、receiver未变。原producer真实manifest对应原A2A
+task/operation/receipt/nonce/完整147270B文件及109356B正文，不重GET。
+新只读task `PAM-004d-campus-artifact-read-20261011-v1`仅提交一次；
+native account-hop旧历史冲突已在idle/no writer边界独立核对严格
+前缀/完整权威artifact，完整两份历史/一致DB备份后同步；同task原
+Leader thread epoch6/原生plan运行，目的端完整文件实际消费仍待核。
+只有VPS worker受控stop/start一次，未改DB/task/session/guard。
+之后应把这类“原完成历史严格前缀同步”做成可审计原生续接恢复，
+不是每次让Root修账号目录，不允许覆盖分歧/更新未决turn的历史。
+
+Channel核验器承认原witness同receipt独立reconciled后的意图闭合，
+仍保留canonical unknown；不能用库存报告签handoff proof。当前legacy
+生产没有真实witness/owned supervisor handles，不造incarnation。
+下一步仅旧沟通caller实际停止/在途/原通道状态闭合和一次受控carrier
+交接，不要求停止无关Leader/history工作；VPS失联HA另须把沟通
+authority/state/arbitration脱离VPS故障域，不能以搬carrier替代。
+本机12:35实际boot后既有服务active，Root没有重启它；保留实测边界。
 
 11:38 新推进：新校园父task只提交一次；原VPS Leader经A2A委派
 laptop同类项目specialist，child completed epoch1，父原thread自动
