@@ -1202,6 +1202,8 @@
       "original_request_readback_status": "accepted",
       "root_reenqueued_or_new_request_id_used": false,
       "existing_native_recovery_bridge_active_verified": true,
+      "bounded_known_rejection_retry_count": 1,
+      "native_refresh_exact_original_reply_context_verified": true,
       "outcome_unknown": false,
       "delivery_verified": false,
       "automatic_retry": false,
