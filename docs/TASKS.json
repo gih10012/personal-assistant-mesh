@@ -15,6 +15,23 @@
     "native_goal_or_accounting_reset": false,
     "next_action": "Report current wrap-up through existing bound-owner ClawBot; jointly replan with owner before further implementation"
   },
+  "latest_wrap_up_publication_and_notification": {
+    "source_commit": "4ffb62d87ede8d347476e2e5f9a98c2215df0e24",
+    "public_github_push_verified": true,
+    "initial_direct_push_tls_failure_retained": true,
+    "same_remote_branch_checked_before_push": true,
+    "existing_local_proxy_child_only_used": true,
+    "global_network_configuration_changed": false,
+    "claw_request_id": "mesh-owner-wrapup-20261011-2200-v1",
+    "claw_initial_status": "submitting",
+    "same_original_request_lookup_status": "accepted",
+    "same_id_lookup_replayed": true,
+    "root_second_wire_submission_or_new_id": false,
+    "claw_outcome_unknown": false,
+    "delivery_verified": false,
+    "goal_completed": false,
+    "joint_replan_before_further_implementation": true
+  },
   "latest_wrap_up_sources": {
     "root_integrated_local_full_suite_passed": 2073,
     "root_integrated_local_full_suite_seconds": 170.493,
