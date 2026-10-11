@@ -198,6 +198,50 @@ new shared-account IO/commits: **moving only the receiver is not VPS HA**.
 Original-state availability, independent arbitration and actual old-call
 quiescence remain required for fault-domain recovery.
 
+## Owned retry and optional same-term supervision
+
+The Channel loops now keep fixed, bounded local diagnostics when their original
+authority is unavailable. Reporting a remote error no longer performs another
+remote `state/set` that could kill the poll/send thread. Capped backoff uses
+interruptible `stop.wait`; one Channel cannot run duplicate loops for the same
+lane. Legacy success/error cadence and original unknown barriers remain.
+`channel.local_errors()` reads only local memory, not a durable recovery proof.
+
+An explicit `ChannelSupervisor(channel, ...)` owns one poll/send/maintenance
+group for an **already granted** `CarrierFence`. Its maintenance inspects the
+original term, optionally refreshes an owner-supplied same-binding candidate
+report, and renews that same term. Every identity field including witness,
+incarnation, holder, epoch, account, checkpoint and frozen state must remain
+unchanged; only the deadline may change. Lost renewal ACK closes new managed IO;
+later maintenance first rereads the same term. It does not re-dispatch an iLink
+operation, enroll, grant, reconcile, steal a holder or install a proof verifier.
+
+The original-authority server can explicitly opt in through private config:
+
+```json
+{"channel_carrier": {
+  "witness_id": "owner-witness", "owner_ref": "owner-reference",
+  "transport_mode": "fenced",
+  "supervisor": {"renew_seconds": 60, "renew_interval": 20,
+                 "candidate_ttl": 60,
+                 "candidate_contract": "REPLACE_WITH_ACTUAL_OWNER_REPORT_OBJECT"}
+}}
+```
+
+The placeholder string is intentionally **not a valid configuration**. The
+candidate object must be the complete contract above, matching the actual
+granted local holder. These are deployment reports, not independently attested
+connectivity or handoff proofs. Without an explicit candidate report, the
+supervisor does not invent one; expiry of the original candidate closes renewal.
+Omitting `supervisor` preserves existing startup. `disabled` cannot enable it.
+
+Readiness gates only **new** managed dispatch. Already dispatched original work
+still drains through its original persistence path. `stop(timeout)` reports
+whether owned threads actually stopped; timeout/`false`, process exit or an
+empty snapshot is not remote-request/caller quiescence evidence. Neither this
+supervision nor successful renewal removes VPS authority/state dependence or
+provides production partition HA. Native tools and unrelated work are untouched.
+
 ## Remaining deployment and recovery work
 
 1. Configure one witness and private account/authority binding explicitly.

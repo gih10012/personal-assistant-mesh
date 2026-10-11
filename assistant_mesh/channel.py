@@ -16,6 +16,7 @@ import urllib.request
 
 from .config import private_json
 from .channel_carrier import CarrierError, CarrierFence
+from .channel_supervisor import BoundedBackoff, LocalDiagnostics
 from .networking import digest
 from .remote_notifications import PROTOCOL as NOTIFY_PROTOCOL
 
@@ -101,6 +102,9 @@ class Channel:
         self.store, self.transport = store, transport
         self.carrier_fence = carrier_fence
         self.stop = threading.Event()
+        self._supervisor = None
+        self._diagnostics = LocalDiagnostics()
+        self._loop_lock, self._running_loops = threading.Lock(), set()
         if carrier_fence is not None:
             if not isinstance(carrier_fence, CarrierFence):
                 raise ChannelError('channel_fence_invalid')
@@ -135,6 +139,7 @@ class Channel:
 
     def poll_once(self):
         if self.carrier_fence is not None:
+            self._check_supervisor()
             return self._poll_fenced()
         account = self.transport.account
         batch = self.transport.poll(self.store.get('cursor', account.get('cursor', '')))
@@ -144,6 +149,7 @@ class Channel:
 
     def send_once(self):
         if self.carrier_fence is not None:
+            self._check_supervisor()
             return self._send_fenced()
         row = self.store.next_send()
         if not row:
@@ -249,24 +255,55 @@ class Channel:
             'outbox_id': row['id'], 'client_id': row['client_id']}, body, call, persist)
         return True
 
-    def run_poll(self):
-        backoff = 1
-        while not self.stop.is_set():
+    def _check_supervisor(self):
+        if self._supervisor is not None and not self._supervisor.ready.is_set():
+            raise ChannelError('channel_fence_blocked')
+
+    def local_errors(self):
+        """Bounded fixed diagnostics remain readable when the authority is down."""
+        return self._diagnostics.snapshot()
+
+    def _loop_error(self, lane, error):
+        code = error.code if isinstance(error, ChannelError) else lane + '_failed'
+        if lane == 'send' and isinstance(error, (ChannelError, CarrierError)):
+            code = 'channel_fence_blocked'
+        if code not in LocalDiagnostics._CODES:
+            code = lane + '_failed'
+        # Fenced/remote errors must not make a second call into the unavailable
+        # authority just to report the first error. Original outcomes/guards
+        # are handled by the existing atomic canonical intent path, not logging.
+        report_failed = False
+        if self.carrier_fence is None:
             try:
-                self.poll_once()
-                backoff = 1
-            except ChannelError as exc:
-                self.store.set('channel_error', {'code': exc.code, 'at': time.time()})
-                backoff = min(60, backoff * 2)
+                self.store.set('channel_error', {'code': code, 'at': time.time()})
             except Exception:
-                self.store.set('channel_error', {'code': 'poll_failed', 'at': time.time()})
-                backoff = min(60, backoff * 2)
-            self.stop.wait(backoff)
+                report_failed = True
+        self._diagnostics.record(lane, code, report_failed)
+
+    def _run_loop(self, lane, operation, interval):
+        with self._loop_lock:
+            if lane in self._running_loops:
+                return  # Never start a replacement while the original is alive.
+            self._running_loops.add(lane)
+        backoff = BoundedBackoff(interval)
+        try:
+            while not self.stop.is_set():
+                try:
+                    operation()
+                    self._diagnostics.clear(lane)
+                    delay = backoff.reset()
+                except Exception as error:
+                    self._loop_error(lane, error)
+                    # Preserve legacy send's normal/error cadence. Opt-in
+                    # remote loops instead back off on failed reconnects.
+                    delay = interval if lane == 'send' and self.carrier_fence is None else backoff.failed()
+                self.stop.wait(delay)
+        finally:
+            with self._loop_lock:
+                self._running_loops.remove(lane)
+
+    def run_poll(self):
+        self._run_loop('poll', self.poll_once, 1)
 
     def run_send(self):
-        while not self.stop.is_set():
-            try:
-                self.send_once()
-            except (ChannelError, CarrierError):
-                self.store.set('channel_error', {'code': 'channel_fence_blocked', 'at': time.time()})
-            self.stop.wait(0.5)
+        self._run_loop('send', self.send_once, 0.5)

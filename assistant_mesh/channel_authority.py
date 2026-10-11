@@ -16,13 +16,22 @@ from .networking import canonical, digest
 
 
 def validate_config(value):
-    _shape(value, ('witness_id', 'owner_ref', 'transport_mode'))
+    if not isinstance(value, dict):
+        raise ValueError('channel_carrier_config_invalid')
+    base = {key: item for key, item in value.items() if key != 'supervisor'}
+    _shape(base, ('witness_id', 'owner_ref', 'transport_mode'))
     from .channel_carrier import _id
     _id(value['witness_id'])
     _id(value['owner_ref'])
     if value['transport_mode'] not in ('disabled', 'fenced'):
         raise ValueError('channel_carrier_transport_mode_invalid')
-    return dict(value)
+    result = dict(base)
+    if 'supervisor' in value:
+        if value['transport_mode'] != 'fenced':
+            raise ValueError('channel_supervisor_requires_fenced_transport')
+        from .channel_supervisor import validate_config as validate_supervisor
+        result['supervisor'] = validate_supervisor(value['supervisor'])
+    return result
 
 
 def validate_peer(peer, owner_ref, authority):

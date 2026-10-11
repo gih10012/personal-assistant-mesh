@@ -457,6 +457,29 @@ class API:
         return getattr(self.allocations, action)(actor, **dict(arguments))
 
 
+def _start_channel(api, config):
+    """Start one explicit transport group; never enroll/grant/steal a holder."""
+    channel, supervisor = None, None
+    if api.channel_authority is not None:
+        carrier = api.channel_authority.config
+        if carrier['transport_mode'] == 'fenced':
+            from .channel_carrier import CarrierFence
+            term = api.channel_authority.witness.inspect(api.channel_authority.binding)
+            if term['holder'] != config['node_id'] or term['frozen']:
+                raise ValueError('channel_carrier_local_term_not_granted')
+            fence = CarrierFence(api.channel_authority.bound_client(config['node_id']), term)
+            channel = Channel(api.channel_authority.state, api.ilink, fence)
+            if 'supervisor' in carrier:
+                from .channel_supervisor import ChannelSupervisor
+                supervisor = ChannelSupervisor(channel, **carrier['supervisor']).start()
+    elif api.ilink is not None:
+        channel = Channel(api.store, api.ilink)
+    if channel is not None and supervisor is None:
+        for target in (channel.run_poll, channel.run_send):
+            threading.Thread(target=target, daemon=True).start()
+    return channel, supervisor
+
+
 def serve(config, ready=None):
     api = API(config)
     class Handler(BaseHTTPRequestHandler):
@@ -507,26 +530,16 @@ def serve(config, ready=None):
     # Private RPC only. Use SSH forwarding or a TLS/auth proxy for remote nodes.
     server = ThreadingHTTPServer(('127.0.0.1', config.get('port', 17680)), Handler)
     server.daemon_threads = True
-    channel = None
-    if api.channel_authority is not None:
-        if api.channel_authority.config['transport_mode'] == 'fenced':
-            from .channel_carrier import CarrierFence
-            term = api.channel_authority.witness.inspect(api.channel_authority.binding)
-            if term['holder'] != config['node_id'] or term['frozen']:
-                server.server_close()
-                raise ValueError('channel_carrier_local_term_not_granted')
-            fence = CarrierFence(api.channel_authority.bound_client(config['node_id']), term)
-            channel = Channel(api.channel_authority.state, api.ilink, fence)
-    elif api.ilink is not None:
-        channel = Channel(api.store, api.ilink)
-    if channel is not None:
-        for target in (channel.run_poll, channel.run_send):
-            threading.Thread(target=target, daemon=True).start()
-    if ready:
-        ready(server, api, channel)
+    channel, supervisor = None, None
     try:
+        channel, supervisor = _start_channel(api, config)
+        if ready:
+            ready(server, api, channel)
         server.serve_forever(poll_interval=0.5)
     finally:
-        if channel:
+        if supervisor is not None:
+            # Bounded local cleanup is not remote iLink quiescence proof.
+            supervisor.stop()
+        elif channel:
             channel.stop.set()
         server.server_close()
