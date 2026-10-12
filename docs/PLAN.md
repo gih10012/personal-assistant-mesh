@@ -11,6 +11,22 @@
 继续 Firefox 接线。见 [调优交接](BROWSER-NETWORK-TUNING-HANDOFF.md)。
 只有此调优子项目延后，四线/整个 Goal 继续；不自动扩大代理或面板变更。
 
+23:20实际装载续接：原receiver两项只读projection已在唯一新process
+加载，原Worker不重启；原carrier完整callback闭合，一致备份及独立
+10表/schema/inode/native/steering全行核验通过。历史HTTP返回6个
+decision、0个remote link，不能因此声称新增字段业务回执已经验收。
+新明确自维护任务`PAM-004d-campus-lease-maintenance-20261012-v1`
+原scope仅一次accepted：让原Leader作者租约恢复tool，而非Root继续
+代做每层业务。实际校园租约过期死循环需same-ID CAS/epoch-aware
+配置、原journal/旧artifact配置保持、真实续租；随后新Workspace远端
+委派及完整reader实跑。未恢复前不假造epoch2/新观测，也不再执行旧GET。
+
+当前推进顺序：完成并审查原Leader维护候选→受控恢复现有校园实例/
+容量池→配置已有native SSH完整reader→真实新Workspace闭环和字段
+核验；并行保留Chat/官方Cloud/通用新节点/Claw安全接管。现有Cloud
+草稿仍未发布，等待原setup恢复，不另建环境；账号不反复确认。
+以下21:19盘点及未装载candidate是保留的当时快照，不覆盖当前装载。
+
 晚间已验：原Leader同scope/thread新明确readonly inventory完成epoch1/
 plan3，真实exec的统一CLI和完整15347B读取已独立核；Standalone VPS
 31项通过/原认证可用，receiver两投影candidate71项通过但未切。正确

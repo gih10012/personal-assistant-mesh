@@ -5,6 +5,13 @@
 Shell、文件、网络、浏览器和其他 MCP；本入口只管理 Mesh 自己提供的
 共享能力。源码与下面的隔离验证不等于生产已接通。
 
+实际接线续接：2026-10-12原Leader同thread已真实运行CLI discover并
+完整读取15347B、8section无截断盘点。23:20原唯一receiver实际加载
+两只读指纹投影，原Worker/10个保护表和历史保持。校园租约过期已
+定位、恢复tool任务仅一次accepted；新call/delegate/full-artifact与
+实际指纹仍未闭环，local-artifact分支仍欠。详见
+[状态](STATUS-2026-10-12.md)，不以这段新增替代下面的授权/未知边界。
+
 ## 模型使用的四个动作
 
 | 动作 | 行为 | 不能据此推断 |

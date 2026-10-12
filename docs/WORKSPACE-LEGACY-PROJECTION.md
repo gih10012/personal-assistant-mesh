@@ -1,5 +1,12 @@
 # Workspace 对原3198 authority 的最小只读投影兼容
 
+2026-10-12 23:20生产进展：原独立receiver的同源candidate已实际
+唯一加载，原Worker/Store不变；carrier全callback闭合、一致备份和
+独立10表/schema/inode/native全行保持已核。仅两模块发生变化。
+历史HTTP没有remote-delegation link，实际两指纹值尚待新Workspace
+任务回执核对，不能用模块装载替代业务验收。详见
+[装载记录](STATUS-2026-10-12.md)。以下保留实现/原准备边界。
+
 新 Workspace 的 unknown 恢复必须核对**真实原委派内容**，不能只对上
 child/message ID。`routing_context` 的 remote records 与 `routing` 的
 linked remote reference 现在额外返回：
@@ -27,7 +34,8 @@ receiver 的已部署最小归档 `116bacc2…da01` 与常驻 Worker 仍是各�
 可以用自己的发布包，authority 必须确实加载 additive 投影；目录存在
 或 client 新版本并不代表旧 process 已经有这些返回字段。
 
-装载/切换是 Root 后续单独受控生产步骤，本片没有做。不能为只读检查
+装载/切换是 Root 单独受控生产步骤；最初源码切片没有做，现已按上文
+单独加载。不能为只读检查
 在生产 DB 上实例化 `API`/`Store`：原3198构造器的 schema/inflight
 recovery 行为仍存在，可能重分类无关 submitting/steering。必须保留
 原账号、账本、43任务、会话/unknown 与 native Worker；唯一 receiver

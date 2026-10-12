@@ -24,6 +24,21 @@ class/instance、目标作用域、共享瓶颈、故障域及外围设备代理
 不把发现耳机等同取得控制权。Mesh 只管理自己的额外共享接口，
 **不能阻断任何原生功能**；此前另一聊天中的全设备 Broker 约束不采用。
 
+23:20 续接已真正增量装载原 authority 的两项只读委派指纹投影。
+切换前原 carrier 的真实线程与全部在途回调闭合；一致备份、切换后
+独立全行核验通过：10个保护表、schema、账本inode、原native会话/
+历史块和submitted steering保持，原Worker未重启。只换唯一receiver，
+不是新的通信authority、跨节点接管或HA。历史HTTP读取无remote link，
+新字段的实际业务回执仍须下一真实Workspace委派验证。
+
+同时实际定位校园能力/容量租约已过期，而旧续租循环要求租约仍有效，
+不是当前A2A/auth故障。新的明确自维护任务
+`PAM-004d-campus-lease-maintenance-20261012-v1`仅提交一次并accepted，
+交原Leader同scope自行编写可复用CAS恢复工具与epoch-aware候选。
+目前仅准备/隔离验证授权；恢复需审查后真实部署/续租/完整新产物，
+不能把任务accepted当能力已恢复。Cloud现有草稿仍未发布，Chat原生
+HTTPS/OAuth及独立故障域Claw仍欠；四线及完整长期Goal继续active。
+
 ClawBot 第一阶段为“确认 VPS 停止后安全接管＋Chat/终端冗余入口”，
 包括通信状态与权限，不承诺任意网络分区下无缝微信 HA。未知 DOM
 发送、Cloud submit 或外部写入都保留原 intent，绝不换 ID 重试。
