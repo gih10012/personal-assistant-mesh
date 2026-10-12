@@ -1,0 +1,38 @@
+{
+  "format": "mesh-cloud-membership/1",
+  "mesh_task_id": "REPLACE_ORIGINAL_MESH_TASK_ID",
+  "mesh_epoch": 1,
+  "lease_id": "REPLACE_CURRENT_TASK_LEASE_ID",
+  "expires_at": 2147483647,
+  "request_id": "REPLACE_ORIGINAL_CLOUD_REQUEST_ID",
+  "callback_url": "https://mesh.example.invalid/cloud/node",
+  "scopes": ["node:hello", "task:read", "artifact:write", "task:report"],
+  "capabilities": [],
+  "enrollment": {
+    "format": "mesh-enrollment/1",
+    "mesh_id": "REPLACE_STABLE_MESH_ID",
+    "node_id": "openai-codex-cloud-REPLACE_DERIVED_NODE_SUFFIX",
+    "owner_binding": "REPLACE_VERIFIED_OWNER_BINDING",
+    "repo_pin": {
+      "repository": "https://github.com/gih10012/personal-assistant-mesh",
+      "commit": "0000000000000000000000000000000000000000"
+    },
+    "runtime": {
+      "kind": "temporary",
+      "expires_at": 2147483647,
+      "state_ref": "mesh:REPLACE_DURABLE_CLOUD_STATE_REFERENCE"
+    },
+    "join": {
+      "peer_id": "REPLACE_JOIN_PEER_ID",
+      "authority_id": "REPLACE_CURRENT_AUTHORITY_ID",
+      "route_ref": "route:REPLACE_APPROVED_HTTPS_ROUTE",
+      "credential_ref": "secret:REPLACE_SCOPED_NODE_CREDENTIAL_REFERENCE",
+      "trust_ref": "trust:REPLACE_STABLE_OWNER_TRUST_REFERENCE"
+    },
+    "continuation": {
+      "project_id": "REPLACE_FIXED_PROJECT_ID",
+      "session_ref": "session:REPLACE_EXISTING_PROJECT_CONTINUITY_REFERENCE",
+      "state_ref": "mesh:REPLACE_DURABLE_RESULT_REFERENCE"
+    }
+  }
+}

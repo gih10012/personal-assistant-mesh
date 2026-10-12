@@ -131,8 +131,12 @@ class RoutingContext:
                 'observed' if self.projection is not None else 'disabled')
             executions = []
             if 'remote_delegations' in tables:
-                for row in db.execute('SELECT child_id,parent_epoch,caller_node,peer,message_id,remote_task_id,remote_status,terminal,observed '
-                                      'FROM remote_delegations WHERE parent_id=? ORDER BY child_id LIMIT ?', (task_id, limit + 1)):
+                for row in db.execute('SELECT r.child_id,r.parent_epoch,r.caller_node,r.peer,r.message_id,'
+                                      'r.remote_task_id,r.remote_status,r.terminal,r.observed,'
+                                      'r.fingerprint AS delegation_fingerprint,d.fingerprint AS message_fingerprint '
+                                      'FROM remote_delegations r LEFT JOIN mesh_deliveries d '
+                                      'ON d.peer=r.peer AND d.message_id=r.message_id '
+                                      'WHERE r.parent_id=? ORDER BY r.child_id LIMIT ?', (task_id, limit + 1)):
                     executions.append(dict(row, kind='remote_delegation', reference_id=row['child_id'],
                         decision_binding_verified=False, execution_verified=False))
             sections['remote_execution_candidates'] = self._section(executions, limit,

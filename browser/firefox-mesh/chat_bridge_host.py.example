@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Private installed launcher; replace ONLY these two owner path constants.
+
+Firefox supplies manifest-path and extension-ID. Do not turn this into a
+generic command, config selector, token forwarder, or page-private API host.
+This is a template, not an installed/active native host.
+"""
+from pathlib import Path
+import sys
+
+
+RUNTIME_ROOT = '/OWNER_INSTALLED/personal-assistant-mesh'
+PRIVATE_CONFIG = '/OWNER_PRIVATE/chat-collaboration.json'
+EXPECTED_EXTENSION = 'personal-assistant-mesh-chat@gih10012.local'
+
+
+def main():
+    if (len(sys.argv) != 3 or not Path(sys.argv[1]).is_absolute()
+            or sys.argv[2] != EXPECTED_EXTENSION):
+        sys.stderr.write('Chat native caller not allowed\n')
+        return 1
+    sys.path.insert(0, RUNTIME_ROOT)
+    from assistant_mesh.chat_bridge_queue import main as run
+    return run(['--config', PRIVATE_CONFIG, 'native-host',
+                '--extension-id', EXPECTED_EXTENSION])
+
+
+if __name__ == '__main__':
+    sys.exit(main())

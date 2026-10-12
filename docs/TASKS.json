@@ -2,18 +2,72 @@
   "schema": 1,
   "project": "personal-assistant-mesh",
   "goal_status": "active",
-  "updated_at": "2026-10-11",
+  "updated_at": "2026-10-12",
   "plan": "docs/PLAN.md",
   "effective_owner_goal": "docs/GOAL.md",
-  "latest_owner_status": "docs/STATUS-2026-10-11.md",
-  "latest_continuation_at": "2026-10-11T21:52:00+08:00",
+  "latest_owner_status": "docs/STATUS-2026-10-12.md",
+  "previous_owner_status_retained": "docs/STATUS-2026-10-11.md",
+  "latest_continuation_at": "2026-10-12",
+  "approved_replan_implementation": {
+    "received_at": "2026-10-12",
+    "implementation_authorized": true,
+    "native_goal_status_verified": "active",
+    "native_goal_replaced_only_after_owner_explicit_clear": true,
+    "old_native_goal_tokens_used_archived": 33581556,
+    "old_usage_migrated_into_new_native_goal": false,
+    "original_leader_threads_task_ids_dependencies_and_unknowns_preserved": true,
+    "first_milestone": ["continuous Leader and unified actual Mesh capabilities", "ordinary Chat tools and on-demand dedicated Firefox conversation", "official OpenAI Codex Cloud actual temporary node/job", "environment-adaptive new-device enrollment"],
+    "real_project": "Mesh self-bootstrap and self-maintenance",
+    "claw_milestone": "confirmed-stop safe takeover plus independent Chat/terminal entries; not arbitrary-partition seamless WeChat HA",
+    "harmony_native_phone_and_system_xiaoyi": "next phase after generic enrollment",
+    "public_oauth_or_cloud_account_gate_blocks_other_streams": false,
+    "native_features_restricted": false,
+    "new_spend_authorized": false
+  },
+  "implementation_slice_20261012": {
+    "goal_status_verified": "active",
+    "another_goal_reset_or_recreation": false,
+    "original_43_task_ids_and_dependencies_verified_unchanged": true,
+    "workspace_contract": "docs/WORKSPACE-ENTRANCE.md",
+    "workspace_native_cli_and_owner_readonly_command_templates_source": true,
+    "workspace_old_wire_and_both_real_fingerprints_preserved": true,
+    "workspace_cli_and_exact_legacy_independent_tests": 31,
+    "workspace_production_leader_loaded": false,
+    "mcp_contract": "docs/CHAT-MCP-HTTP.md",
+    "mcp_sdk_version_actually_tested": "2.3.0",
+    "mcp_actual_loopback_sdk_tests": 16,
+    "mcp_actual_owner_idp_oauth_or_public_chat_installed": false,
+    "chat_browser_contract": "docs/CHAT-BROWSER-COLLABORATION.md",
+    "chat_selected_account_positive_menu_contract_source": true,
+    "chat_actual_verified_dom_selectors_or_signed_extension_installed": false,
+    "chat_controlled_dom_port_cases": 24,
+    "enrollment_contract": "docs/ENVIRONMENT-ADAPTIVE-ENROLLMENT.md",
+    "cloud_membership_contract": "docs/OFFICIAL-CLOUD-NODE.md",
+    "main_163_account_selected_through_normal_firefox_ui_verified": true,
+    "existing_personal_github_cloud_integration_repository_verified": true,
+    "official_cloud_setup_get_started_input_count": 1,
+    "official_cloud_original_private_intent_preserved": true,
+    "official_cloud_setup_latest_ui_status": "14:10 environment creation failed and Chat reconnection, cause not proven",
+    "official_cloud_published_or_formal_job_receipt_verified": false,
+    "official_cloud_automatic_retry_or_new_id": false,
+    "root_integrated_selected_tests": 139,
+    "root_integrated_selected_seconds": 2.982,
+    "root_integrated_full_tests": 2208,
+    "root_integrated_full_seconds": 169.407,
+    "root_integrated_full_skips": 0,
+    "production_common_core_or_worker_changed": false,
+    "unknown_business_operations_replayed": false,
+    "new_paid_key_or_billing_enabled": false,
+    "new_cloud_ci_success_claimed": false,
+    "whole_goal_completed": false
+  },
   "owner_requested_wrap_up_then_joint_replan": {
     "received_at": "2026-10-11",
     "finish_current_source_tests_publish_and_claw_report": true,
     "new_implementation_or_production_expansion_before_replan": false,
     "goal_complete": false,
     "native_goal_or_accounting_reset": false,
-    "next_action": "Report current wrap-up through existing bound-owner ClawBot; jointly replan with owner before further implementation"
+    "next_action": "Historical wrap-up report accepted; joint replan completed and owner authorized implementation on 2026-10-12; approved_replan_implementation supersedes this pause"
   },
   "latest_wrap_up_publication_and_notification": {
     "source_commit": "4ffb62d87ede8d347476e2e5f9a98c2215df0e24",
@@ -53,6 +107,18 @@
     "original_coordination_tasks_and_dependencies_preserved": true
   },
   "latest_current_mesh_link_diagnosis": {
+    "sampled_at": "2026-10-12T14:04:00+08:00",
+    "source": "both original authenticated /v1/mesh/links views",
+    "laptop_to_cloud_original_authenticated_link_connected": true,
+    "cloud_to_laptop_original_authenticated_link_reachable": true,
+    "both_current_failures": 0,
+    "existing_tunnel_automatic_retry_recovered": true,
+    "root_restart_or_network_change": false,
+    "long_term_stability_or_partition_ha_proven": false,
+    "original_local_node_worker_and_vps_worker_receiver_restarts": 0,
+    "next_action": "Keep original authenticated paths; perform controlled real original-Leader unified workspace use, then bounded disconnect/rejoin validation without replay"
+  },
+  "previous_2140_mesh_link_diagnosis_retained": {
     "sampled_at": "2026-10-11T21:40:00+08:00",
     "read_only": true,
     "laptop_to_cloud_original_authenticated_link_connected": true,
@@ -68,7 +134,8 @@
     "network_or_service_changed": false,
     "next_action": "Jointly replan bounded original reverse-link recovery; preserve usable forward and sole receiver, then verify both authenticated A2A directions"
   },
-  "native_goal_accounting_preserved": true,
+  "native_goal_accounting_preserved": false,
+  "native_goal_accounting_change_reason": "Owner explicitly cleared old Goal, then requested a new active Goal; historical usage retained as evidence, not attributed to new Goal",
   "native_objective_in_place_edited": false,
   "latest_model_advice_entrypoint": {
     "sampled_at": "2026-10-11T21:31:00+08:00",
@@ -1333,7 +1400,7 @@
           "id": "PAM-004d", "title": "统一能力入口和真实多候选出口调度",
           "state": "implementation_in_progress", "owner": "root+egress_path_impl+mesh-leader",
           "depends_on": ["PAM-002a", "PAM-003c"],
-          "next_action": "VPS薄CLI/校园A2A-local-thin-provider-parent-resume、后续原Leader独立空缓存完整传输/解码已实测；首轮失败/原pending plan保留，后续成功不伪造首轮原因。下一片discover/delegate/call/status/result/artifact薄入口自动组合，原message/op/cap不换、不重GET；已有SSH/native自由不限制，不要求owner手拼JSON/逐URL预探。认证模型VPS路径、多出口性能/故障另验，不以一个readonly task称所有任务自动回传",
+          "next_action": "既有VPS薄CLI/校园A2A及原Leader空缓存完整读取证据保留。新统一Workspace/native CLI及完整只读SSH reader模板已source实现，31独立/exactlegacy和2208整合通过。下一仅旧authority两指纹投影安全增量装载、私有原身份CLI及原Leader一次新明确自维护任务，完整产物自动读回；不切全部Worker/换原message-op-cap/重GET。现有native自由保持，多出口性能与认证模型另验",
           "evidence": {
             "thin_call_contract": "docs/CAPABILITY-CALL.md",
             "thin_call_original_propose_reserve_link_source_implemented": true,
@@ -1409,13 +1476,13 @@
     {
       "id": "PAM-005",
       "title": "AI 个性化异构节点入网",
-      "state": "planned",
+      "state": "implementation_in_progress",
       "owner": "mesh-leader",
       "depends_on": [
         "PAM-002",
         "PAM-003"
       ],
-      "next_action": "定义平台中立 enrollment/适配报告/持久状态合同，再由节点 agent 按实际系统改装",
+      "next_action": "平台中立enrollment/适配报告/可信挑战/原身份续接及persistent-temporary-interactive/代理设备绑定已实现，30聚焦及2208整合通过。下一复用真实官方Cloud临时job的受限身份与完整回收；独立协议实例不冒充第三物理设备，不宣称Windows/鸿蒙真机已测，不强制Python/systemd/SSH",
       "acceptance": "先验证一个不同环境；不把 Linux 包、进程常驻或终端权限作为所有节点的假设"
     },
     {
@@ -1565,14 +1632,14 @@
         },
         {
           "id": "PAM-006d", "title": "主账号Chat原生Mesh工具与推理能力",
-          "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
-          "next_action": "本次primary再次确认Chat MCP插件/OAuth路线；复用既有owner-bound三工具补HTTPS Streamable HTTP/OAuth sidecar，主账号实际安装/模型工具往返仍未做。SIWC独立计划内Responses推理候选另列，消耗既有Codex/Work usage且不给Chat历史；不把stdio/Firefox桥或OAuth登录称普通Chat不限额/API",
+          "state": "implementation_in_progress", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
+          "next_action": "SDK2.3.0窄HTTP/OAuth resource sidecar及既有三工具已source/真实loopback 16项、全量2208通过；正向当前账号菜单和按需专用tab队列已source/24controlled通过。@163已正常UI核主账号；下一实际稳定HTTPS/现有IdP OAuth subject-client绑定及本人正常Chat安装/模型原request往返，扩展实际DOM与正常签名另核，不给operator bearer，不把浏览器登录或本机SDK称Chat入网/无限API",
           "acceptance": "实际Chat模型工具回执/原任务/成果一致，身份范围与使用限制实核；连好后另验定时检查"
         },
         {
           "id": "PAM-006e", "title": "OpenAI官方Codex Cloud临时节点",
-          "state": "planned", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
-          "next_action": "此前旧CLI repo-scoped官方环境GET200/[]非全账号无权益；最新官方published环境/per-task VM/All网络/默认七天恢复边界已fetch。核真实主账号published environment/repo访问，已有权限内单次task-bound job/diff/退出后持久读回；CloudJobs仍缺Mesh task/epoch/lease、HTTPS callback/临时限任务身份。环境由AI自适应，不照搬本机登录/skills或标Legacy旧文档；内部cloud仍ali-vps",
+          "state": "implementation_in_progress", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
+          "next_action": "CloudJobs/UI intent与task-epoch-lease membership/完整失效后读回已source，真实HTTP合成实例非官方job。@163正常Cloud UI/GitHub精确个人仓库可达，仅一次Get started，14:10环境创建失败/Chat重连接；私有原操作保留，不将临时/local/client-new-thread作正式receipt，不重复创建/换ID。下一核同原setup正常恢复、publish及一个受限callback的真实job/工具产物；环境AI适配、无operator bearer/本机认证复制，内部cloud仍ali-vps",
           "acceptance": "官方job身份、真实执行与成果回收、退出后持久状态分别核验；不给临时环境operator bearer或复制整个认证目录"
         }
       ]
@@ -1899,8 +1966,16 @@
     }
   ],
   "current_work": {
-    "next_owner_requested_step": "Current slice wrap-up/public push/Claw report, then jointly replan before further implementation; not overall goal completion",
-    "latest_status_phase": "19:03 original3198 minimal receiver overlay117bothhosts and real systemd239 canary passed; unique backed-up production load/ownerIPC/carrier-only stop/fullcallback/HTTP200 and controlled resume verified, native full-rowhash/ledgerinode/Worker unchanged. PiGoStep onePOST403 subscriptionrequired and custom anonymous fixture403 retained; genuine stock/all-real-tools OS-isolated free task+same originalsession followup succeeded with full-message/export/artifact proof, native cost0/noauth/errors0; HTTP POSTcount/VPS route unknown. Temporary external capability not Leader or productionMesh registration. Wholegoalactive; Chat/officialCloud/fenced handoff/independent-fault-domain HA incomplete",
+    "next_owner_requested_step": "Implement approved four parallel streams and real Mesh self-maintenance acceptance; native Goal active after owner-directed replacement; no overall completion claim",
+    "approved_replan_current_streams": {
+      "root": "unified capability/artifact integration, current runtime evidence and minimal authenticated Chat MCP sidecar",
+      "entrypoint_plan_review": "dedicated Firefox ordinary Chat event port, durable once-send queue and complete-result evidence",
+      "node_autonomy_plan_review": "environment-neutral enrollment/challenge/continuation and edge-device delegation",
+      "official_cloud_implementation": "current CLI/task-bound temporary node source plus actual official MCP SDK HTTP source completed; Root owns same-intent failed official setup recovery, no agent submits",
+      "production_changed_by_this_new_slice_yet": false
+    },
+    "latest_status_phase": "2026-10-12 four-stream source integrated; actual isolated SDK full2208/169.407s no skips and browser24controlled. Original authenticated A2A both directions connected14:04, original frozen core/Worker/receiver unchanged. Main163 normal UI selected; exact personal GitHub repo official Cloud setup once, explicit UI creation failure14:10 retained, no publish/job/membership. Chat HTTPS/real IdP OAuth/account install/DOM signing gates, original-Leader production workspace and independent-domain Claw handoff pending. Full Goal active, original43/unknown/native features preserved",
+    "previous_1903_status_phase_retained": "19:03 original3198 minimal receiver overlay117bothhosts and real systemd239 canary passed; unique backed-up production load/ownerIPC/carrier-only stop/fullcallback/HTTP200 and controlled resume verified, native full-rowhash/ledgerinode/Worker unchanged. PiGoStep onePOST403 subscriptionrequired and custom anonymous fixture403 retained; genuine stock/all-real-tools OS-isolated free task+same originalsession followup succeeded with full-message/export/artifact proof, native cost0/noauth/errors0; HTTP POSTcount/VPS route unknown. Temporary external capability not Leader or productionMesh registration. Wholegoalactive; Chat/officialCloud/fenced handoff/independent-fault-domain HA incomplete",
     "latest_status_runtime_configuration_changed": true,
     "latest_status_production_change_scope": "independent unique legacy receiver cwd/entry + private managed runtime ownerIPC only; original3198 Store/Worker/core/history/ledger unchanged, no new key/login/spend or second poller",
     "previous_1321_artifact_slice_runtime_change_preserved": true,

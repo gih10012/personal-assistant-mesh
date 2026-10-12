@@ -1,0 +1,40 @@
+"""Private owner-installed uvicorn factory example, not an automatic deploy.
+
+Copy/adapt in a private deployment directory. Replace fictitious config and
+independently verify server-side role=ingress/source=chatgpt-chat/subject grants.
+Never point ingress_clients to an operator bearer. No login/AS/key creation.
+"""
+import json
+import os
+
+from assistant_mesh import native_messaging as native
+from assistant_mesh.mcp_http import RemoteIngressBackend, create_server
+from assistant_mesh.mcp_http_auth import IdPJWTVerifier, NotConfigured, validate_policy
+
+
+def create_app():
+    reference = os.environ.get('MESH_MCP_HTTP_CONFIG')
+    if not reference:
+        raise NotConfigured('mcp_http_not_configured')
+    # Linux reference private ACL reader; other platforms supply their adapter.
+    document = json.loads(native._private_bytes(reference).decode('utf8'),
+                          object_pairs_hook=native._unique, parse_constant=native._nonfinite)
+    if (not isinstance(document, dict)
+            or set(document) != {'format', 'policy', 'existing_idp_jwt', 'ingress_clients'}
+            or document['format'] != 'mesh-mcp-http-owner/1'):
+        raise NotConfigured('mcp_http_not_configured')
+    policy = validate_policy(document['policy'])
+    verifier_config = document['existing_idp_jwt']
+    if (not isinstance(verifier_config, dict)
+            or set(verifier_config) != {'jwks_url', 'algorithms', 'client_id_claim'}):
+        raise NotConfigured('mcp_http_idp_not_configured')
+    verifier = IdPJWTVerifier(issuer_url=policy['issuer_url'], resource_url=policy['resource_url'],
+                             **verifier_config)
+    references = document['ingress_clients']
+    expected = {entry['mesh_subject'] for entry in policy['subjects']}
+    if not isinstance(references, dict) or set(references) != expected:
+        raise NotConfigured('mcp_http_ingress_not_configured')
+    clients = {subject: native.client_from_config(path) for subject, path in references.items()}
+    _, app = create_server(policy, token_verifier=verifier,
+                          backend=RemoteIngressBackend(clients, policy['owner_binding']))
+    return app

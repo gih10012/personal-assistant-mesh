@@ -1,0 +1,5 @@
+# Optional isolated modern sidecar only; never add these to the Python3.6 core.
+# Actual loopback tested on Python3.14.7. SDK/dependencies require Python>=3.10.
+mcp==2.3.0
+uvicorn==0.54.0
+PyJWT[crypto]==2.15.1

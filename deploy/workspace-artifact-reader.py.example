@@ -1,0 +1,43 @@
+#!/usr/bin/python3
+"""Private owner-reviewed original-data reader; pin these constants at install.
+
+stdout is a private manifest/binary transport, NOT a public log. This program
+never opens a Store, creates a grant or executes the original business request.
+"""
+import base64
+import json
+import re
+import sys
+
+# Install a separately frozen library; do not replace the running core.
+sys.path.insert(0, '/PRIVATE/frozen-artifact-reader-runtime')
+from assistant_mesh.artifact_transport import ArtifactProducer, _decode
+
+OWNER_CONFIG = '/PRIVATE/original-artifact-owner.json'
+OWNER_CONFIG_SHA256 = 'EXTERNALLY_PINNED_64_CHARACTER_LOWERCASE_SHA256'
+
+
+def main():
+    if (len(sys.argv) != 3 or sys.argv[1] not in ('manifest', 'read')
+            or len(sys.argv[2]) > 8192 or re.fullmatch(r'[A-Za-z0-9_-]+', sys.argv[2]) is None):
+        return 2
+    token = sys.argv[2]
+    raw = base64.b64decode(token + '=' * (-len(token) % 4), altchars=b'-_', validate=True)
+    request = _decode(raw, 6144)
+    if set(request) != {'message_id', 'operation_id', 'capability_id'}:
+        return 2
+    producer = ArtifactProducer(OWNER_CONFIG, OWNER_CONFIG_SHA256)
+    arguments = [request[name] for name in ('message_id', 'operation_id', 'capability_id')]
+    if sys.argv[1] == 'manifest':
+        sys.stdout.write(json.dumps(producer.manifest(*arguments), sort_keys=True))
+    else:
+        producer.write_to(*arguments, binary_stream=sys.stdout.buffer)
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        outcome = main()
+    except Exception:
+        outcome = 2  # no exception paths, source data or credentials on stderr
+    raise SystemExit(outcome)

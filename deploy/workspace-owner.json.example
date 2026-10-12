@@ -1,0 +1,26 @@
+{
+  "format": "mesh-workspace-owner/1",
+  "client_config": "/PRIVATE/original-worker.json",
+  "client_config_sha256": "EXACT_SHA256_OF_EXISTING_PRIVATE_WORKER_CONFIG",
+  "authority": "original-authority",
+  "node": "original-worker-node",
+  "journal_path": "/PRIVATE/workspace/workspace.sqlite",
+  "artifact_dir": "/PRIVATE/workspace/artifacts",
+  "artifact_readers": {
+    "enrolled-peer-authority": {
+      "manifest_argv": [
+        "/usr/bin/ssh", "-F", "/PRIVATE/original-ssh-config",
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "OWNER_VERIFIED_ALIAS", "/PRIVATE/installed-original-reader", "manifest",
+        "{request_base64url}"
+      ],
+      "read_argv": [
+        "/usr/bin/ssh", "-F", "/PRIVATE/original-ssh-config",
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "OWNER_VERIFIED_ALIAS", "/PRIVATE/installed-original-reader", "read",
+        "{request_base64url}"
+      ],
+      "timeout_seconds": 30
+    }
+  }
+}

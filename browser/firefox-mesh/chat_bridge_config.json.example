@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "enabled": false,
+  "owner_id": "OWNER_NAMESPACE",
+  "state_dir": "/OWNER_PRIVATE/chat-browser-queue",
+  "expected_account": "OWNER_MAIN_ACCOUNT@163.com",
+  "projects": {
+    "OWNER_PROJECT": "https://chatgpt.com/c/OWNER_EXISTING_CONVERSATION"
+  },
+  "dom": {
+    "account_menu": null,
+    "account_selector": "OWNER_VERIFIED_SINGLE_ACCOUNT_SELECTOR",
+    "account_attribute": "textContent",
+    "completion_selector": "OWNER_VERIFIED_TURN_TERMINAL_SELECTOR",
+    "composer_selector": "#prompt-textarea",
+    "send_selector": "button[data-testid=\"send-button\"]",
+    "generating_selector": "button[data-testid=\"stop-button\"]",
+    "message_selector": "[data-message-author-role]",
+    "role_attribute": "data-message-author-role",
+    "message_id_attribute": "data-message-id"
+  }
+}

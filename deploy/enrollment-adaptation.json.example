@@ -1,0 +1,11 @@
+{
+  "format": "mesh-adaptation-report/1",
+  "mesh_id": "replace-with-existing-mesh-identity",
+  "node_id": "replace-with-stable-owned-node-identity",
+  "system": {"name": "actual-environment-not-forced-Linux", "version": "unknown"},
+  "harness": {"name": "actual-native-harness", "version": "unknown", "available": false},
+  "storage": {"mode": "mesh", "state_ref": "private:existing-persistent-mesh-state"},
+  "capabilities": [],
+  "gaps": ["Inspect the actual authorized environment; do not claim verification from this template."],
+  "native_features_restricted": false
+}

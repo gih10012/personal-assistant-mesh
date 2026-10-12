@@ -1,0 +1,10 @@
+{
+  "format": "mesh-cloud-request/1",
+  "job_id": "REPLACE_ORIGINAL_CLOUD_JOB_ID",
+  "task_id": "REPLACE_ORIGINAL_MESH_TASK_ID",
+  "epoch": 1,
+  "lease_id": "REPLACE_CURRENT_TASK_LEASE_ID",
+  "request_id": "REPLACE_STABLE_HELLO_REQUEST_ID",
+  "action": "hello",
+  "arguments": {}
+}

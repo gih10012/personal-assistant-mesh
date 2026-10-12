@@ -1,11 +1,58 @@
 # 持续执行计划
 
-更新时间：2026-10-11（独立空缓存原Leader自行完整传输/消费已验证；legacy载体停止观察源码已发布，生产交接仍未做）。长期 goal 仍 active；以下是持续推进的优先级，
+更新时间：2026-10-12（本人批准共同重规划后的实施，新原生 Goal 已 active）。以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
 
-## 最新可执行下一片（协调计划，不是新 runtime receipt）
+## 2026-10-12 批准实施：四线与实际验收
+
+本轮使用原 43 个协调任务和项目专员线程；旧阶段的暂停/next action
+保留为历史，以本节为当前执行顺序。本人清空旧原生 Goal 后已创建
+包含完整本轮范围的新 active Goal；不伪称原生累计统计无损搬迁。
+
+1. **004d/007，Root 集成**：统一 discover/call/delegate/status/full-artifact
+   薄入口，当前真实出口盘点与模型建议；保留原生 Leader 历史/goal/plan。
+   一次真实工具创建、部署、执行和升级/回退项目，不以 activation manifest
+   或测试数量替代使用证据。沿用旧核心，增量旁路，不顺带切整个 Worker。
+2. **006d，Chat 专员＋Root**：普通 Chat 原生受限 HTTPS MCP/OAuth 工具，
+   Leader→专用 Firefox 项目 tab 的事件 native port 与耐久队列；同账号/
+   conversation 核对、原 intent 一次发送、完整终态回收。手动 popup 继续兼容。
+   不用定时轮询替代按需调用，不用 Work-only 功能冒充普通 Chat 能力。
+3. **006e，官方 Cloud 专员**：核当前官方 CLI 与真实 published environment，
+   原 intent 一次提交、task/epoch/lease 绑定临时节点、受限 callback、完整成果
+   和 VM 结束后状态读取。Alibaba 的 `cloud` ID 不改、不冒充官方 Cloud。
+4. **005，入网专员**：纯协议/适配报告与 persistent/temporary/interactive
+   模式、可信挑战核验和代理设备绑定。新设备 agent 发现环境再自行适配，
+   不强制 Linux/Python/systemd/SSH；先验证独立协议实例，再复用于实际 Cloud。
+
+并行维护 009：确认原 carrier 停止和完整在途闭合后的本机安全接管；
+不凭网络 timeout 新开第二 poller。第一阶段采用安全接管＋多入口，
+不是任何分区下连续微信服务。010/007e 真实可用免费执行与模型前沿
+按实际成本/额度处理；3–5 天更新有实际调度后才称运行。
+
+联合验收：Chat 发布自维护任务→原 Leader 规划/盘点→官方 Cloud 真子任务
+调用 Mesh 并产出工具→Leader 即时调用普通 Chat 做交叉核验→本机/VPS
+执行→完整成果及原入口报告；再跑同项目第二任务。断加入路径验证本地
+新任务、原生 agent 排障/授权替代重联、身份/撤销/unknown 保持；浏览器
+发送后失联和 Cloud VM 结束均只读原状态，不重提交。域名、DNS、OAuth
+本人同意或账号安装是真 gate，不假设现有，不阻塞其他线。
+
+鸿蒙原生 App、系统小艺、GUI/后台真机边界，以及 Live/语音/面板留给
+后续 Mesh 委派项目；第一阶段仍交付通用新设备入网，不能省略。
+
+实施交接：[2026-10-12 状态](STATUS-2026-10-12.md)。四线源码与私有
+CLI/正向账号菜单/官方 SDK2.3.0 loopback 实验已完成；全量2208项/
+169.407s无skip通过，原生产 common core/Worker 未切。两端 A2A
+14:04认证 connected。主 @163 正常切换、个人 GitHub 既有授权和
+精确仓库已实际核，官方环境一次 setup 在14:10明确创建失败；保持
+原 intent，不换 ID/自动重试，先核原状态/正常连接再发布。普通 Chat
+HTTPS/现有IdP/OAuth 和实际扩展签名/DOM安装均仍 gate，不能以源码
+或视觉勾号冒充入网。下一实际装载先最小两项只读指纹投影＋统一
+CLI，保留原私有 journal、native历史和不相关工作；安全接管/独立
+故障域仍必做，不缩小目标。
+
+## 2026-10-11 收尾记录（历史，不是本轮暂停指令）
 
 21:52 owner要求先收尾/Claw报告/共同重新plan。当前片只完成已有
 三项source集成/风险相称回归/公开推送，不新模型POST/注册生产/

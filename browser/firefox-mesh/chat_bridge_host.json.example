@@ -1,0 +1,7 @@
+{
+  "name": "personal_assistant_mesh_chat",
+  "description": "Owner-bound ordinary Chat project event collaborator, distinct from the manual Mesh entrance",
+  "path": "/OWNER_PRIVATE_INSTALLED/chat-bridge-host.py",
+  "type": "stdio",
+  "allowed_extensions": ["personal-assistant-mesh-chat@gih10012.local"]
+}

@@ -1,11 +1,43 @@
 # 持续 owner goal
 
-更新时间：2026-10-11。整个 goal **active，未完成**。本文件是后续 owner
+更新时间：2026-10-12。整个 goal **active，未完成**。本文件是后续 owner
 指令的有效目标合同，与 [PLAN](PLAN.md)、[TASKS](TASKS.json) 一起续接。
-保留原生 goal 创建时间、连续会话、累计使用量和失败身份，不为改措辞
-重建 goal。历史 objective 的 OpenClaw/云端独立入口措辞已被 owner
-后续要求取代：Dots 对标、Codex/Pi、沟通能力多节点承担。当前控制工具
-不能原位修改 native objective；本文件不冒充该操作。
+2026-10-12 本人共同重规划并批准实施，随后在产品中明确清空旧 Goal、
+要求直接新建；新原生 Goal 已实核 active，objective 为本轮完整计划。
+这是本人授权的新 Goal，不宣称旧原生累计用量或创建时间被移入新 Goal。
+旧 Goal 的累计使用量 33581556 和全部仓库阶段证据保留为历史；原 Leader
+会话、项目子会话、43 个协调任务/依赖、原操作及 unknown 身份不重建。
+历史 OpenClaw/云端独立入口措辞不再是当前目标；以下旧阶段记载不覆盖
+本轮批准范围，2026-10-11 的“先收尾再 replan”暂停已由本人实施指令解除。
+
+## 本轮批准的第一里程碑
+
+四线并行：连续原生 Codex/Pi Leader 与本机/VPS 统一能力入口；主账号
+普通 Chat 原生 MCP 入网及 Leader 按需调用专用 Firefox 项目会话；
+**官方 OpenAI Codex Cloud** 的真实 published environment/job 临时节点；
+环境中立的新设备入网与 AI 自适配合同。第一阶段不能缩成只做两台机器。
+以“Mesh 自举与自维护”真实项目验收任务→委派→完整成果→原入口回复，
+第二任务复用原项目上下文。源码/隔离试验/生产接线/真实任务分别记录。
+
+通用入网先行，鸿蒙原生平等节点和系统小艺入口下一阶段；保留能力
+class/instance、目标作用域、共享瓶颈、故障域及外围设备代理绑定，
+不把发现耳机等同取得控制权。Mesh 只管理自己的额外共享接口，
+**不能阻断任何原生功能**；此前另一聊天中的全设备 Broker 约束不采用。
+
+ClawBot 第一阶段为“确认 VPS 停止后安全接管＋Chat/终端冗余入口”，
+包括通信状态与权限，不承诺任意网络分区下无缝微信 HA。未知 DOM
+发送、Cloud submit 或外部写入都保留原 intent，绝不换 ID 重试。
+域名/DNS、OAuth 同意或真实账号安装缺权限只影响对应工作线。
+
+2026-10-12 实施续接：原生 Goal 已再次实核 active，未再次 reset。
+统一 Workspace/native CLI、环境中立 enrollment、官方 Cloud 临时
+membership、普通 Chat 官方 SDK HTTP 与专用浏览器队列已实现并独立
+验证；全量2208项/169.407s无skip，不以源码顶替生产入网。14:04
+两端原认证 A2A connected，原 Worker/唯一 receiver 未重启。
+Firefox 已正常切回并核对 @163；个人 GitHub 精确仓库仅一次官方
+环境 setup，14:10 页面明确创建失败，未 publish/真实 job/重复提交。
+完整交接见 [2026-10-12 状态](STATUS-2026-10-12.md)，43 任务及依赖/
+unknown 保持。
 
 21:52本人要求本轮先收尾、Claw报告，再一起重新plan；因此不再扩
 实施或新生产部署。本片新增三项source交付：免费stock callback+

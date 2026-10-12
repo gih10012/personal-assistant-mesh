@@ -118,6 +118,15 @@ class CloudJobsTests(unittest.TestCase):
         self.assertEqual([], self.fake.calls)
         self.assertNotIn('PRIVATE_', json.dumps(view))
 
+    def test_planned_identity_is_pure_and_matches_original_intent(self):
+        planned = self.jobs.planned_id(self.payload['mesh_task_id'], self.payload['request_id'])
+        self.assertEqual(0, self.count())
+        self.assertEqual([], self.fake.calls)
+        self.assertEqual(planned, self.intent())
+        self.assertNotEqual(planned, self.jobs.planned_id(self.payload['mesh_task_id'], 'other-request'))
+        with self.assertRaises(ValueError):
+            self.jobs.planned_id('\x00invalid', 'request')
+
     def test_identical_intent_survives_reopen_and_returns_same_id(self):
         first = self.jobs.intent(self.payload)
         second = self.reopen().intent(dict(reversed(list(self.payload.items()))))
@@ -443,6 +452,76 @@ class CloudJobsTests(unittest.TestCase):
         with self.assertRaisesRegex(CommandFailure, '^cli_output_limit$'):
             run_cli([sys.executable, '-c', 'print("x" * 2048)'],
                     input=None, cwd=self.path, env=dict(os.environ), timeout=5, max_bytes=1024)
+
+    def test_saved_diff_full_read_is_offline_and_retains_original_epoch(self):
+        job_id = self.bind()
+        raw = b'diff --git a/fixture b/fixture\n' + bytes(range(256)) * 400
+        self.fake.responses += [page('ready'), CommandResult(0, raw, b'')]
+        self.jobs.observe(job_id)
+        artifact = self.jobs.fetch_diff(job_id)
+        count = len(self.fake.calls)
+        self.assertEqual(raw, self.reopen().read_diff(job_id, artifact['sha256']))
+        self.assertEqual(count, len(self.fake.calls))
+        self.assertEqual(3, self.jobs.get(job_id)['mesh_epoch'])
+        with self.assertRaises(PermissionError):
+            self.jobs.read_diff(job_id, 'a' * 64)
+
+    def test_duplicate_cli_json_key_cannot_change_exact_provider_binding(self):
+        job_id = self.bind()
+        self.fake.responses.append(CommandResult(0, b'{"tasks":[],"tasks":[],"cursor":null}', b''))
+        self.assertEqual('provider_observation_unavailable', self.jobs.observe(job_id)['observation_error'])
+        self.assertIsNone(self.jobs.get(job_id)['provider_status'])
+
+    def test_null_environment_on_legacy_task_is_not_project_environment_proof(self):
+        job_id = self.bind()
+        self.fake.responses.append(page('ready', environment=None))
+        self.assertEqual('provider_observation_unavailable', self.jobs.observe(job_id)['observation_error'])
+        self.assertIsNone(self.jobs.get(job_id)['provider_status'])
+
+    def test_official_ui_once_boundary_survives_crash_and_never_calls_cli_exec(self):
+        job_id = self.intent()
+        with self.assertRaises(PermissionError):
+            self.jobs.begin_ui_submission(job_id)
+        first = self.jobs.begin_ui_submission(job_id, authorized=True)
+        self.assertTrue(first['submission_started'])
+        self.assertEqual('submission_unknown', first['submission_state'])
+        self.assertEqual('official_ui_intent', first['receipt_source'])
+        self.assertFalse(first['cli_attempted'])
+        self.assertTrue(first['submission_attempted'])
+        self.assertEqual('official_ui', first['submission_channel'])
+        self.assertFalse(self.reopen().begin_ui_submission(job_id, authorized=True)['submission_started'])
+        self.assertEqual('submission_unknown', self.reopen().submit(job_id, authorized=True)['submission_state'])
+        self.assertEqual([], self.fake.calls)
+        with self.assertRaises(Conflict):
+            self.jobs.reconcile(job_id, URL, owner_confirmed=True)
+
+    def test_official_ui_receipt_and_exact_environment_observation_not_provider_execution(self):
+        job_id = self.intent()
+        self.jobs.begin_ui_submission(job_id, authorized=True)
+        with self.assertRaises(PermissionError):
+            self.jobs.record_ui_receipt(job_id, URL)
+        result = self.jobs.record_ui_receipt(job_id, URL, owner_confirmed=True)
+        self.assertEqual('owner_ui_receipt', result['receipt_source'])
+        self.assertFalse(result['execution_verified'])
+        self.assertEqual(result, self.reopen().record_ui_receipt(job_id, URL, owner_confirmed=True))
+        ready = self.jobs.record_ui_observation(job_id, URL, 'env-fixture', 'ready', owner_confirmed=True)
+        self.assertEqual('ready', ready['provider_status'])
+        for args in [(URL + '_other', 'env-fixture', 'ready'), (URL, 'other-env', 'ready')]:
+            with self.subTest(args=args), self.assertRaises(Conflict):
+                self.jobs.record_ui_observation(job_id, *args, owner_confirmed=True)
+        self.jobs.submit(job_id, authorized=True)
+        self.assertEqual([], self.fake.calls)
+
+    def test_ui_receipt_cannot_invent_intent_or_adopt_cli_submission(self):
+        job_id = self.intent()
+        with self.assertRaises(Conflict):
+            self.jobs.record_ui_receipt(job_id, URL, owner_confirmed=True)
+        self.fake.responses.append(CommandFailure('cli_timeout'))
+        self.jobs.submit(job_id, authorized=True)
+        with self.assertRaises(Conflict):
+            self.jobs.record_ui_receipt(job_id, URL, owner_confirmed=True)
+        self.assertFalse(self.jobs.begin_ui_submission(job_id, authorized=True)['submission_started'])
+        self.assertEqual(1, len(self.fake.calls))
 
 
 if __name__ == '__main__':

@@ -3,13 +3,16 @@
 One CLI launch per intent, NOT provider exactly-once delivery. No cloud jobs are
 created on construction/import; only submit(..., authorized=True) may launch
 exec. The integrating authority must check actual owner/task authorization.
-This module has no Store, HTTP, enrollment, native-history or apply integration.
+CloudMembership supplies the separately authorized temporary-node contract.
+This module never creates a Store, opens a listener, applies a diff, or transfers
+local Codex credentials to a Cloud environment.
 """
 import contextlib
 import hashlib
 import json
 import os
 import re
+import signal
 import sqlite3
 import stat
 import subprocess
@@ -37,6 +40,15 @@ def _encoded(value):
 
 def _digest(value):
     return hashlib.sha256(_encoded(value).encode('utf8')).hexdigest()
+
+
+def _unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('duplicate_cloud_cli_json_key')
+        value[key] = item
+    return value
 
 
 def _text(value, label, maximum=512):
@@ -122,15 +134,26 @@ def run_cli(argv, *, input, cwd, env, timeout, max_bytes):
     """
     with tempfile.TemporaryFile(dir=str(cwd)) as output, tempfile.TemporaryFile(dir=str(cwd)) as error:
         process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=output,
-                                   stderr=error, cwd=str(cwd), env=env, shell=False)
+                                   stderr=error, cwd=str(cwd), env=env, shell=False,
+                                   start_new_session=os.name == 'posix')
+        def stop_owned():
+            # The official npm launcher can own a native child. Kill only this
+            # newly created process group, never an existing Codex/Cloud task.
+            try:
+                if os.name == 'posix':
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except ProcessLookupError:
+                pass
         try:
             process.communicate(input=input, timeout=timeout)
         except subprocess.TimeoutExpired:
-            process.kill()
+            stop_owned()
             process.communicate()
             raise CommandFailure('cli_timeout') from None
         except BaseException:
-            process.kill()
+            stop_owned()
             process.communicate()
             raise
         output.seek(0)
@@ -176,7 +199,8 @@ class CloudJobs:
         self.environment = dict(os.environ)
         # This managed adapter uses native CLI login, not a new API key/proxy.
         for name in ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL',
-                     'CODEX_CLOUD_TASKS_BASE_URL', 'CODEX_CLOUD_TASKS_MODE'):
+                     'CODEX_CLOUD_TASKS_BASE_URL', 'CODEX_CLOUD_TASKS_MODE',
+                     'CODEX_CLOUD_TASKS_FORCE_INTERNAL'):
             self.environment.pop(name, None)
         self.environment['CODEX_HOME'] = home
         self.environment['NO_COLOR'] = '1'
@@ -235,7 +259,7 @@ class CloudJobs:
         value = dict(value)
         for field in ('mesh_task_id', 'request_id', 'environment_id', 'branch'):
             _text(value[field], field)
-        if type(value['mesh_epoch']) is not int or value['mesh_epoch'] < 1:
+        if type(value['mesh_epoch']) is not int or not 1 <= value['mesh_epoch'] < (1 << 63):
             raise ValueError('invalid_cloud_mesh_epoch')
         prompt = value['prompt']
         try:
@@ -251,6 +275,15 @@ class CloudJobs:
 
     def _id(self, value):
         return 'cloud-' + _digest([PROTOCOL, self.owner, value['mesh_task_id'], value['request_id']])
+
+    def planned_id(self, mesh_task_id, request_id):
+        """Pure pre-intent identity for constructing the original task prompt.
+
+        This neither reserves a task nor proves a launch/provider receipt. The
+        original intent still validates env/branch/epoch/prompt before use.
+        """
+        return self._id({'mesh_task_id': _text(mesh_task_id, 'mesh_task_id'),
+                         'request_id': _text(request_id, 'request_id')})
 
     def _row(self, db, job_id):
         row = db.execute('SELECT * FROM cloud_jobs WHERE id=?', (_text(job_id, 'job_id'),)).fetchone()
@@ -275,10 +308,15 @@ class CloudJobs:
 
     @staticmethod
     def _view(row):
+        ui = row['receipt_source'] in ('official_ui_intent', 'owner_ui_receipt')
         return {'format': PROTOCOL, 'job_id': row['id'], 'mesh_task_id': row['mesh_task_id'],
+                'mesh_epoch': json.loads(row['body'])['mesh_epoch'],
                 'request_id': row['request_id'],
                 'submission_state': ('submission_unknown' if row['state'] == 'submitting' else row['state']),
-                'cli_attempted': bool(row['attempted']), 'can_submit': row['state'] == 'intent',
+                'cli_attempted': bool(row['attempted']) and not ui,
+                'submission_attempted': bool(row['attempted']),
+                'submission_channel': ('official_ui' if ui else 'cli') if row['attempted'] else None,
+                'can_submit': row['state'] == 'intent',
                 'provider_task_id': row['provider_id'], 'provider_url': row['provider_url'],
                 'provider_status': row['provider_status'], 'receipt_source': row['receipt_source'],
                 'submission_error': row['submission_error'], 'observation_error': row['observation_error'],
@@ -358,7 +396,8 @@ class CloudJobs:
             if row['state'] != 'intent':
                 return self._view(row)
             self._intent(value)  # current deployment may have revoked env/ref
-            db.execute("UPDATE cloud_jobs SET state='submitting',attempted=1 WHERE id=?", (job_id,))
+            db.execute("UPDATE cloud_jobs SET state='submitting',attempted=1,receipt_source='cli_exec_intent' WHERE id=?",
+                       (job_id,))
         try:
             result = self._invoke(job_id, ['exec', '--env', value['environment_id'], '--branch', value['branch'],
                                           '--attempts', '1', '-'], value['prompt'])
@@ -376,6 +415,64 @@ class CloudJobs:
         except (OSError, subprocess.SubprocessError):
             return self._error(job_id, 'submission', 'cli_runtime_failure')
 
+    def begin_ui_submission(self, job_id, *, authorized=False):
+        """Consume the same once boundary before an owner-operated official UI.
+
+        This does not open a browser or send anything. The caller must persist
+        and check submission_started before exactly one UI send. If it crashes
+        afterwards, inspect that original task/conversation; never send again.
+        No fake CLI runner or second job is needed for an incompatible CLI.
+        """
+        if authorized is not True:
+            raise PermissionError('cloud_submit_authorization_required')
+        with self._transaction() as db:
+            row, value = self._row(db, job_id)
+            if row['state'] != 'intent':
+                return dict(self._view(row), submission_started=False)
+            self._intent(value)
+            db.execute("UPDATE cloud_jobs SET state='submitting',attempted=1,receipt_source='official_ui_intent' WHERE id=?",
+                       (job_id,))
+            return dict(self._view(self._row(db, job_id)[0]), submission_started=True)
+
+    def record_ui_receipt(self, job_id, provider_url, *, owner_confirmed=False):
+        """Trusted owner records the exact causal, visible official UI receipt.
+
+        owner_confirmed is NOT a model-supplied auth field. A UI deployment must
+        verify account/environment/conversation and its original one-send
+        intent. This is not independently verified provider execution.
+        """
+        if owner_confirmed is not True:
+            raise PermissionError('cloud_reconciliation_owner_required')
+        provider_id = _provider_url(provider_url)
+        with self._transaction() as db:
+            row, _ = self._row(db, job_id)
+            if row['receipt_source'] not in ('official_ui_intent', 'owner_ui_receipt'):
+                raise Conflict('cloud_ui_submission_not_started')
+            if row['provider_id'] is not None:
+                return self._bind_existing(row, provider_id)
+        return self._bind(job_id, provider_url, 'owner_ui_receipt')
+
+    def record_ui_observation(self, job_id, provider_url, environment_id, status, *, owner_confirmed=False):
+        """Record an exact UI observation when current CLI cannot list that VM.
+
+        The owner must actually see this task/environment and map its displayed
+        state to pending/ready/applied/error. Unknown states stay unrecognized;
+        no auto-completion, native session reconstruction, or provider call.
+        """
+        if owner_confirmed is not True:
+            raise PermissionError('cloud_reconciliation_owner_required')
+        provider_id = _provider_url(provider_url)
+        if not isinstance(status, str) or status not in _STATUSES:
+            raise ValueError('invalid_cloud_ui_status')
+        with self._transaction() as db:
+            row, value = self._row(db, job_id)
+            if (row['receipt_source'] != 'owner_ui_receipt' or row['provider_id'] != provider_id
+                    or value['environment_id'] != environment_id):
+                raise Conflict('cloud_ui_observation_identity_mismatch')
+            db.execute('UPDATE cloud_jobs SET provider_status=?,observed=?,observation_error=NULL WHERE id=?',
+                       (status, self.clock(), job_id))
+        return self.get(job_id)
+
     def _find(self, job_id, value, provider_id, max_pages):
         cursor, seen = None, set()
         for _ in range(max_pages):
@@ -386,7 +483,7 @@ class CloudJobs:
             if result.returncode != 0:
                 raise CommandFailure('cli_list_nonzero')
             try:
-                page = json.loads(result.stdout.decode('utf8'))
+                page = json.loads(result.stdout.decode('utf8'), object_pairs_hook=_unique_object)
                 if not isinstance(page, dict) or not isinstance(page.get('tasks'), list) or len(page['tasks']) > 20:
                     raise ValueError('page')
                 matches = [item for item in page['tasks'] if isinstance(item, dict) and item.get('id') == provider_id]
@@ -447,6 +544,8 @@ class CloudJobs:
             row, value = self._row(db, job_id)
             if row['attempted'] != 1:
                 raise Conflict('cloud_job_not_attempted')
+            if row['receipt_source'] in ('official_ui_intent', 'owner_ui_receipt'):
+                raise Conflict('cloud_ui_receipt_requires_owner_ui_reconciliation')
             if row['provider_id'] is not None:
                 return self._bind_existing(row, provider_id)
         try:
@@ -553,3 +652,12 @@ class CloudJobs:
                 raise Conflict('cloud_diff_saved_content_changed')
             values.append(self._artifact_view(job_id, job['provider_id'], checksum, size, path))
         return values
+
+    def read_diff(self, job_id, checksum):
+        """Read the complete immutable saved diff, with no CLI/provider call."""
+        if not isinstance(checksum, str) or not re.fullmatch(r'[0-9a-f]{64}', checksum):
+            raise ValueError('invalid_cloud_artifact_sha256')
+        for item in self.saved_diffs(job_id):
+            if item['sha256'] == checksum:
+                return Path(item['private_path']).read_bytes()
+        raise PermissionError('cloud_diff_not_found')

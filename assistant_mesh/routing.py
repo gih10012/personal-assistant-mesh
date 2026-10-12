@@ -124,9 +124,11 @@ class Routing:
         try:
             if kind == 'remote_delegation':
                 self._table(db, 'remote_delegations')
-                row = db.execute('''SELECT child_id,parent_id,caller_node,peer,message_id,
-                    remote_task_id,remote_status,terminal,observed FROM remote_delegations
-                    WHERE child_id=?''', (reference,)).fetchone()
+                row = db.execute('''SELECT r.child_id,r.parent_id,r.caller_node,r.peer,r.message_id,
+                    r.remote_task_id,r.remote_status,r.terminal,r.observed,
+                    r.fingerprint AS delegation_fingerprint,d.fingerprint AS message_fingerprint
+                    FROM remote_delegations r LEFT JOIN mesh_deliveries d
+                    ON d.peer=r.peer AND d.message_id=r.message_id WHERE r.child_id=?''', (reference,)).fetchone()
                 if not row:
                     raise ValueError('routing_reference_not_found')
                 if row['parent_id'] != decision['task_id']:
@@ -139,6 +141,8 @@ class Routing:
                     raise Conflict('routing_reference_identity_mismatch')
                 result = {'kind': kind, 'reference_id': reference, 'peer': row['peer'],
                           'message_id': row['message_id'], 'state': child['status'],
+                          'delegation_fingerprint': row['delegation_fingerprint'],
+                          'message_fingerprint': row['message_fingerprint'],
                           'remote_task_id': row['remote_task_id'], 'remote_state': row['remote_status'],
                           'terminal_recorded': bool(row['terminal']), 'observed_at': row['observed'],
                           'result_sha256': _sha(child['result']) if child['result'] is not None else None}
