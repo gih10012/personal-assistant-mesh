@@ -188,16 +188,26 @@
     editorText(editor) {
       return typeof editor.value === "string" ? editor.value : editor.textContent;
     }
+    editor(job) {
+      const editors = Array.from(this.document.querySelectorAll(job.dom.composer_selector)).filter(visible);
+      return editors.length === 1 ? editors[0] : null;
+    }
+    sendButton(job) {
+      const buttons = Array.from(this.document.querySelectorAll(job.dom.send_selector)).filter(visible);
+      return buttons.length === 1 ? buttons[0] : null;
+    }
     async preflight(job) {
       const prior = await this.inspect(job);
       if (prior.state !== "not_sent") return { ready: false, observation: prior };
-      const editor = this.document.querySelector(job.dom.composer_selector);
-      const send = this.document.querySelector(job.dom.send_selector);
-      if (!visible(editor) || !visible(send) || editor.disabled || editor.getAttribute("aria-disabled") === "true") {
+      const editor = this.editor(job);
+      if (!editor || editor.disabled || editor.readOnly || editor.getAttribute("aria-disabled") === "true") {
         return { ready: false, observation: observation(job, "blocked", "composer_unavailable") };
       }
       if (this.editorText(editor) !== "") return { ready: false, observation: observation(job, "blocked", "composer_occupied") };
       if (this.generating(job)) return { ready: false, observation: observation(job, "blocked", "generation_in_progress") };
+      // Chat may display a voice control, not a send button, while its editor
+      // is empty. Readiness grants only one fill attempt; the real, unique,
+      // enabled send control must appear and be rechecked AFTER that fill.
       return { ready: true };
     }
     async send(job) {
@@ -206,7 +216,8 @@
       const ready = await this.preflight(job);
       if (!ready.ready) return ready.observation;
       this.clicked.add(job.request_id); // grant already durable on both sides
-      const editor = this.document.querySelector(job.dom.composer_selector);
+      const editor = this.editor(job);
+      if (!editor) return observation(job, "unknown", "composer_changed");
       if (typeof editor.value === "string") {
         const prototype = editor.tagName === "TEXTAREA" ? this.events.HTMLTextAreaElement : this.events.HTMLInputElement;
         const setter = prototype && Object.getOwnPropertyDescriptor(prototype.prototype, "value");
@@ -217,9 +228,9 @@
       }
       if (!this.events.InputEvent) return observation(job, "unknown", "native_input_event_unavailable");
       editor.dispatchEvent(new this.events.InputEvent("input", { bubbles: true, inputType: "insertText", data: job.prompt }));
-      await Promise.resolve();
-      const send = this.document.querySelector(job.dom.send_selector);
-      if (await this.account(job) || this.generating(job) || this.editorText(editor) !== job.prompt
+      const send = await this.waitFor(() => this.sendButton(job));
+      if (await this.account(job) || this.generating(job) || this.editor(job) !== editor
+          || this.editorText(editor) !== job.prompt || this.sendButton(job) !== send
           || !visible(send) || send.disabled || send.getAttribute("aria-disabled") === "true") {
         return observation(job, "unknown", "send_precondition_changed");
       }

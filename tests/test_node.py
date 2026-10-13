@@ -723,7 +723,17 @@ class NodeTests(unittest.TestCase):
         self.assertFalse(node.status()['runtime_execution_verified'])
 
     def test_unknown_layout_never_creates_runtime_incident_or_blocks_worker(self):
-        node = self.node(self.config('alice', central=True))
+        config = self.config('alice', central=True)
+        # A valid noncanonical entrypoint is intentionally unknown to this
+        # optional package observer. Do not depend on the host PATH lacking a
+        # canonical Codex package: official Cloud VMs can provide one.
+        executable = self.directory / 'standalone-runtime'
+        executable.write_bytes(b'fixture metadata only; never executed')
+        executable.chmod(0o755)
+        worker = json.loads(Path(config['local_worker_config']).read_text())
+        worker['codex']['executable'] = str(executable)
+        self.rewrite(config['local_worker_config'], codex=worker['codex'])
+        node = self.node(config)
         node._observe_runtime(force=True)
         self.assertEqual('unknown', node.status()['runtime_observation']['runtimes'][0]['layout'])
         self.assertIsNone(self.incidents(node, LOCAL_RUNTIME, runtime=True))

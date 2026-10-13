@@ -1,6 +1,6 @@
 # 持续 owner goal
 
-更新时间：2026-10-12。整个 goal **active，未完成**。本文件是后续 owner
+更新时间：2026-10-13。整个 goal **active，未完成**。本文件是后续 owner
 指令的有效目标合同，与 [PLAN](PLAN.md)、[TASKS](TASKS.json) 一起续接。
 2026-10-12 本人共同重规划并批准实施，随后在产品中明确清空旧 Goal、
 要求直接新建；新原生 Goal 已实核 active，objective 为本轮完整计划。
@@ -23,6 +23,16 @@
 class/instance、目标作用域、共享瓶颈、故障域及外围设备代理绑定，
 不把发现耳机等同取得控制权。Mesh 只管理自己的额外共享接口，
 **不能阻断任何原生功能**；此前另一聊天中的全设备 Broker 约束不采用。
+
+2026-10-13新实际里程碑：原Leader同task/thread编写及审查恢复tool，
+原cap/pool同ID恢复cap3/pool2/binding2，实际跨123.68s续租验证。
+新Workspace任务同原Leader→复用校园专员→真实provider→原Leader
+自动取回/读完147280B产物，独立源/VPS副本逐字节一致，真实HTTP
+两指纹与原wire匹配。旧业务/native历史/unknown保持，本地artifact/
+多候选性能/断网自治/选模周期与Claw安全接管仍欠，不能称整个网完成。
+本人已发布官方Cloud环境并在新选择器真实可选；actual job/node未通。
+普通Chat编辑器已实核但账号/项目DOM及安装仍欠。四线继续active，
+[当前完整交接](STATUS-2026-10-13.md)覆盖下面保留的“未发布/待恢复”快照。
 
 23:20 续接已真正增量装载原 authority 的两项只读委派指纹投影。
 切换前原 carrier 的真实线程与全部在途回调闭合；一致备份、切换后

@@ -1,0 +1,17 @@
+diff --git a/assistant_mesh/server.py b/assistant_mesh/server.py
+--- a/assistant_mesh/server.py
++++ b/assistant_mesh/server.py
+@@ -457,7 +457,12 @@
+                 return self.send_json(401, {'error': 'authentication_required'})
+             try:
+                 size = int(self.headers.get('Content-Length', '0'))
+-                if size < 0 or size > 128 * 1024:
++                # Full original carrier outcomes only; other API budgets stay.
++                large_channel = (peer.get('role') == 'channel_carrier' and self.command == 'POST'
++                    and self.path in ('/channel-carrier/state/record_result',
++                                      '/channel-carrier/state/commit_poll'))
++                maximum = 8 * 1024 * 1024 + 65536 if large_channel else 128 * 1024
++                if size < 0 or size > maximum:
+                     return self.send_json(413, {'error': 'body_too_large'})
+                 payload = json.loads(self.rfile.read(size)) if size else {}
+                 if not isinstance(payload, dict):

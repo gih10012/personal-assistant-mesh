@@ -1,5 +1,11 @@
 # Workspace 对原3198 authority 的最小只读投影兼容
 
+2026-10-13：新合法Workspace任务的真实live HTTP remote link已返回
+两项fingerprint，独立与原wire及委派/delivery完整记录完全一致；一次
+实际delivery，原Leader/项目专员续接及完整回收另已验。
+[实测记录](STATUS-2026-10-13.md)补齐下方历史“尚待新任务”门槛，
+仍不由只读投影推导授权或全局 exactly-once。
+
 2026-10-12 23:20生产进展：原独立receiver的同源candidate已实际
 唯一加载，原Worker/Store不变；carrier全callback闭合、一致备份和
 独立10表/schema/inode/native全行保持已核。仅两模块发生变化。

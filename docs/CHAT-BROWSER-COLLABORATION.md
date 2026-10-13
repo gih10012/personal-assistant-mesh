@@ -1,5 +1,13 @@
 # 普通 Chat 的按需协作通道
 
+2026-10-13真实结构核验补充：新版ordinary Chat composer不是默认
+`#prompt-textarea`，空编辑器也没有send button。私有readonly DOM
+证据已保存；源码现在允许唯一空编辑器一次fill后等真实send控件，
+再核同编辑器/精确完整文本/唯一按钮/账号/无生成，27controlled cases
+通过。不加Enter或重发；真实selected profile、`/c`终态及安装仍欠，
+未enable send或发送Chat消息。以下“源码片未操作”指最初切片，最新
+只读GUI状态详见[交接](STATUS-2026-10-13.md)，不等于Chat已入网。
+
 本片是**源码与离线合同验收**，未安装扩展/native host、未操作本人账号、
 未创建或发送真实 Chat turn，不是 Chat 原生 HTTPS/OAuth MCP 已接通。
 目标是连续 Codex/Pi Leader 按需把一个明确子任务交给本人普通 Chat，

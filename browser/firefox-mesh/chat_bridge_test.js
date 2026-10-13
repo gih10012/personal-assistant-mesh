@@ -128,6 +128,29 @@ function browserFixture() {
     assert.equal((await f.adapter.send(f.job)).reason, "send_intent_observed"); assert.equal(f.editor.textContent, f.job.prompt); assert.equal(f.send.clicks, 1);
     assert.equal((await f.adapter.send(f.job)).reason, "local_send_intent_exists"); assert.equal(f.send.clicks, 1);
   });
+  await test("empty composer without send button can fill once and use the control appearing after input", async () => {
+    const f = await fixture(); f.nodes["#send"] = [];
+    assert.equal((await f.adapter.preflight(f.job)).ready, true);
+    const original = f.editor.dispatchEvent.bind(f.editor);
+    f.editor.dispatchEvent = (event) => { original(event); f.nodes["#send"] = [f.send]; };
+    assert.equal((await f.adapter.send(f.job)).reason, "send_intent_observed");
+    assert.equal(f.editor.textContent, f.job.prompt); assert.equal(f.send.clicks, 1);
+    assert.equal((await f.adapter.send(f.job)).reason, "local_send_intent_exists"); assert.equal(f.send.clicks, 1);
+  });
+  await test("ambiguous composer never fills and a changed editor after input never sends", async () => {
+    const f = await fixture(); const other = new Node(); f.nodes["#editor"].push(other);
+    assert.equal((await f.adapter.preflight(f.job)).observation.reason, "composer_unavailable");
+    assert.equal(f.editor.textContent, ""); assert.equal(other.textContent, "");
+    f.nodes["#editor"] = [f.editor];
+    f.editor.dispatchEvent = () => { f.nodes["#editor"] = [other]; other.textContent = "USER DRAFT"; };
+    assert.equal((await f.adapter.send(f.job)).reason, "send_precondition_changed");
+    assert.equal(other.textContent, "USER DRAFT"); assert.equal(f.send.clicks, 0);
+  });
+  await test("a second matching visible send button after account check is not clicked", async () => {
+    const f = await fixture(); let reads = 0; const original = f.adapter.account.bind(f.adapter);
+    f.adapter.account = async (job) => { const value = await original(job); if (++reads === 2) f.nodes["#send"].push(new Node()); return value; };
+    assert.equal((await f.adapter.send(f.job)).reason, "send_precondition_changed"); assert.equal(f.send.clicks, 0);
+  });
   await test("disabled send after filling stays unknown and is never clicked", async () => {
     const f = await fixture(); f.send.disabled = true; assert.equal((await f.adapter.send(f.job)).state, "unknown"); assert.equal(f.send.clicks, 0);
   });

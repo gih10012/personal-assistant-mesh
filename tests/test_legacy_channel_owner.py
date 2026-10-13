@@ -97,7 +97,13 @@ class LegacyChannelOwnerTests(unittest.TestCase):
             return json.loads(raw)
 
     def test_actual_socket_owner_peer_identity_and_complete_counter_snapshot(self):
-        report = self.start()
+        # Hold BOTH real callbacks while comparing the IPC snapshot to the
+        # owner-held group. An idle send callback can return between these two
+        # observations; different live counters then are valid, not a wire bug.
+        self.store.enqueue('snapshot-held-send', 'synthetic snapshot body')
+        self.start()
+        self.assertTrue(self.transport.sent.wait(1))
+        report = self.status()
         self.assertEqual(0o700, stat.S_IMODE(self.root.stat().st_mode))
         self.assertEqual(0o600, stat.S_IMODE(self.path.stat().st_mode))
         self.assertTrue(stat.S_ISSOCK(self.path.stat().st_mode))
@@ -107,6 +113,8 @@ class LegacyChannelOwnerTests(unittest.TestCase):
         self.assertIs(self.group, self.control._group)
         self.assertEqual(self.group.snapshot(), report['lifecycle'])
         self.assertEqual({'poll', 'send'}, set(report['lifecycle']['loop_calls']))
+        self.assertTrue(all(row['active'] and row['admitted'] == 1 and row['returned'] == 0
+                            for row in report['lifecycle']['loop_calls'].values()))
         self.assertTrue(report['lifecycle']['actual_owned_thread_handles'])
         rendered = json.dumps(report)
         self.assertNotIn('DO_NOT_PUBLISH_SYNTHETIC_TOKEN', rendered)
