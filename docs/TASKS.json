@@ -9,6 +9,11 @@
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
   "latest_continuation_at": "2026-10-13",
   "latest_integrated_source_validation_20261013": {
+    "published_source_commit": "373b76a050d11fd99afb5ad9d3116394dbddbcc4",
+    "actual_git_push_verified": true,
+    "exact_head_ci_run": 38371026857,
+    "exact_head_ci_status": "completed",
+    "exact_head_ci_conclusion": "success",
     "standard_cli_full_tests": 2229,
     "standard_cli_full_test_seconds": 182.418,
     "standard_cli_returncode": 0,
@@ -29,6 +34,17 @@
     "full_four_stream_actual_acceptance_verified": false,
     "warning_free_claimed": false,
     "goal_status": "active"
+  },
+  "latest_owner_milestone_notification_20261013": {
+    "request_id": "mesh-owner-roundtrip-progress-20261013-v1",
+    "channel": "existing bound-self ClawBot remote channel",
+    "root_submit_count": 1,
+    "status": "accepted",
+    "outcome_unknown": false,
+    "automatic_retry": false,
+    "delivery_verified": false,
+    "old_guidance_resent_or_new_poller_started": false,
+    "owner_https_route_choice_requested": true
   },
   "latest_actual_workspace_20261013": {
     "whole_goal_status": "active",
