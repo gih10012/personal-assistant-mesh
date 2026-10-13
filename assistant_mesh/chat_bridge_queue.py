@@ -70,6 +70,28 @@ def account_menu_config(value):
     return dict(value, steps=steps)
 
 
+def owner_profile_config(value, account_sha256):
+    """Reuse an owner-confirmed name only from trusted installation config.
+
+    The label is scoped to normal profile UI, not inferred from Chat content.
+    Its account namespace must be the same immutable private queue namespace.
+    """
+    if value is None:
+        return None
+    fields = {'control_selector', 'label_selector', 'expected_label', 'account_sha256'}
+    if (not isinstance(value, dict) or set(value) != fields
+            or any(not isinstance(value[key], str) or not 1 <= len(value[key].encode('utf8')) <= 256
+                   or re.search(r'[\x00-\x1f\x7f]', value[key])
+                   for key in ('control_selector', 'label_selector', 'expected_label'))
+            or value['expected_label'] != value['expected_label'].strip()
+            or not isinstance(value['account_sha256'], str)
+            or not re.fullmatch(r'[0-9a-f]{64}', value['account_sha256'])):
+        raise ValueError('chat_owner_profile_contract_invalid')
+    if value['account_sha256'] != account_sha256:
+        raise ValueError('chat_owner_profile_namespace_conflict')
+    return dict(value)
+
+
 def encoded(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True,
                       separators=(',', ':'), allow_nan=False).encode('utf8')
@@ -107,19 +129,30 @@ def configuration(value):
     if (not isinstance(account, str) or not re.fullmatch(r'[^\s@]+@163\.com', account)
             or len(account.encode('utf8')) > 254):
         raise ValueError('chat_primary_163_account_required')
+    account_sha256 = hashlib.sha256(account.lower().encode()).hexdigest()
     projects, dom = value['projects'], value['dom']
     if (not isinstance(projects, dict) or not 1 <= len(projects) <= 64
             or not isinstance(dom, dict)
-            or not {'account_selector', 'account_attribute', 'completion_selector'} <= set(dom)
-            or set(dom) - set(DOM_DEFAULTS) - {'account_selector', 'account_attribute', 'completion_selector', 'account_menu'}):
+            or 'completion_selector' not in dom
+            or set(dom) - set(DOM_DEFAULTS) - {'account_selector', 'account_attribute', 'completion_selector',
+                                             'account_menu', 'owner_confirmed_profile'}):
         raise ValueError('chat_bindings_invalid')
     dom = dict(DOM_DEFAULTS, **dom)
+    profile = owner_profile_config(dom.get('owner_confirmed_profile'), account_sha256)
+    legacy_fields = {'account_selector', 'account_attribute'}
+    if ((profile is None or dom.get('account_menu') is not None or legacy_fields.intersection(dom))
+            and not legacy_fields <= set(dom)):
+        raise ValueError('chat_bindings_invalid')
     if any(not isinstance(item, str) or not 1 <= len(item) <= 256
-           or re.search(r'[\x00-\x1f\x7f]', item) for key, item in dom.items() if key != 'account_menu'):
+           or re.search(r'[\x00-\x1f\x7f]', item) for key, item in dom.items()
+           if key not in ('account_menu', 'owner_confirmed_profile')):
         raise ValueError('chat_dom_contract_invalid')
-    if dom['account_attribute'] != 'textContent' and not re.fullmatch(r'[a-z][a-z0-9-]{0,63}', dom['account_attribute']):
+    if ('account_attribute' in dom and dom['account_attribute'] != 'textContent'
+            and not re.fullmatch(r'[a-z][a-z0-9-]{0,63}', dom['account_attribute'])):
         raise ValueError('chat_dom_contract_invalid')
     dom['account_menu'] = account_menu_config(dom.get('account_menu'))
+    if profile is not None:
+        dom['owner_confirmed_profile'] = profile
     root = Path(value['state_dir'])
     if not root.is_absolute() or '..' in root.parts:
         raise ValueError('chat_private_directory_required')
@@ -127,7 +160,7 @@ def configuration(value):
     if len(set(bindings.values())) != len(bindings):
         raise ValueError('chat_shared_conversation_requires_single_project')
     return {'owner_id': identifier(value['owner_id']), 'state_dir': str(root),
-            'enabled': value['enabled'], 'account_sha256': hashlib.sha256(account.lower().encode()).hexdigest(),
+            'enabled': value['enabled'], 'account_sha256': account_sha256,
             'projects': bindings, 'dom': dom}
 
 

@@ -59,3 +59,11 @@ historical activation, or research result proof of full autonomy/HA/execution.
 Secrets, account state, chats, native rollouts and private machine identifiers
 remain outside this public repository. Unknown side effects retain the original
 identity and never replay because a leader, model, version or node changes.
+
+Reuse the owner's explicitly confirmed main-account display-name binding. The
+private owner-state `personal-assistant-mesh/OWNER-IDENTITY.md` records it; read
+that handoff instead of repeatedly opening profile/email menus or asking the
+owner to confirm again. Normal profile evidence consistent with that binding
+is sufficient for the known owner workflow. Recheck only an actual account
+switch or conflicting identity, never arbitrary names/emails in chat content.
+Missing DOM selectors are an adapter gap, not an unconfirmed owner identity.

@@ -22,9 +22,14 @@
       || !/^[0-9a-f]{64}$/.test(job.content_sha256) || !/^[0-9a-f]{64}$/.test(job.account_sha256)
       || !conversation(job.conversation_url) || !object(job.dom)
       || !job.prompt.startsWith(`Mesh request: ${job.request_id}\nMesh content SHA-256: ${job.content_sha256}\n\n`)) fail("job_invalid");
-    for (const key of ["account_selector", "account_attribute", "completion_selector", "composer_selector", "send_selector",
+    for (const key of ["completion_selector", "composer_selector", "send_selector",
       "generating_selector", "message_selector", "role_attribute", "message_id_attribute"]) {
       if (typeof job.dom[key] !== "string" || !job.dom[key] || job.dom[key].length > 256) fail("job_invalid");
+    }
+    if (job.dom.owner_confirmed_profile === undefined || job.dom.owner_confirmed_profile === null || job.dom.account_menu) {
+      for (const key of ["account_selector", "account_attribute"]) {
+        if (typeof job.dom[key] !== "string" || !job.dom[key] || job.dom[key].length > 256) fail("job_invalid");
+      }
     }
     return job;
   }
@@ -60,6 +65,18 @@
     }
     return value;
   }
+  function validateOwnerProfile(value, accountSha256) {
+    if (value === undefined || value === null) return null;
+    if (!object(value) || Object.keys(value).sort().join() !== "account_sha256,control_selector,expected_label,label_selector"
+      || ![value.control_selector, value.label_selector, value.expected_label].every((item) =>
+        typeof item === "string" && size(item) > 0 && size(item) <= 256 && !/[\u0000-\u001f\u007f]/.test(item))
+      || value.expected_label !== value.expected_label.trim()
+      || typeof value.account_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(value.account_sha256)) {
+      fail("owner_profile_contract_invalid");
+    }
+    if (value.account_sha256 !== accountSha256) fail("owner_profile_namespace_conflict");
+    return value;
+  }
   function observation(job, state, reason, body = "", user = "", assistant = "", terminal = false) {
     return { state, reason, text: body, conversation_url: job.conversation_url,
       account_sha256: job.account_sha256, user_message_id: user, assistant_message_id: assistant,
@@ -72,8 +89,8 @@
       this.accountReads = Promise.resolve();
     }
     account(job) {
-      // Serialize read-only UI openings in this owned tab. No cached account
-      // assertion or arbitrary page-email fallback on later turns.
+      // Serialize checks in this owned tab. A trusted owner-confirmed profile
+      // binding is re-read without menus; arbitrary Chat names never count.
       const run = () => this.readSelectedAccount(job);
       const result = this.accountReads.then(run, run);
       this.accountReads = result.catch(() => undefined); return result;
@@ -92,8 +109,32 @@
     outsideConversation(node, job) {
       return node && !node.closest(job.dom.message_selector) && !node.closest(job.dom.composer_selector);
     }
+    readOwnerProfile(job, config) {
+      try {
+        const controls = Array.from(this.document.querySelectorAll(config.control_selector)).filter(visible);
+        if (controls.length !== 1 || !this.outsideConversation(controls[0], job)) return "owner_profile_unavailable";
+        const control = controls[0];
+        if ((control.tagName !== "BUTTON" && control.getAttribute("role") !== "button")
+          || control.disabled || control.getAttribute("aria-disabled") === "true"
+          || control.getAttribute("aria-busy") === "true") return "owner_profile_unavailable";
+        // Only the explicit name descendant in that normal profile control.
+        // The whole control may also contain avatar/subscription text.
+        const labels = Array.from(control.querySelectorAll(config.label_selector)).filter(visible);
+        if (labels.length !== 1 || !this.outsideConversation(labels[0], job)) return "owner_profile_label_unavailable";
+        const label = text(labels[0]);
+        if (typeof label !== "string" || !label.trim()) return "owner_profile_label_unavailable";
+        if (this.location.href !== job.conversation_url) return "conversation_changed";
+        return label.trim() === config.expected_label ? null : "account_changed";
+      } catch (_) { return "owner_profile_unavailable"; }
+    }
     async readSelectedAccount(job) {
       if (this.location.href !== job.conversation_url) return "conversation_changed";
+      let profile;
+      try { profile = validateOwnerProfile(job.dom.owner_confirmed_profile, job.account_sha256); }
+      catch (error) { return error.message; }
+      // Explicit installation binding takes priority. A changed/missing label
+      // never triggers account-menu clicks or adoption of another identity.
+      if (profile) return this.readOwnerProfile(job, profile);
       let config;
       try { config = validateAccountMenu(job.dom.account_menu); } catch (_) { return "selected_account_contract_invalid"; }
       if (!config) return "selected_account_contract_not_configured";
@@ -273,7 +314,7 @@
       evaluate().catch(() => undefined);
     }
   }
-  const exported = { ChatBridgeDOM, validateJob, validateAccountMenu, binding, equalBinding, observation, EXTENSION_ID, MAX_RESULT };
+  const exported = { ChatBridgeDOM, validateJob, validateAccountMenu, validateOwnerProfile, binding, equalBinding, observation, EXTENSION_ID, MAX_RESULT };
   if (typeof module !== "undefined") module.exports = exported;
   if (!root.MeshChatDOM) root.MeshChatDOM = exported;
   if (typeof browser !== "undefined" && root.location && root.location.origin === "https://chatgpt.com" && !root.MeshChatDOMInstalled) {

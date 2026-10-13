@@ -43,6 +43,14 @@ async function fixture() {
   const adapter = new dom.ChatBridgeDOM(document, location, deterministicCrypto, { InputEvent: class { constructor(type, value) { this.type = type; Object.assign(this, value); } }, MutationObserver }, timers);
   return { job, nodes, account, profile, menu, current, editor, send, document, location, adapter, timers, observer: () => observer };
 }
+async function profileFixture() {
+  const f = await fixture();
+  f.job.dom.owner_confirmed_profile = { control_selector: '#profile-menu', label_selector: '.profile-name',
+    expected_label: 'Fixture Owner', account_sha256: f.job.account_sha256 };
+  f.profile.innerText = 'Fixture Owner\nPlus';
+  f.label = new Node('Fixture Owner'); f.profile.nodes['.profile-name'] = [f.label];
+  return f;
+}
 function messages(f, body = "  完整答案\n```text\n保留空白\n```\n\n", complete = true) {
   const user = new Node(f.job.prompt, { role: "user", id: "user-1" }), assistant = new Node(body, { role: "assistant", id: "assistant-1" });
   assistant.nodes[".done"] = complete ? [new Node()] : [];
@@ -117,6 +125,76 @@ function browserFixture() {
   await test("already-open user menu is not toggled or adopted by automatic check", async () => {
     const f = await fixture(); f.menu.hidden = false; f.profile.attributes["aria-expanded"] = "true";
     assert.equal(await f.adapter.account(f.job), "account_menu_not_read_only_control"); assert.equal(f.profile.clicks, 0);
+  });
+  await test("trusted owner profile is re-read without menu clicks or email rediscovery", async () => {
+    const f = await profileFixture(); f.account.textContent = 'other@163.com';
+    assert.equal(await f.adapter.account(f.job), null);
+    assert.equal((await f.adapter.preflight(f.job)).ready, true);
+    assert.equal(await f.adapter.account(f.job), null);
+    assert.equal(f.profile.clicks, 0); assert.equal(f.current.clicks, 0); assert.equal(f.menu.hidden, true);
+  });
+  await test("profile-only config needs no fabricated email selector or menu contract", async () => {
+    const f = await profileFixture();
+    for (const key of ['account_selector', 'account_attribute', 'account_menu']) delete f.job.dom[key];
+    assert.equal(dom.validateJob(f.job), f.job); assert.equal(await f.adapter.account(f.job), null);
+    assert.equal(f.profile.clicks, 0);
+  });
+  await test("chat and composer names never replace the normal profile identity", async () => {
+    const f = await profileFixture(); f.label.innerText = 'Another Owner';
+    const matching = new Node('Fixture Owner'); matching.turn = new Node('CHAT BODY');
+    f.nodes['.profile-name'] = [matching];
+    assert.equal((await f.adapter.preflight(f.job)).observation.reason, 'account_changed');
+    f.label.innerText = 'Fixture Owner'; f.profile.turn = new Node('CHAT BODY');
+    assert.equal(await f.adapter.account(f.job), 'owner_profile_unavailable');
+    delete f.profile.turn; f.label.turn = f.editor;
+    assert.equal(await f.adapter.account(f.job), 'owner_profile_label_unavailable');
+    assert.equal(f.profile.clicks, 0); assert.equal(f.editor.textContent, ''); assert.equal(f.send.clicks, 0);
+  });
+  await test("profile must be a unique visible normal button and label", async () => {
+    const f = await profileFixture(); f.profile.hidden = true;
+    assert.equal(await f.adapter.account(f.job), 'owner_profile_unavailable');
+    f.profile.hidden = false; f.nodes['#profile-menu'].push(new Node('Fixture Owner', { role: 'button' }));
+    assert.equal(await f.adapter.account(f.job), 'owner_profile_unavailable');
+    f.nodes['#profile-menu'] = [f.profile]; f.profile.attributes.role = 'menuitem';
+    assert.equal(await f.adapter.account(f.job), 'owner_profile_unavailable');
+    f.profile.attributes.role = 'button'; f.label.hidden = true;
+    assert.equal(await f.adapter.account(f.job), 'owner_profile_label_unavailable');
+    f.label.hidden = false; f.profile.nodes['.profile-name'].push(new Node('Fixture Owner'));
+    assert.equal(await f.adapter.account(f.job), 'owner_profile_label_unavailable'); assert.equal(f.profile.clicks, 0);
+  });
+  await test("invalid or mismatched owner profile binding never falls back to menu", async () => {
+    const f = await profileFixture(); const trusted = clone(f.job.dom.owner_confirmed_profile);
+    for (const config of [{ ...trusted, account_sha256: 'a'.repeat(64) }, { ...trusted, expected_label: '' },
+      { ...trusted, confirmed: true }, { ...trusted, expected_label: ' Fixture Owner' }]) {
+      f.job.dom.owner_confirmed_profile = config;
+      assert.equal((await f.adapter.preflight(f.job)).ready, false);
+    }
+    assert.equal(f.profile.clicks, 0); assert.equal(f.send.clicks, 0);
+  });
+  await test("confirmed label remains exact and live, not a cached account assertion", async () => {
+    const f = await profileFixture(); assert.equal(await f.adapter.account(f.job), null);
+    for (const changed of ['fixture owner', 'Fixture Owner Plus', 'Another Owner']) {
+      f.label.innerText = changed;
+      assert.equal(await f.adapter.account(f.job), 'account_changed');
+    }
+    assert.equal(f.profile.clicks, 0);
+  });
+  await test("owner profile does not weaken origin or original conversation binding", async () => {
+    const f = await profileFixture();
+    f.location.href = 'https://other.example/c/fixture-conversation-1';
+    assert.equal((await f.adapter.preflight(f.job)).observation.reason, 'conversation_changed');
+    f.location.href = 'https://chatgpt.com/c/another-conversation';
+    assert.equal((await f.adapter.preflight(f.job)).observation.reason, 'conversation_changed');
+    assert.throws(() => dom.validateJob({ ...f.job, conversation_url: 'https://other.example/c/fixture-conversation-1' }));
+    assert.equal(f.profile.clicks, 0); assert.equal(f.send.clicks, 0);
+  });
+  await test("profile changing after one fill leaves original send unknown without retry", async () => {
+    const f = await profileFixture();
+    f.editor.dispatchEvent = () => { f.label.innerText = 'Another Owner'; };
+    assert.equal((await f.adapter.send(f.job)).reason, 'send_precondition_changed');
+    assert.equal(f.editor.textContent, f.job.prompt); assert.equal(f.send.clicks, 0); assert.equal(f.profile.clicks, 0);
+    f.label.innerText = 'Fixture Owner';
+    assert.equal((await f.adapter.send(f.job)).reason, 'local_send_intent_exists'); assert.equal(f.send.clicks, 0);
   });
   await test("occupied composer and ongoing generation never replaced", async () => {
     const f = await fixture(); f.editor.textContent = "USER DRAFT";

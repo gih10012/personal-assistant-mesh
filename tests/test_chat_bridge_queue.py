@@ -39,6 +39,12 @@ def account_menu():
             'selected_attribute': 'aria-checked', 'selected_value': 'true'}
 
 
+def owner_profile():
+    return {'control_selector': '#fixture-profile-menu', 'label_selector': '.fixture-profile-name',
+            'expected_label': 'Fixture Owner',
+            'account_sha256': hashlib.sha256(b'fixture-owner@163.com').hexdigest()}
+
+
 def request(number=1, project='fixture-project', text='  合成无秘密任务 🐾\n\n'):
     return {'request_id': 'fixture-request-' + str(number), 'task_id': 'fixture-child-' + str(number),
             'project_id': project, 'input': text}
@@ -219,7 +225,8 @@ class ChatQueueTests(unittest.TestCase):
                             dict(self.options, dom={}), dict(self.options, token='NOT_REAL')):
             with self.subTest(config=replacement), self.assertRaises(ValueError):
                 bridge.configuration(replacement)
-        for field in ('conversation_url', 'account', 'model', 'shell', 'token', 'url'):
+        for field in ('conversation_url', 'account', 'model', 'shell', 'token', 'url',
+                      'owner_confirmed_profile', 'expected_label', 'dom'):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 self.journal.enqueue(dict(request(), **{field: 'not allowed'}))
 
@@ -251,6 +258,59 @@ class ChatQueueTests(unittest.TestCase):
                         dict(account_menu(), javascript='not allowed')):
             with self.subTest(contract=changed), self.assertRaises(ValueError):
                 bridge.configuration(dict(self.options, dom=dict(self.options['dom'], account_menu=changed)))
+
+    def test_owner_profile_only_config_reuses_original_namespace_and_request(self):
+        self.journal.enqueue(request())
+        original = self.journal.offers()[0]
+        options = dict(self.options, dom={'completion_selector': '.fixture-completed',
+                                         'owner_confirmed_profile': owner_profile()})
+        journal = bridge.ChatBridgeQueue(options)
+        offered = journal.offers()[0]
+        self.assertEqual(self.journal.namespace, journal.namespace)
+        self.assertEqual(original['content_sha256'], offered['content_sha256'])
+        self.assertEqual(original['conversation_url'], offered['conversation_url'])
+        self.assertEqual(owner_profile(), offered['dom']['owner_confirmed_profile'])
+        self.assertNotIn('account_selector', offered['dom'])
+        self.assertNotIn('expected_account', offered)
+        self.assertIsNone(offered['dom']['account_menu'])
+        self.assertFalse(offered['send_intent'])
+
+    def test_owner_profile_and_legacy_menu_both_forwarded_without_namespace_change(self):
+        options = dict(self.options, dom=dict(self.options['dom'], account_menu=account_menu(),
+                                              owner_confirmed_profile=owner_profile()))
+        journal = bridge.ChatBridgeQueue(options)
+        journal.enqueue(request())
+        offered = journal.offers()[0]
+        self.assertEqual(account_menu(), offered['dom']['account_menu'])
+        self.assertEqual(owner_profile(), offered['dom']['owner_confirmed_profile'])
+        self.assertEqual(self.journal.namespace, journal.namespace)
+
+    def test_owner_profile_invalid_or_unbound_private_contract_rejected(self):
+        for changed in (dict(owner_profile(), account_sha256='a' * 64),
+                        dict(owner_profile(), expected_label=' Fixture Owner'),
+                        dict(owner_profile(), expected_label='Fixture\nOwner'),
+                        dict(owner_profile(), expected_label=''),
+                        dict(owner_profile(), control_selector=False),
+                        dict(owner_profile(), label_selector='x' * 257),
+                        dict(owner_profile(), confirmed=True),
+                        {'expected_label': 'Fixture Owner'}):
+            with self.subTest(contract=changed), self.assertRaises(ValueError):
+                bridge.configuration(dict(self.options, dom=dict(self.options['dom'],
+                                                                  owner_confirmed_profile=changed)))
+        with self.assertRaisesRegex(ValueError, 'owner_profile_namespace_conflict'):
+            bridge.configuration(dict(self.options, expected_account='another@163.com',
+                                      dom=dict(self.options['dom'], owner_confirmed_profile=owner_profile())))
+
+    def test_owner_profile_installation_never_regrants_original_unknown_send(self):
+        self.journal.enqueue(request())
+        original = self.journal.offers()[0]
+        self.journal.begin_send(original['request_id'], original['content_sha256'])
+        journal = bridge.ChatBridgeQueue(dict(self.options, dom={
+            'completion_selector': '.fixture-completed', 'owner_confirmed_profile': owner_profile()}))
+        offered = journal.offers()[0]
+        self.assertEqual('observe', offered['mode'])
+        self.assertEqual('unknown', offered['state'])
+        self.assertFalse(journal.begin_send(original['request_id'], original['content_sha256'])['send_granted'])
 
     def test_world_readable_or_symlink_database_rejected_not_repaired(self):
         self.journal.database.chmod(0o644)

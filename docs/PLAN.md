@@ -26,6 +26,12 @@ Claw安全接管、独立通信故障域、local完整产物/动态调度与3–
 失败和live-snapshot测试竞态记录保留，生产原逻辑未为测试放宽。
 下一009c真实proof/停止/原在途/独立authority状态故障域仍欠。
 
+本人再次明确主账号显示名对应关系并要求写文档，已私存身份交接并
+更新AGENTS。普通Chat接线优先复用trusted owner-confirmed profile，
+不再每轮打开邮箱菜单；剩余精确DOM/实际安装/原会话终态是适配缺口，
+不是本人没确认账号。新分支兼容旧菜单、身份冲突不fallback、unknown
+不重发，相关135项及35 DOM cases/Root60项已过；仍需真实接线。
+
 本人晚间把浏览器进一步网络调优留给 Leader 后续项目，当前网络可用，
 继续 Firefox 接线。见 [调优交接](BROWSER-NETWORK-TUNING-HANDOFF.md)。
 只有此调优子项目延后，四线/整个 Goal 继续；不自动扩大代理或面板变更。

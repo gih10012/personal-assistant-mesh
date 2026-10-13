@@ -1,5 +1,19 @@
 # 普通 Chat 的按需协作通道
 
+本人已明确确认主账号的资料显示名映射，并要求记住、不反复核邮箱。
+这份私有身份交接优先于下列历史“每次打开菜单”的流程。trusted owner
+安装配置现可使用`dom.owner_confirmed_profile`：只读唯一正常profile
+button内部的精确姓名标签，绑定既有account SHA/queue namespace；
+不点击菜单、不从聊天昵称/邮箱推断、不把缺DOM当本人身份未确认。
+实测冲突/切号才重新核对。本人真实标签与映射不进入公开库。
+
+该optional私有合同包含`control_selector/label_selector/expected_label/
+account_sha256`；姓名selector只在normal control内求值，必须精确分离
+订阅/头像文本。只配置此分支时不需要虚构邮箱CSS；旧菜单配置兼容，
+显式profile分支优先，失败也不偷偷回落菜单或切换账号。原request/
+unknown不reset、不重grant。135相关隔离项及35 DOM cases通过；Root
+另复跑queue/native60项与35 DOM cases，不称实际账号/消息已安装验证。
+
 2026-10-13真实结构核验补充：新版ordinary Chat composer不是默认
 `#prompt-textarea`，空编辑器也没有send button。私有readonly DOM
 证据已保存；源码现在允许唯一空编辑器一次fill后等真实send控件，
@@ -45,8 +59,10 @@ ID 后调用；不能把模型自报的 `task_id` 当执行权限。远端 Leade
 与内容 SHA 前缀。相同 task/request/内容重查返回同记录；换内容、换
 request 修补同 child 或同项目改会话冲突。扩展也私有持久保存原绑定。
 
-提交前先确认：当前 URL 精确等于固定原会话、正常账号菜单中**明确
-当前选中项**的本人主账号邮箱 SHA 匹配、空 composer、无生成中回复。
+提交前先核当前URL精确等于固定原会话、原owner身份namespace一致、
+空composer、无生成中回复。已配置owner-confirmed profile时直接沿用
+上述只读资料绑定；**仅没有该绑定的旧菜单分支**才核正常账号菜单中
+明确当前选中项的主账号邮箱SHA。
 仅在 owner 已审核的 `dom.account_menu` 合同成立时正常点击只读账号
 菜单/子菜单，读取选中项内 email 后关闭自己打开的菜单。任意聊天
 正文、任意页面 email 文本、昵称或历史“已登录”标记都不是账号证据。

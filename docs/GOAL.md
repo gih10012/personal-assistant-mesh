@@ -34,6 +34,12 @@ class/instance、目标作用域、共享瓶颈、故障域及外围设备代理
 普通Chat编辑器已实核但账号/项目DOM及安装仍欠。四线继续active，
 [当前完整交接](STATUS-2026-10-13.md)覆盖下面保留的“未发布/待恢复”快照。
 
+本人随后再次要求记住主账号已确认的资料显示名映射，已保存私有
+`OWNER-IDENTITY.md`并写入AGENTS续接规则。以后直接复用本人绑定，
+不反复开邮箱菜单/问登录；只有实际切号或冲突才核具体缺项。新增
+optional profile-only身份分支仅读正常资料区，保留原account namespace/
+conversation/unknown边界，不把聊天同名或私有配置当OAuth认证证明。
+
 23:20 续接已真正增量装载原 authority 的两项只读委派指纹投影。
 切换前原 carrier 的真实线程与全部在途回调闭合；一致备份、切换后
 独立全行核验通过：10个保护表、schema、账本inode、原native会话/

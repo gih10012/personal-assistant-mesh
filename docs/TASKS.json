@@ -8,6 +8,23 @@
   "latest_owner_status": "docs/STATUS-2026-10-13.md",
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
   "latest_continuation_at": "2026-10-13",
+  "owner_confirmed_profile_binding_20261013": {
+    "owner_explicit_mapping_reconfirmed": true,
+    "exact_mapping_handoff_owner_private_0600": true,
+    "public_working_contract_updated": true,
+    "repeat_email_menu_or_login_confirmation_required": false,
+    "recheck_only_actual_switch_or_identity_conflict": true,
+    "normal_profile_readonly_source_branch_added": true,
+    "chat_content_names_or_emails_not_identity": true,
+    "original_account_namespace_and_unknowns_preserved": true,
+    "profile_only_does_not_need_fabricated_email_selectors": true,
+    "legacy_menu_branch_compatible": true,
+    "related_tests": 135,
+    "root_queue_and_native_tests": 60,
+    "controlled_dom_port_cases": 35,
+    "actual_extension_install_or_chat_turn_claimed": false,
+    "goal_status": "active"
+  },
   "latest_integrated_source_validation_20261013": {
     "published_source_commit": "373b76a050d11fd99afb5ad9d3116394dbddbcc4",
     "actual_git_push_verified": true,
