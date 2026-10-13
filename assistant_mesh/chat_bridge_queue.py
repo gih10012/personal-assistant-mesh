@@ -79,7 +79,7 @@ def owner_profile_config(value, account_sha256):
     if value is None:
         return None
     fields = {'control_selector', 'label_selector', 'expected_label', 'account_sha256'}
-    if (not isinstance(value, dict) or set(value) != fields
+    if (not isinstance(value, dict) or set(value) - fields - {'label_scope', 'parent_selector'} or not fields <= set(value)
             or any(not isinstance(value[key], str) or not 1 <= len(value[key].encode('utf8')) <= 256
                    or re.search(r'[\x00-\x1f\x7f]', value[key])
                    for key in ('control_selector', 'label_selector', 'expected_label'))
@@ -89,7 +89,50 @@ def owner_profile_config(value, account_sha256):
         raise ValueError('chat_owner_profile_contract_invalid')
     if value['account_sha256'] != account_sha256:
         raise ValueError('chat_owner_profile_namespace_conflict')
+    scope = value.get('label_scope', 'control')
+    if (scope not in ('control', 'direct_parent')
+            or scope == 'control' and 'parent_selector' in value
+            or scope == 'direct_parent' and (not isinstance(value.get('parent_selector'), str)
+                or not 1 <= len(value['parent_selector']) <= 256
+                or re.search(r'[\x00-\x1f\x7f]', value['parent_selector']))):
+        raise ValueError('chat_owner_profile_contract_invalid')
     return dict(value)
+
+
+def message_layout_config(value):
+    """Reviewed rendered units, not fabricated role or platform user IDs."""
+    if value is None:
+        return None
+    fields = {'unit_selector', 'unit_key_attribute', 'user_role_suffix', 'assistant_role_suffix',
+              'user_text_selector', 'assistant_text_selector', 'assistant_id_attribute',
+              'terminal_container_selector', 'terminal_state_attribute', 'terminal_state_value'}
+    if (not isinstance(value, dict) or set(value) != fields
+            or any(not isinstance(item, str) or not 1 <= len(item) <= 256
+                   or re.search(r'[\x00-\x1f\x7f]', item) for item in value.values())
+            or any(not re.fullmatch(r'[a-z][a-z0-9-]{0,63}', value[key])
+                   for key in ('unit_key_attribute', 'assistant_id_attribute', 'terminal_state_attribute'))
+            or value['user_role_suffix'].endswith(value['assistant_role_suffix'])
+            or value['assistant_role_suffix'].endswith(value['user_role_suffix'])
+            or value['terminal_state_value'] not in ('complete', 'completed')):
+        raise ValueError('chat_message_layout_invalid')
+    return dict(value)
+
+
+def original_prompt(request_id, content_sha256, body):
+    return 'Mesh request: {}\nMesh content SHA-256: {}\n\n{}'.format(request_id, content_sha256, body['input'])
+
+
+def observed_identity(value):
+    if not isinstance(value, dict):
+        return None
+    if value.get('user_reference'):
+        identity = {'user_reference': dict(value['user_reference'])}
+    elif value.get('user_message_id'):
+        identity = {'user_message_id': value['user_message_id']}
+    else:
+        return None
+    identity['assistant_message_id'] = value.get('assistant_message_id', '')
+    return identity
 
 
 def encoded(value):
@@ -135,7 +178,7 @@ def configuration(value):
             or not isinstance(dom, dict)
             or 'completion_selector' not in dom
             or set(dom) - set(DOM_DEFAULTS) - {'account_selector', 'account_attribute', 'completion_selector',
-                                             'account_menu', 'owner_confirmed_profile'}):
+                                             'account_menu', 'owner_confirmed_profile', 'message_layout'}):
         raise ValueError('chat_bindings_invalid')
     dom = dict(DOM_DEFAULTS, **dom)
     profile = owner_profile_config(dom.get('owner_confirmed_profile'), account_sha256)
@@ -145,7 +188,7 @@ def configuration(value):
         raise ValueError('chat_bindings_invalid')
     if any(not isinstance(item, str) or not 1 <= len(item) <= 256
            or re.search(r'[\x00-\x1f\x7f]', item) for key, item in dom.items()
-           if key not in ('account_menu', 'owner_confirmed_profile')):
+           if key not in ('account_menu', 'owner_confirmed_profile', 'message_layout')):
         raise ValueError('chat_dom_contract_invalid')
     if ('account_attribute' in dom and dom['account_attribute'] != 'textContent'
             and not re.fullmatch(r'[a-z][a-z0-9-]{0,63}', dom['account_attribute'])):
@@ -153,6 +196,9 @@ def configuration(value):
     dom['account_menu'] = account_menu_config(dom.get('account_menu'))
     if profile is not None:
         dom['owner_confirmed_profile'] = profile
+    layout = message_layout_config(dom.get('message_layout'))
+    if layout is not None:
+        dom['message_layout'] = layout
     root = Path(value['state_dir'])
     if not root.is_absolute() or '..' in root.parts:
         raise ValueError('chat_private_directory_required')
@@ -277,12 +323,17 @@ class ChatBridgeQueue:
                 seen.add(project)
                 checked = self._row(db, row['request_id'])
                 body = json.loads(checked['body'])
-                prompt = 'Mesh request: {}\nMesh content SHA-256: {}\n\n{}'.format(
-                    row['request_id'], row['content_sha256'], body['input'])
-                result.append(dict(self._view(row), conversation_url=body['conversation_url'],
+                prompt = original_prompt(row['request_id'], row['content_sha256'], body)
+                offered = dict(self._view(row), conversation_url=body['conversation_url'],
                                    account_sha256=body['account_sha256'], prompt=prompt,
                                    dom=dict(self.config['dom']),
-                                   mode='observe' if row['send_intent'] else 'prepare'))
+                                   mode='observe' if row['send_intent'] else 'prepare')
+                if row['result']:
+                    saved = json.loads(row['result'])
+                    identity = saved.get('observed_identity') or observed_identity(saved)
+                    if identity:
+                        offered['observed_identity'] = identity
+                result.append(offered)
             return result
 
     def begin_send(self, request_id, content_sha256):
@@ -307,7 +358,8 @@ class ChatBridgeQueue:
     def record(self, request_id, content_sha256, observation):
         allowed = {'state', 'reason', 'text', 'conversation_url', 'account_sha256',
                    'user_message_id', 'assistant_message_id', 'terminal_visible', 'scope'}
-        if not isinstance(observation, dict) or set(observation) != allowed:
+        if (not isinstance(observation, dict) or not allowed <= set(observation)
+                or set(observation) - allowed - {'user_reference'}):
             raise ValueError('chat_observation_invalid')
         value = dict(observation)
         if (value['state'] not in ('partial', 'unknown', 'blocked', 'completed')
@@ -324,18 +376,55 @@ class ChatBridgeQueue:
                     or value['conversation_url'] != body['conversation_url']
                     or value['account_sha256'] != body['account_sha256']):
                 raise Conflict('chat_observation_binding_conflict')
+            reference = value.get('user_reference')
+            if 'user_reference' in value:
+                prompt = original_prompt(row['request_id'], row['content_sha256'], body)
+                if (not self.config['dom'].get('message_layout') or value['user_message_id']
+                        or not isinstance(reference, dict)
+                        or set(reference) != {'kind', 'reference', 'prompt_sha256'}
+                        or reference.get('kind') != 'rendered_user_anchor'
+                        or not isinstance(reference.get('reference'), str)
+                        or not 1 <= len(reference['reference']) <= 200
+                        or reference['reference'] != reference['reference'].strip()
+                        or re.search(r'[\x00-\x1f\x7f]', reference['reference'])
+                        or reference.get('prompt_sha256') != hashlib.sha256(prompt.encode('utf8')).hexdigest()):
+                    raise ValueError('chat_user_reference_invalid')
             if value['state'] == 'completed' and (not value['terminal_visible'] or not value['text']
-                                                 or not value['user_message_id'] or not value['assistant_message_id']):
+                                                 or not (value['user_message_id'] or reference)
+                                                 or not value['assistant_message_id']):
                 raise ValueError('chat_terminal_evidence_required')
             if value['state'] != 'completed' and value['terminal_visible']:
                 raise ValueError('chat_terminal_evidence_mismatch')
+            prior = json.loads(row['result']) if row['result'] else None
+            remembered = prior and (prior.get('observed_identity') or observed_identity(prior))
+            current = observed_identity(value)
+            if row['state'] == 'completed':
+                # Preserve old completed JSON bytes, including legacy rows.
+                if prior and 'observed_identity' in prior:
+                    value['observed_identity'] = prior['observed_identity']
+                value.update(text_sha256=hashlib.sha256(value['text'].encode('utf8')).hexdigest(),
+                             text_bytes=len(value['text'].encode('utf8')))
+                if row['result'] != encoded(value).decode():
+                    raise Conflict('chat_completed_result_changed')
+                return self._view(row)
+            if current and remembered:
+                user_changed = ({key: item for key, item in current.items() if key != 'assistant_message_id'}
+                                != {key: item for key, item in remembered.items() if key != 'assistant_message_id'})
+                assistant_changed = (current['assistant_message_id'] and remembered['assistant_message_id']
+                                     and current['assistant_message_id'] != remembered['assistant_message_id'])
+                if user_changed or assistant_changed:
+                    value.update(state='unknown', reason='message_identity_conflict', text='', terminal_visible=False)
+                elif current['assistant_message_id'] and not remembered['assistant_message_id']:
+                    remembered = dict(remembered, assistant_message_id=current['assistant_message_id'])
+            elif current:
+                remembered = current
+            if remembered and (self.config['dom'].get('message_layout') or prior and 'observed_identity' in prior):
+                # Host-owned checkpoint survives an empty/changed later DOM
+                # observation. It is not a claim that a user anchor is stable.
+                value['observed_identity'] = remembered
             value.update(text_sha256=hashlib.sha256(value['text'].encode('utf8')).hexdigest(),
                          text_bytes=len(value['text'].encode('utf8')))
             serialized = encoded(value).decode()
-            if row['state'] == 'completed':
-                if row['result'] != serialized:
-                    raise Conflict('chat_completed_result_changed')
-                return self._view(row)
             # Even a lost local grant ACK is now observation-only. Blocked
             # before any send remains queued and is retried only on a wake.
             sent = row['send_intent'] or value['state'] in ('completed', 'partial', 'unknown')

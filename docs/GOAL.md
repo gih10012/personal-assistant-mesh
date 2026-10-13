@@ -12,6 +12,17 @@
 
 ## 本轮批准的第一里程碑
 
+2026-10-13晚间新增实际进展：独立Firefox协作扩展已通过正常临时加载，
+唯一NativeMessaging host的Firefox父进程/Unix peer与0600 wake事件已核。
+首次108B socket路径实际报AF_UNIX path too long；停扩展后迁移同一空
+队列到短私有路径，inode/namespace/原记录保持，再加载实际wake成功。
+仍enabled=false/零任务，不把接线当Chat推理入网。真实DOM及一次不发送
+的编辑器填入/发送控件出现/清空已核，新的父资料区、结构化消息和
+positive complete源码适配保留真实assistant ID与用户渲染锚的区别。
+本地full-artifact源码新增明确local来源，不伪造A2A消息、不补写旧薄
+入口journal；实际Leader本地消费仍待。Root当前标准CLI2257项181.945s/
+0skip、129相关项及44 DOM cases通过，非新head CI或整个四线验收。
+
 四线并行：连续原生 Codex/Pi Leader 与本机/VPS 统一能力入口；主账号
 普通 Chat 原生 MCP 入网及 Leader 按需调用专用 Firefox 项目会话；
 **官方 OpenAI Codex Cloud** 的真实 published environment/job 临时节点；

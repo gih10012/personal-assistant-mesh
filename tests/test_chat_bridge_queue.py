@@ -45,6 +45,15 @@ def owner_profile():
             'account_sha256': hashlib.sha256(b'fixture-owner@163.com').hexdigest()}
 
 
+def message_layout():
+    return {'unit_selector': '.fixture-unit', 'unit_key_attribute': 'data-content-search-unit-key',
+            'user_role_suffix': ':user', 'assistant_role_suffix': ':assistant',
+            'user_text_selector': '.fixture-user-body', 'assistant_text_selector': '.fixture-assistant-body',
+            'assistant_id_attribute': 'data-chatgpt-selection-message-id',
+            'terminal_container_selector': '.fixture-turn', 'terminal_state_attribute': 'data-talvt-turn-state',
+            'terminal_state_value': 'complete'}
+
+
 def request(number=1, project='fixture-project', text='  合成无秘密任务 🐾\n\n'):
     return {'request_id': 'fixture-request-' + str(number), 'task_id': 'fixture-child-' + str(number),
             'project_id': project, 'input': text}
@@ -55,6 +64,14 @@ def observed(job, state='completed', text='  完整可见结果\n代码\n\n'):
             'text': text, 'conversation_url': job['conversation_url'], 'account_sha256': job['account_sha256'],
             'user_message_id': 'fixture-user', 'assistant_message_id': 'fixture-assistant',
             'terminal_visible': state == 'completed', 'scope': 'visible_dom_text'}
+
+
+def rendered_observed(job, state='completed', text='  完整可见结果\n代码\n\n'):
+    value = observed(job, state, text)
+    value['user_message_id'] = ''
+    value['user_reference'] = {'kind': 'rendered_user_anchor', 'reference': 'fixture-turn-1:user',
+                               'prompt_sha256': hashlib.sha256(job['prompt'].encode('utf8')).hexdigest()}
+    return value
 
 
 class ChatQueueTests(unittest.TestCase):
@@ -226,7 +243,7 @@ class ChatQueueTests(unittest.TestCase):
             with self.subTest(config=replacement), self.assertRaises(ValueError):
                 bridge.configuration(replacement)
         for field in ('conversation_url', 'account', 'model', 'shell', 'token', 'url',
-                      'owner_confirmed_profile', 'expected_label', 'dom'):
+                      'owner_confirmed_profile', 'expected_label', 'dom', 'message_layout', 'user_reference'):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 self.journal.enqueue(dict(request(), **{field: 'not allowed'}))
 
@@ -311,6 +328,105 @@ class ChatQueueTests(unittest.TestCase):
         self.assertEqual('observe', offered['mode'])
         self.assertEqual('unknown', offered['state'])
         self.assertFalse(journal.begin_send(original['request_id'], original['content_sha256'])['send_granted'])
+
+    def test_profile_direct_parent_contract_explicit_not_general_ancestor(self):
+        profile = dict(owner_profile(), label_scope='direct_parent', parent_selector='.fixture-profile-parent')
+        options = dict(self.options, dom=dict(self.options['dom'], owner_confirmed_profile=profile))
+        self.assertEqual(profile, bridge.configuration(options)['dom']['owner_confirmed_profile'])
+        for changed in (dict(owner_profile(), label_scope='closest', parent_selector='body'),
+                        dict(owner_profile(), label_scope='direct_parent'),
+                        dict(owner_profile(), parent_selector='.fixture-profile-parent')):
+            with self.subTest(contract=changed), self.assertRaises(ValueError):
+                bridge.configuration(dict(self.options, dom=dict(self.options['dom'], owner_confirmed_profile=changed)))
+
+    def test_rendered_reference_is_not_a_platform_user_id_and_full_result_persists(self):
+        journal = bridge.ChatBridgeQueue(dict(self.options, dom=dict(self.options['dom'], message_layout=message_layout())))
+        journal.enqueue(request())
+        job = journal.offers()[0]
+        value = rendered_observed(job)
+        journal.record(job['request_id'], job['content_sha256'], value)
+        journal.record(job['request_id'], job['content_sha256'], value)
+        reopened = bridge.ChatBridgeQueue(dict(self.options, dom=dict(self.options['dom'], message_layout=message_layout())))
+        result = reopened.result(job['request_id'])['result']
+        self.assertEqual('', result['user_message_id'])
+        self.assertEqual(value['user_reference'], result['user_reference'])
+        self.assertEqual(value['text'], result['text'])
+        self.assertEqual(hashlib.sha256(value['text'].encode('utf8')).hexdigest(), result['text_sha256'])
+        self.assertFalse(reopened.result(job['request_id'])['account_verified'])
+
+    def test_old_completed_serialized_result_is_not_rewritten_by_new_layout(self):
+        self.journal.enqueue(request())
+        job = self.journal.offers()[0]
+        value = observed(job)
+        self.journal.record(job['request_id'], job['content_sha256'], value)
+        with contextlib.closing(sqlite3.connect(str(self.journal.database))) as db:
+            before = db.execute('SELECT result FROM chat_requests WHERE request_id=?', (job['request_id'],)).fetchone()[0]
+        options = dict(self.options, dom=dict(self.options['dom'], message_layout=message_layout()))
+        journal = bridge.ChatBridgeQueue(options)
+        journal.record(job['request_id'], job['content_sha256'], value)
+        self.assertEqual(value['text'], journal.result(job['request_id'])['result']['text'])
+        with contextlib.closing(sqlite3.connect(str(journal.database))) as db:
+            after = db.execute('SELECT result FROM chat_requests WHERE request_id=?', (job['request_id'],)).fetchone()[0]
+        self.assertEqual(before, after)
+        self.assertNotIn('observed_identity', json.loads(after))
+
+    def test_rendered_reference_requires_reviewed_layout_and_exact_original_prompt_sha(self):
+        journal = bridge.ChatBridgeQueue(dict(self.options, dom=dict(self.options['dom'], message_layout=message_layout())))
+        journal.enqueue(request())
+        job = journal.offers()[0]
+        value = rendered_observed(job)
+        for changed in (dict(value['user_reference'], kind='platform_message_id'),
+                        dict(value['user_reference'], reference=''),
+                        dict(value['user_reference'], prompt_sha256=job['content_sha256']),
+                        dict(value['user_reference'], extra='not allowed')):
+            with self.subTest(reference=changed), self.assertRaisesRegex(ValueError, 'user_reference_invalid'):
+                journal.record(job['request_id'], job['content_sha256'], dict(value, user_reference=changed))
+        with self.assertRaisesRegex(ValueError, 'user_reference_invalid'):
+            journal.record(job['request_id'], job['content_sha256'], dict(value, user_message_id='fabricated-user-id'))
+        with self.assertRaisesRegex(ValueError, 'user_reference_invalid'):
+            self.journal.record(self.journal.enqueue(request())['request_id'], job['content_sha256'], value)
+        self.assertFalse(journal.status(job['request_id'])['send_intent'])
+
+    def test_rendered_anchor_or_assistant_change_keeps_original_identity_unknown_no_regrant(self):
+        options = dict(self.options, dom=dict(self.options['dom'], message_layout=message_layout()))
+        journal = bridge.ChatBridgeQueue(options)
+        journal.enqueue(request())
+        job = journal.offers()[0]
+        original = rendered_observed(job, state='partial')
+        journal.record(job['request_id'], job['content_sha256'], original)
+        changed = dict(rendered_observed(job), user_reference=dict(original['user_reference'], reference='fixture-renumbered:user'))
+        journal.record(job['request_id'], job['content_sha256'], changed)
+        self.assertEqual('unknown', journal.status(job['request_id'])['state'])
+        self.assertEqual('message_identity_conflict', journal.result(job['request_id'])['result']['reason'])
+        offered = bridge.ChatBridgeQueue(options).offers()[0]
+        self.assertEqual(original['user_reference'], offered['observed_identity']['user_reference'])
+        self.assertEqual('observe', offered['mode'])
+        self.assertFalse(journal.begin_send(job['request_id'], job['content_sha256'])['send_granted'])
+        journal.record(job['request_id'], job['content_sha256'], dict(rendered_observed(job), assistant_message_id='different-assistant'))
+        self.assertEqual('unknown', journal.status(job['request_id'])['state'])
+        self.assertEqual(original['assistant_message_id'], journal.offers()[0]['observed_identity']['assistant_message_id'])
+
+    def test_missing_dom_keeps_identity_checkpoint_and_later_first_assistant_can_complete(self):
+        options = dict(self.options, dom=dict(self.options['dom'], message_layout=message_layout()))
+        journal = bridge.ChatBridgeQueue(options)
+        journal.enqueue(request())
+        job = journal.offers()[0]
+        first = dict(rendered_observed(job, state='partial', text=''), assistant_message_id='')
+        journal.record(job['request_id'], job['content_sha256'], first)
+        missing = dict(observed(job, state='unknown', text=''), user_message_id='', assistant_message_id='')
+        journal.record(job['request_id'], job['content_sha256'], missing)
+        self.assertEqual(first['user_reference'], journal.offers()[0]['observed_identity']['user_reference'])
+        journal.record(job['request_id'], job['content_sha256'], rendered_observed(job))
+        self.assertEqual('completed', journal.status(job['request_id'])['state'])
+
+    def test_structured_layout_unknown_fields_ambiguous_roles_or_nonterminal_state_rejected(self):
+        for changed in (dict(message_layout(), page_store='not allowed'),
+                        dict(message_layout(), assistant_role_suffix='user'),
+                        dict(message_layout(), unit_key_attribute='innerText'),
+                        dict(message_layout(), terminal_state_value='streaming'),
+                        dict(message_layout(), user_text_selector=False)):
+            with self.subTest(layout=changed), self.assertRaisesRegex(ValueError, 'message_layout_invalid'):
+                bridge.configuration(dict(self.options, dom=dict(self.options['dom'], message_layout=changed)))
 
     def test_world_readable_or_symlink_database_rejected_not_repaired(self):
         self.journal.database.chmod(0o644)

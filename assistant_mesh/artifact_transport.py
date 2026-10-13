@@ -22,6 +22,7 @@ from .resources import _json
 
 
 FORMAT = 'mesh-private-artifact-transfer/1'
+LOCAL_FORMAT = 'mesh-local-private-artifact-transfer/1'
 MAX_ARTIFACT_BYTES = 24 * 1024 * 1024
 CHUNK_BYTES = 65536
 _CONTEXT_KEYS = {'operation_id', 'capability_id', 'provider', 'receipt_id',
@@ -46,6 +47,8 @@ _MANIFEST_KEYS = {'format', 'authority', 'sender', 'message_id', 'message_finger
     'evidence_level', 'native_owner_file_authority', 'managed_artifact_grant_verified',
     'execution_verified', 'target_content_independently_verified',
     'authentication_verified', 'model_inference_verified', 'original_operation_replayed'}
+_LOCAL_MANIFEST_KEYS = (_MANIFEST_KEYS - {'sender', 'message_id', 'message_fingerprint'}) | {
+    'source_kind', 'task_node', 'allocation_plan_sha256'}
 
 
 class ArtifactTransportError(ValueError):
@@ -182,13 +185,18 @@ def _check_value(raw, manifest):
 
 def _manifest(value, maximum):
     _positive(maximum)
-    _require(isinstance(value, dict) and set(value) == _MANIFEST_KEYS and value['format'] == FORMAT,
+    _require(isinstance(value, dict), 'artifact_manifest_invalid')
+    local = value.get('format') == LOCAL_FORMAT
+    _require((local and set(value) == _LOCAL_MANIFEST_KEYS and value['source_kind'] == 'local_allocation')
+             or (not local and set(value) == _MANIFEST_KEYS and value.get('format') == FORMAT),
              'artifact_manifest_invalid')
     detached = _decode(_json(value, 'artifact_manifest', 16384).encode('utf8'), 16384)
-    for key in ('authority', 'sender', 'message_id', 'task_id', 'operation_id', 'capability_id', 'provider', 'receipt_id'):
+    names = ('task_node',) if local else ('sender', 'message_id')
+    for key in ('authority', 'task_id', 'operation_id', 'capability_id', 'provider', 'receipt_id') + names:
         _name(detached[key])
-    for key in ('message_fingerprint', 'scope_sha256', 'workload_sha256', 'provider_context_sha256',
-                'settlement_sha256', 'artifact_sha256', 'body_sha256'):
+    hashes = ('allocation_plan_sha256',) if local else ('message_fingerprint',)
+    for key in ('scope_sha256', 'workload_sha256', 'provider_context_sha256',
+                'settlement_sha256', 'artifact_sha256', 'body_sha256') + hashes:
         _sha(detached[key])
     for key in ('task_epoch', 'capability_epoch'):
         _positive(detached[key], (1 << 63) - 1)
@@ -224,15 +232,15 @@ this producer. This library does not create a managed artifact-read grant.
         self.path, self.sha = str(owner_config_path), _sha(owner_config_sha256)
         self._config()
 
-    def _config(self):
+    def _owner_config(self, principal_field):
         raw = _owner_bytes(self.path, 65536, 'artifact_owner_config_unavailable')
         _require(hashlib.sha256(raw).hexdigest() == self.sha, 'artifact_owner_config_changed')
         config = _decode(raw, 65536)
-        _require(set(config) == {'schema', 'authority', 'sender', 'authority_db',
+        _require(set(config) == {'schema', 'authority', principal_field, 'authority_db',
                                 'max_artifact_bytes', 'bindings'} and config['schema'] == 1
                  and type(config['schema']) is int, 'artifact_owner_config_invalid')
         _name(config['authority'])
-        _name(config['sender'])
+        _name(config[principal_field])
         _private_path(config['authority_db'])
         _positive(config['max_artifact_bytes'])
         _require(isinstance(config['bindings'], dict) and 1 <= len(config['bindings']) <= 64,
@@ -246,6 +254,26 @@ this producer. This library does not create a managed artifact-read grant.
             _private_path(binding['provider_journal'])
             _sha(binding['owner_config_sha256'])
         return config
+
+    def _config(self):
+        return self._owner_config('sender')
+
+    @staticmethod
+    def _allocation_records(db, config, task, operation_id, capability_id):
+        allocation = _one(db, 'SELECT operation_id,task_id,task_epoch,task_node,actor,state,plan '
+            'FROM managed_allocations WHERE operation_id=? AND length(plan)<=131072', (operation_id,))
+        _require(allocation['task_id'] == task['id'] and allocation['state'] == 'completed' and
+                 allocation['actor'] == 'node:' + allocation['task_node'] and
+                 type(allocation['task_epoch']) is int and 1 <= allocation['task_epoch'] <= task['epoch'],
+                 'artifact_original_allocation_mismatch_or_unsettled')
+        plan = _decode(allocation['plan'])
+        selection = _selection(plan, capability_id)
+        dispatch = _one(db, 'SELECT * FROM managed_dispatch WHERE operation_id=? AND capability_id=? '
+            'AND length(settlement)<=8192', (operation_id, capability_id))
+        binding = config['bindings'][capability_id]
+        _require(dispatch['state'] == 'completed' and dispatch['provider'] == binding['provider'],
+                 'artifact_original_dispatch_mismatch_or_unsettled')
+        return allocation, plan, selection, dispatch, _decode(dispatch['settlement'], 8192)
 
     def _prepare(self, message_id, operation_id, capability_id):
         for identity in (message_id, operation_id, capability_id):
@@ -266,18 +294,16 @@ this producer. This library does not create a managed artifact-read grant.
             _require(context.get('authority') == 'local:' + config['authority'] and
                      origin.get('kind') == 'a2a' and origin.get('peer') == config['sender'] and
                      origin.get('message_id') == message_id, 'artifact_original_task_origin_mismatch')
-            allocation = _one(db, 'SELECT operation_id,task_id,task_epoch,task_node,actor,state,plan '
-                'FROM managed_allocations WHERE operation_id=? AND length(plan)<=131072', (operation_id,))
-            _require(allocation['task_id'] == task['id'] and allocation['state'] == 'completed' and
-                     allocation['actor'] == 'node:' + allocation['task_node'] and
-                     type(allocation['task_epoch']) is int and 1 <= allocation['task_epoch'] <= task['epoch'],
-                     'artifact_original_allocation_mismatch_or_unsettled')
-            selection = _selection(_decode(allocation['plan']), capability_id)
-            dispatch = _one(db, 'SELECT * FROM managed_dispatch WHERE operation_id=? AND capability_id=? '
-                'AND length(settlement)<=8192', (operation_id, capability_id))
-            _require(dispatch['state'] == 'completed' and dispatch['provider'] == binding['provider'],
-                     'artifact_original_dispatch_mismatch_or_unsettled')
-            settlement = _decode(dispatch['settlement'], 8192)
+            allocation, unused_plan, selection, dispatch, settlement = self._allocation_records(
+                db, config, task, operation_id, capability_id)
+        origin = {'format': FORMAT, 'sender': config['sender'], 'message_id': message_id,
+                  'message_fingerprint': message['fingerprint']}
+        return self._prepare_provider(config, binding, task, allocation, selection, dispatch, settlement, origin)
+
+    def _prepare_provider(self, config, binding, task, allocation, selection, dispatch, settlement, origin):
+        # The local and A2A producers share the same completed provider/settlement
+        # and full-file checks. Only their independently read origin differs.
+        operation_id, capability_id = allocation['operation_id'], dispatch['capability_id']
         with _readonly(binding['provider_journal'], ('provider_metadata', 'provider_executions')) as db:
             metadata = dict((row['key'], row['value']) for row in db.execute('SELECT * FROM provider_metadata LIMIT 4'))
             _require(metadata == {'schema': '1', 'provider': binding['provider'], 'authority': config['authority']},
@@ -322,8 +348,8 @@ this producer. This library does not create a managed artifact-read grant.
         manifest = dict(expected)
         for key in ('action', 'scope', 'workload'):
             manifest.pop(key)
-        manifest.update(format=FORMAT, authority=config['authority'], sender=config['sender'],
-            message_id=message_id, message_fingerprint=message['fingerprint'],
+        manifest.update(origin)
+        manifest.update(authority=config['authority'],
             invocation_nonce=execution['invocation_nonce'], scope_sha256=_digest(provider_context['scope']),
             workload_sha256=_digest(provider_context['workload']), provider_context_sha256=execution['fingerprint'],
             settlement_sha256=_digest(settlement), adapter=binding['adapter'], artifact_format=adapter.FORMAT,
@@ -355,6 +381,50 @@ this producer. This library does not create a managed artifact-read grant.
             chunk = raw[offset:offset + CHUNK_BYTES]
             _require(binary_stream.write(chunk) == len(chunk), 'artifact_private_stream_short_write')
         return manifest
+
+
+class LocalArtifactProducer(ArtifactProducer):
+    """Original local allocation, without fabricating an A2A message/receipt.
+
+    The fixed owner config uses ``node`` instead of ``sender``. The first
+    positional reference is the original task ID, not a remote message ID.
+    Reads permit a continued/expired task but require the original allocation
+    node, completed dispatch and settled provider to agree. No Store, live
+    lease, business callback or current capability registry is constructed.
+    """
+
+    def _config(self):
+        return self._owner_config('node')
+
+    def _prepare(self, task_id, operation_id, capability_id):
+        for identity in (task_id, operation_id, capability_id):
+            _name(identity)
+        config = self._config()
+        binding = config['bindings'].get(capability_id)
+        _require(binding is not None, 'artifact_capability_not_owner_bound')
+        with _readonly(config['authority_db'], ('tasks', 'managed_allocations', 'managed_dispatch')) as db:
+            task = _one(db, 'SELECT id,epoch,context,scope FROM tasks WHERE id=? AND length(context)<=65536',
+                        (task_id,))
+            context = _decode(task['context'], 65536)
+            # Ordinary owner tasks may have no authority field. A locally
+            # executed A2A task is also a local allocation, not a remote proxy.
+            _require(not context.get('remote_proxy') and
+                     context.get('authority', 'local:' + config['authority']) == 'local:' + config['authority'],
+                     'artifact_original_local_task_mismatch')
+            allocation, plan, selection, dispatch, settlement = self._allocation_records(
+                db, config, task, operation_id, capability_id)
+            _require(allocation['task_node'] == config['node'], 'artifact_original_local_node_mismatch')
+        origin = {'format': LOCAL_FORMAT, 'source_kind': 'local_allocation',
+                  'task_node': allocation['task_node'], 'allocation_plan_sha256': _digest(plan)}
+        return self._prepare_provider(config, binding, task, allocation, selection, dispatch, settlement, origin)
+
+    @_safe
+    def manifest(self, task_id, operation_id, capability_id):
+        return self._prepare(task_id, operation_id, capability_id)[0]
+
+    @_safe
+    def write_to(self, task_id, operation_id, capability_id, binary_stream):
+        return super().write_to(task_id, operation_id, capability_id, binary_stream)
 
 
 def _existing(parent, name, manifest):

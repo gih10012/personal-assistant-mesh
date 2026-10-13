@@ -7,6 +7,18 @@
 
 ## 2026-10-12 批准实施：四线与实际验收
 
+2026-10-13晚间续接：普通Chat独立扩展已真正暂加载，唯一Firefox-owned
+native host与同队列wake事件通过；长Unix socket路径的真实失败已保留，
+停扩展后同inode空队列迁移短路径成功，账号namespace未改。无新Chat
+消息/队列任务，保持disabled。已核实际直接父资料区/消息unit/真实
+assistant ID/渲染user anchor/positive complete；一次不发送的真实DOM
+draft填入后发送控件出现，随后原空编辑器恢复。结构化source与local
+full-artifact来源合同已补齐，Root2257标准CLI/129相关/44 DOM cases过。
+下一实际步骤：冻结新source、配置真实selector、原Leader按需一次Chat
+任务与完整结果消费；独立local reader安装/原Leader只读消费既有产物，
+核旧journal schema/inode/完整行保持。Cloud、公网OAuth、通信故障域及
+其它原待办不因本片接线/source成功而视为完成。
+
 2026-10-13当前进展覆盖下列历史快照：原Leader维护tool/同thread review
 已真正完成，Root同ID恢复cap3/pool2/binding2并验持续续租。新的统一
 Workspace调用/A2A项目专员续接/provider和完整147280B自动回收已实跑，

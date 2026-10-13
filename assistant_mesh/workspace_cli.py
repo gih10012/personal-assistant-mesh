@@ -56,8 +56,12 @@ class CommandArtifactReader:
     """
 
     def __init__(self, binding):
-        if not isinstance(binding, dict) or set(binding) != {
-                'manifest_argv', 'read_argv', 'timeout_seconds'}:
+        fields = {'manifest_argv', 'read_argv', 'timeout_seconds'}
+        if (not isinstance(binding, dict) or not fields <= set(binding)
+                or set(binding) - fields - {'reference_kind'}):
+            raise WorkspaceError('workspace_reader_config_invalid')
+        self.reference_kind = binding.get('reference_kind', 'a2a_message')
+        if self.reference_kind not in ('a2a_message', 'local_task'):
             raise WorkspaceError('workspace_reader_config_invalid')
         self.commands = {}
         for action in ('manifest', 'read'):
@@ -77,9 +81,10 @@ class CommandArtifactReader:
             raise WorkspaceError('workspace_reader_config_invalid')
         self.timeout = timeout
 
-    def _capture(self, action, message_id, operation_id, capability_id):
+    def _capture(self, action, reference_id, operation_id, capability_id):
+        reference_key = 'task_id' if self.reference_kind == 'local_task' else 'message_id'
         request = {key: _name(value, key) for key, value in (
-            ('message_id', message_id), ('operation_id', operation_id),
+            (reference_key, reference_id), ('operation_id', operation_id),
             ('capability_id', capability_id))}
         raw = json.dumps(request, sort_keys=True, separators=(',', ':'),
                          ensure_ascii=False, allow_nan=False).encode('utf8')
@@ -101,7 +106,7 @@ class CommandArtifactReader:
         return self._capture('read', message_id, operation_id, capability_id)
 
 
-def load_workspace(owner_file, task_id, epoch, client_factory=None):
+def load_workspace(owner_file, task_id, epoch, client_factory=None, read_only=False):
     """All identities/transports are private runtime input, not tool arguments."""
     _name(task_id, 'task_id')
     _epoch(epoch)
@@ -125,7 +130,7 @@ def load_workspace(owner_file, task_id, epoch, client_factory=None):
         client_factory = Client
     return MeshWorkspace(client_factory(client_config), str(journal), config['authority'],
                          config['node'], task_id, epoch,
-                         str(artifacts) if artifacts is not None else None, readers)
+                         str(artifacts) if artifacts is not None else None, readers, read_only=read_only)
 
 
 def execute(owner_file, task_id, epoch, action, operation_id=None, payload_file=None,
@@ -141,7 +146,7 @@ def execute(owner_file, task_id, epoch, action, operation_id=None, payload_file=
     payload = _private_json(payload_file) if payload_file is not None else {}
     if set(payload) - (_CALL_KEYS if action == 'call' else _DISCOVERY_KEYS):
         raise WorkspaceError('workspace_payload_fields_invalid')
-    workspace = load_workspace(owner_file, task_id, epoch, client_factory)
+    workspace = load_workspace(owner_file, task_id, epoch, client_factory, read_only=action in ('status', 'artifact'))
     if action == 'discover':
         return workspace.discover(**payload)
     if action == 'call':

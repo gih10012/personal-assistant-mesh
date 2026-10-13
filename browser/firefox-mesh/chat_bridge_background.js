@@ -82,11 +82,21 @@
       });
     }
     async report(job, value) {
+      if (!object(value) || value.conversation_url !== job.conversation_url || value.account_sha256 !== job.account_sha256) fail("observation_binding_conflict");
       await this.change((state) => {
         const prior = state.requests[job.request_id];
         if (!prior || !dom.equalBinding(prior.binding, job)) fail("original_request_conflict");
         if (prior.observation && prior.observation.state === "completed"
             && JSON.stringify(prior.observation) !== JSON.stringify(value)) fail("completed_result_changed");
+        const current = dom.observedIdentity(value), remembered = prior.observed_identity || dom.observedIdentity(prior.observation);
+        if (current && dom.identityConflict(remembered, current)) {
+          value = { ...value, state: "unknown", reason: "message_identity_conflict", text: "", terminal_visible: false };
+        }
+        if (remembered) prior.observed_identity = remembered;
+        else if (current) prior.observed_identity = current;
+        if (current && !dom.identityConflict(remembered, current) && remembered && !remembered.assistant_message_id && current.assistant_message_id) {
+          prior.observed_identity = { ...remembered, assistant_message_id: current.assistant_message_id };
+        }
         prior.observation = value;
       });
       return this.rpc("report", job, value);
@@ -104,18 +114,37 @@
           if (!prior) state.requests[job.request_id] = { binding: dom.binding(job), send_intent: false, observation: null };
           return JSON.parse(JSON.stringify(state.requests[job.request_id]));
         });
+        if (original.observation && (original.observation.conversation_url !== job.conversation_url
+            || original.observation.account_sha256 !== job.account_sha256)) fail("observation_binding_conflict");
+        const localIdentity = original.observed_identity || dom.observedIdentity(original.observation);
+        if (localIdentity) dom.validateObservedIdentity(localIdentity);
+        if (dom.identityConflict(localIdentity, job.observed_identity)) {
+          // Neither a lost host ACK nor a reload may rewrite either first
+          // checkpoint or grant another send. Report conflict, then observe.
+          await this.report(job, dom.observation(job, "unknown", "identity_checkpoint_conflict"));
+          observationOnly = true;
+        }
+        let identity = localIdentity || job.observed_identity;
+        if (identity && !identity.assistant_message_id && job.observed_identity && !dom.identityConflict(identity, job.observed_identity)) {
+          identity = { ...identity, assistant_message_id: job.observed_identity.assistant_message_id };
+        }
+        if (identity) { job = { ...job, observed_identity: identity }; observationOnly = true; }
         if (original.observation && original.observation.state === "completed") {
           await this.rpc("report", job, original.observation); return;
         }
         observationOnly = observationOnly || original.send_intent;
         tab = await this.ownedTab(job);
-        if (!original.send_intent && job.mode === "prepare") {
+        if (!observationOnly && !original.send_intent && job.mode === "prepare") {
           const ready = await this.content(tab, "preflight", job);
           if (!object(ready) || ready.ready !== true) {
             if (!object(ready) || !object(ready.observation)) fail("preflight_unavailable");
             const value = ready.observation;
             if (value.state === "not_sent") value.state = "blocked";
-            await this.report(job, value); return;
+            await this.report(job, value);
+            if (["partial", "unknown"].includes(value.state)) {
+              await this.content(tab, "watch", job); retained = true;
+            }
+            return;
           }
           // Durable BEFORE begin-send RPC and before any editor modification.
           await this.change((state) => { state.requests[job.request_id].send_intent = true; });

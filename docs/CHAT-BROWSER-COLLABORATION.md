@@ -7,6 +7,13 @@ button内部的精确姓名标签，绑定既有account SHA/queue namespace；
 不点击菜单、不从聊天昵称/邮箱推断、不把缺DOM当本人身份未确认。
 实测冲突/切号才重新核对。本人真实标签与映射不进入公开库。
 
+新版真实 DOM 的 profile button 是无姓名子元素的覆盖层。私有配置现可
+明确指定`label_scope: "direct_parent"`及已核`parent_selector`：只读该
+按钮的**直接 parent**内唯一可见姓名，parent本身须匹配已核selector、
+外于消息和composer，且内部唯一可见profile control就是原按钮。不会
+上溯任意ancestor、整页找同名文字或点击菜单。省略`label_scope`仍用
+原control内部合同；hidden/busy skeleton不替代正常profile证据。
+
 该optional私有合同包含`control_selector/label_selector/expected_label/
 account_sha256`；姓名selector只在normal control内求值，必须精确分离
 订阅/头像文本。只配置此分支时不需要虚构邮箱CSS；旧菜单配置兼容，
@@ -22,8 +29,12 @@ unknown不reset、不重grant。135相关隔离项及35 DOM cases通过；Root
 未enable send或发送Chat消息。以下“源码片未操作”指最初切片，最新
 只读GUI状态详见[交接](STATUS-2026-10-13.md)，不等于Chat已入网。
 
-本片是**源码与离线合同验收**，未安装扩展/native host、未操作本人账号、
-未创建或发送真实 Chat turn，不是 Chat 原生 HTTPS/OAuth MCP 已接通。
+最新适配源自本人许可的真实 DOM 只读采集，完整证据保存在仓库外；
+不公开姓名、会话、消息ID或聊天。Root已正常暂加载独立扩展并连通
+唯一NativeMessaging/wake，仍`enabled=false`、无任务和真实Chat消息。
+本次结构化适配仍是**源码与隔离合同验收**，不等实际推理往返，更
+不是Chat原生HTTPS/OAuth MCP已接通。以下最初源码片/安装说明保留
+其当时范围，不据历史或存活PID声称现在已运行Chat任务。
 目标是连续 Codex/Pi Leader 按需把一个明确子任务交给本人普通 Chat，
 无需等周期检查；Chat 回答经 DOM 观察持久回到 Mesh。原 Firefox 人工
 入口、stdio MCP 和 core server/Store 完全保留。Live/面板另属后续项目。
@@ -95,25 +106,68 @@ nonce；恢复同时匹配 tab ID、URL、owner/project/nonce。绝不按相同 
 扩展的结果消息不能改变原请求。
 
 完成须看到**唯一精确原用户消息**及对应唯一 assistant 消息，完整
-`innerText`、两个消息 ID、经本人审核的回复终态 affordance、无 stop
+`innerText`、明确消息引用、经本人审核的回复终态 affordance、无 stop
 或 streaming/busy，且第二次快照精确相同。中间新用户 turn、重复原
-消息、缺失 ID、只有文本稳定或未知 DOM 都不判完成。MutationObserver
+消息、缺失必要引用、只有文本稳定或未知 DOM 都不判完成。MutationObserver
 随 DOM 变化观察，不移动滚动条/焦点。120 秒只报告 partial/unknown，
 不会把超时的前半答复叫成功；partial 继续观察后续终态。
 
 不 trim 原文，不截取 Markdown 子块，不只保存 SHA/摘要。私有记录存
 完整捕获文字、UTF-8 bytes/SHA、conversation/account 绑定及原消息
-ID。超过 512 KiB 明确 partial/`visible_text_exceeds_capture_limit`，不
+引用。超过 512 KiB 明确 partial/`visible_text_exceeds_capture_limit`，不
 裁剪成成功；隐藏/虚拟化 DOM、未展开附件、图片、引用和隐藏推理不
 冒称全部捕获。已 completed 结果不可变，关闭浏览器/撤销启用后仍
 可按原 ID 完整读回；`execution_verified/account_verified=false`
 始终保留。这个结果不是 Chat 本身原生 MCP 调用的验收。
 
-## 最小安装交接（仍未执行）
+### 结构化消息合同与用户渲染锚
 
-1. Root 只读核对本人 Firefox **@163 主账号**及选定项目原会话 URL，
-   审核当前 DOM account/terminal/composer/message selectors；别用
-   聊天中的 email 文本或模型自报账号替代本人账户页核对。
+新版普通Chat没有旧`data-message-author-role/data-message-id`。optional
+trusted`dom.message_layout`改用已核完整消息unit及body，不伪造旧属性：
+
+```json
+{
+  "unit_selector": "[data-content-search-unit-key]",
+  "unit_key_attribute": "data-content-search-unit-key",
+  "user_role_suffix": ":user",
+  "assistant_role_suffix": ":assistant",
+  "user_text_selector": "[data-user-message-bubble=\"true\"]",
+  "assistant_text_selector": "[data-chatgpt-selection-message-id]",
+  "assistant_id_attribute": "data-chatgpt-selection-message-id",
+  "terminal_container_selector": "[data-talvt-turn-state]",
+  "terminal_state_attribute": "data-talvt-turn-state",
+  "terminal_state_value": "complete"
+}
+```
+
+这些是当前UI适配字段，不是公开稳定OpenAI API或所有版本保证。
+`completion_selector`仍由trusted配置绑定已核终态控件，在该terminal
+范围内求值；还须positive complete状态、范围内唯一完整assistant body、
+无stop/busy/streaming和两次完整匹配快照。第一次preflight看见已有终态
+只返回partial，进入observation-only watcher；不会为它领新send grant。
+composer可用已核`[role="textbox"][contenteditable="true"]`，仍仅一次
+fill，等待真实唯一send控件再复核，不加Enter或重发。
+
+用户unit key仅是**rendered anchor**，不是平台message ID，也不保证
+reload后稳定。它必须精确对应完整原prompt；观察另记
+`user_reference={kind:"rendered_user_anchor",reference:原unit key,
+prompt_sha256:完整原prompt SHA}`，`user_message_id`保持空。真正
+assistant ID仅取完整body的已核DOM属性。Host校验该引用与原持久
+prompt/内容/账号/会话的绑定，不能由enqueue/model参数替换身份。
+旧两平台ID合同继续兼容，没有结构化layout时不接受新锚合同。
+
+Host结果JSON中单独保存自己的`observed_identity` checkpoint；原SQLite
+schema、request hash、队列namespace不改。它经原binding的offer回到
+owned tab，扩展本地checkpoint在Host ACK丢失时也保留。前后锚或
+assistant身份冲突只能unknown/观察，不能复写首次身份或重grant。
+旧completed JSON字节保持；重复同原结果和完整读回继续兼容。DOM丢失
+不等原操作没发生，锚变化不靠“同名prompt”自动修复。
+
+## 最小安装交接（历史模板；临时加载不等常驻）
+
+1. Root沿用本人已明确确认的主账号资料绑定及选定项目原会话URL，
+   审核当前profile/terminal/composer/message selectors。无需再开
+   email菜单或问本人；仅实际切号/冲突才核对，聊天正文不算资料证据。
 2. 在仓库外本人 0700 目录复制 `chat_bridge_config.json.example`，填写
    实际原会话/主账号/owner namespace/selectors；config/request JSON
    0600、单链接普通文件，拒绝不安全 ancestor/symlink。示例默认
@@ -186,7 +240,12 @@ browser/extension 退出会终止 host，不把进程存活当后台 Chat 推理
 
 ### 当前真实 UI 的 selector 核验
 
-Root 可以在本人授权的正常 Firefox UI/页面 DevTools 核对公开 DOM；
+Root已在本人授权的正常Firefox UI/页面DevTools核对当前公开DOM；
+资料姓名在profile overlay的直接parent、composer在contenteditable
+textbox、用户/assistant使用结构化search units的私有证据均已保存。
+以下旧account-menu合同仅是向后兼容路线，已配置本人profile绑定时
+不应为了满足旧模板而再开邮箱菜单或问本人。后续UI变化仍按真实DOM
+修适配，不伪造旧属性。Root可以继续核对公开DOM，
 只观察选定项目/账号控件，不读 cookies、页面内部 store 或私有 API。
 只记录 selector、消息属性是否存在及脱敏核验结论，不能把完整邮箱/
 聊天或页面 dump 放进公开仓库。具体 gate：
@@ -204,11 +263,9 @@ Root 可以在本人授权的正常 Firefox UI/页面 DevTools 核对公开 DOM�
   从 closed→open 打开的菜单，确认所有打开菜单都关闭；用户已经
   打开的菜单、不对应控制关系或无法恢复均 blocked，不切换账号。
   `account_menu=null` 是模板默认值，没有猜测 profile 按钮/选中图标。
-- Root 当前只从正常 UI 观察到本人 @163 行右端 checkmark，其它账号
-  无 checkmark；尚未核对该页面的 DOM selector、selected 属性或
-  controls 关系。因此**还不是可安装的已验配置**。若当前 UI 只给
-  视觉 checkmark、没有本片支持的正向语义，报告具体安装 gate后再
-  按正常 DOM 适配，不用假的 radio 属性或此前账户页核验绕过检查。
+- 初版只观察到当前账号行checkmark而没有菜单DOM合同的快照保留；
+  它不覆盖本人之后的明确显示名确认与当前实际profile结构。不得再
+  把这个旧menu缺项误报为本人账号未确认，也不用假radio属性补它。
 - composer/send/stop selector 分别要命中当前编辑器/真实发送控件/
   生成中停止控件。不能选任意 role=button、页面文本“发送”，也不能
   将按钮暂无属性理解为平台已接受了原 turn。
@@ -221,14 +278,20 @@ Root 可以在本人授权的正常 Firefox UI/页面 DevTools 核对公开 DOM�
   根节点、ID 或多块回复结构变化时要重新适配，不能把固定旧选择器
   和 200ms 文本稳定外推成真实完整性证明。
 
-目前未访问真实 DOM，所以没有为当前主账号提供已验 selector 值。
-页面现有账号/模型/额度和平台可用性均仍以 Root 的真实核验为准。
+当前结构适配source已核真实readonly采集，具体本人配置/会话仍仅
+保存在私有目录；source与暂加载/实际模型消息各自验收，不能拼接成
+真实Chat闭环。页面账号/模型/额度和平台可用性以Root真实核验为准。
 
 ## 验收与当前证据
 
-当前 28 项 Python 合同测试通过，另 24 项 controlled DOM/port cases
-通过；原 Native Messaging、stdio MCP、CloudJobs 与本片合计 127 项
-近邻回归通过。`git diff --check` 通过；这些都不是已安装或真实账号证据。
+此前28项Python/24个DOM案例与127项近邻回归作为初版历史保留。
+新增profile/结构化引用的测试包括直接parent限制、完整文本、真实ID与
+rendered anchor区分、两快照、ACK丢失/身份冲突只观察及旧completed
+JSON字节保持。测试通过不等账号安装、真实任务或Chat原生MCP证据。
+本次39项queue合同、44个DOM/port案例及142项相关组/8.093s通过。
+已知冲突即时发布的新增fixture最初两次误把publish/cleanup异步回调
+当已同步结束；改为等真实publish及其返回回收，不放松运行断言或
+延长runtime期限。两次失败保留，不称完整源码CI或真实Chat已通过。
 
 离线命令：`python3 -m unittest tests.test_chat_bridge_queue`；其 Node
 子测试 `node browser/firefox-mesh/chat_bridge_test.js` 控制 DOM/native port。

@@ -1,0 +1,142 @@
+# 本 authority 的完整原产物
+
+`MeshWorkspace.artifact` 现有本地调用分支可使用 owner 安装的只读
+`LocalArtifactProducer`。这是源码及隔离真实 journal/command 验证，
+**不等于生产已安装或原 Leader 已消费**。既有远端 A2A 格式、消息
+映射、原指纹与读取接口不变；本地读取不能伪造一条远端消息来满足它。
+
+## 原始来源与只读边界
+
+本地 manifest 使用 `mesh-local-private-artifact-transfer/1`，明确
+`source_kind=local_allocation`。它保留 authority、原 task/node/epoch、
+完整 allocation plan SHA、operation/capability/epoch/provider/receipt/
+nonce、scope/workload/context/settlement SHA、原文件与正文的完整
+字节数和 SHA；**没有 sender/message_id/message_fingerprint**。
+
+Workspace 先核对原不可变 intent 和同一私有 journal 中的原
+TaskCapabilityCalls intent/creation epoch/hash/reserve attempt，再由固定
+reader 读原 authority/provider 账本。它不构造新的 TaskCapabilityCalls、
+Store 或 Provider，不发 RPC、不重新准入/续租、不调用 execute。
+当前 task、能力租约或 adapter 执行授权已过期，不会触发原业务重跑。
+
+旧薄入口 journal 没有 Workspace intent 时，artifact-only 兼容分支
+按原 task+operation 精确取原行，核原 call_identity、整个 intent
+canonical bytes/SHA 和原 epoch，返回 `workspace_intent_present=false`、
+`intent_source=task_capability_calls` 与原完整 intent SHA。不创建
+Workspace 表/行、不合成历史，不按 operation 模糊匹配其他 task。
+正常的新 `call` 才延迟初始化其真实 Workspace intent。
+CLI 的 `status`/`artifact` 显式使用 readonly existing-journal 绑定：
+不存在的文件/表拒绝，不创建/迁移/recovery。已有本地状态使用原
+TaskCapabilityCalls readback 校验和只读 inspect，不运行其写构造器。
+
+producer 使用 `mode=ro` 和 `query_only`，核原 completed allocation/
+dispatch、原节点 actor、原 epoch/plan、settled provider context/nonce、
+完整 canonical settlement 和已存在的原文件。unknown/unsettled、缺行、
+身份/范围/哈希变化均拒绝；只剩 SHA、摘要或 provider 自报不足。
+它允许实际在本 authority 执行的 A2A 来源 task，但仍只声明
+**local allocation**，不将 source task 的来源冒充新的远端委派。
+
+完整文件和 base64 正文都验证后，沿用原非覆盖 atomic spool：私有
+0700 目录、0600 文件、完整 EOF、大小/双 SHA、fsync、exclusive link、
+落盘后核文件和目录。已有相同文件幂等读取；冲突文件不覆盖。
+`artifact_content_verified=true` 仅证明实际完整字节和正文匹配，
+`execution_verified`、托管 read grant、内容真实性/账号/模型证明仍 false。
+
+## 最小增量安装
+
+先由 Root 审查并冻结独立 reader/Workspace 库，不替换正式 Worker、
+Store、provider 或旧 receiver，不覆盖旧 journal/config/artifacts。
+新 producer owner 配置在 worktree 外 0600/0700，精确 SHA 由安装者 pin：
+
+```json
+{
+  "schema": 1,
+  "authority": "ORIGINAL_AUTHORITY",
+  "node": "ORIGINAL_ALLOCATION_TASK_NODE",
+  "authority_db": "/PRIVATE/original-authority.sqlite",
+  "max_artifact_bytes": 25165824,
+  "bindings": {
+    "ORIGINAL_CAPABILITY": {
+      "adapter": "campus",
+      "provider": "node:ORIGINAL_PROVIDER",
+      "provider_journal": "/PRIVATE/original-provider.sqlite",
+      "owner_config_path": "/PRIVATE/original-adapter-owner.json",
+      "owner_config_sha256": "PIN_ORIGINAL_ADAPTER_CONFIG_SHA256"
+    }
+  }
+}
+```
+
+这些是占位符。`adapter` 只支持 `campus`/`https`。node 是**原 allocation
+actor 节点**，不凭当前任务迁移后的 node 替换。旧 epoch 产物必须保留
+对应原 adapter 配置；不能把新的 capability epoch 配置强套到旧文件。
+
+固定 local wrapper 从现有
+[三 ID reader 模板](../deploy/workspace-artifact-reader.py.example)改装：
+将 import/constructor 改为 `LocalArtifactProducer`，pin 新配置与冻结
+库，明确接收 `{task_id, operation_id, capability_id}` 三项安全编码。
+模式由已审查的程序决定，不是模型可注入参数。Workspace reader
+私有配置加 `reference_kind=local_task`；默认远端继续使用原
+`message_id` envelope，不借旧字段假造本地 provenance。程序 API 为：
+
+```python
+from assistant_mesh.artifact_transport import LocalArtifactProducer
+
+producer = LocalArtifactProducer(FIXED_CONFIG, EXTERNALLY_PINNED_CONFIG_SHA256)
+manifest = producer.manifest(ORIGINAL_TASK, ORIGINAL_OPERATION, ORIGINAL_CAPABILITY)
+producer.write_to(ORIGINAL_TASK, ORIGINAL_OPERATION, ORIGINAL_CAPABILITY,
+                  binary_stream=PRIVATE_BINARY_STREAM)
+```
+
+Workspace 私有 owner config 的 `artifact_readers[ORIGINAL_AUTHORITY]`
+安装这个 local 固定命令：manifest/read argv 只保留一个完整
+`{request_base64url}` 参数，argv executable、script/config/source 路径及
+最大 60 秒的 child 生命周期由安装者固定。可直接本机执行，也可走
+既有 owner 原生 transport；无需新增公网 API、token 或模型认证。
+固定命令必须真实只读，安全编码本身不证明任意程序无副作用。
+
+```json
+{
+  "reference_kind": "local_task",
+  "manifest_argv": ["/usr/bin/python3", "/PRIVATE/local-reader.py", "manifest", "{request_base64url}"],
+  "read_argv": ["/usr/bin/python3", "/PRIVATE/local-reader.py", "read", "{request_base64url}"],
+  "timeout_seconds": 30
+}
+```
+
+## 真实原文件消费验收
+
+在原来源确认已存在的 operation、task/node/epoch、provider settled
+record 和对应 adapter 配置，不重新 GET、不换 ID。安装后只执行：
+
+```sh
+python3 -m assistant_mesh.workspace_cli --config /PRIVATE/workspace-owner.json \
+  --task-id ORIGINAL_SOURCE_TASK --epoch CURRENT_SOURCE_TASK_EPOCH \
+  --operation-id ORIGINAL_OPERATION artifact
+```
+
+不要在旧 journal 塞入“以前由 Workspace 执行”的假 intent。若原调用
+仅来自旧薄入口而没有 Workspace intent，CLI 沿用该原 calls journal
+的只读兼容入口，保留真实来源；缺行不是重跑许可。
+新 runtime 消费任务与原 source task 是不同身份时必须明确记录两者，
+不能把 CLI 的原 source ID 冒充新任务的执行权限回执。
+
+由原 native Leader 实际调用 reader、读取目的端完整文件并解码/核 SHA，
+Root 再独立比较原文件/目的字节与 body，核原 provider row/count/nonce
+及旧历史/unknown 保持。这一步才证明生产消费；源码测试、路径、
+进程存活、manifest 或 SHA 本身都不能代替它。
+
+## 本次验证
+
+17 项新聚焦测试使用真实隔离 allocation/provider/TaskCapabilityCalls
+账本及合成 HTTP 回复，另有真正固定 Python child/现有 CLI 传完整
+153600 B 正文。覆盖无 A2A origin、无 RPC/constructor/再 GET、原始
+三个 journal 全部行不变、旧 epoch/过期执行配置读回、unknown保持、
+缺表不创建、intent/节点/任务/plan/scope/workload/正文错配、truncation、
+假远端字段、冲突不覆盖及重开幂等、legacy原完整行/schema/inode/文件
+保持、明确 task_id 固定命令、readonly缺库/缺表不创建及新call延迟初始化。
+聚合验证结果另在交接记录，不以计数替代生产 local 闭环。
+
+本 Python/私有文件参考实现不强迫 Windows、手机或临时云环境采用
+相同安装。其它平台可以实现相同原身份/full-bytes 合同；Mesh 不阻断
+节点任何原生 Shell、文件、网络、浏览器或 MCP。

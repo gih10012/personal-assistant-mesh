@@ -9,11 +9,13 @@ import functools
 import hashlib
 import io
 import json
+import os
 import sqlite3
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 
-from .artifact_transport import MAX_ARTIFACT_BYTES, _digest as artifact_digest, fetch_artifact
+from .artifact_transport import LOCAL_FORMAT, MAX_ARTIFACT_BYTES, _digest as artifact_digest, fetch_artifact
 from .capability_call import TaskCapabilityCalls, _journal_path
 from .egress_adapter import _root
 from .networking import digest
@@ -42,31 +44,88 @@ def _check(condition, code):
         raise WorkspaceError(code)
 
 
+def _existing_journal(path):
+    path = Path(path)
+    _check(path.is_absolute() and '..' not in path.parts, 'workspace_existing_private_journal_required')
+    _root(path.parent)
+    info = path.lstat()
+    _check(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+           and stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1,
+           'workspace_existing_private_journal_required')
+    return path
+
+
+class _LocalCallReadback(TaskCapabilityCalls):
+    """Use original readback validators/RPCs without running the write constructor."""
+
+    def __init__(self, workspace):
+        self.client, self.path = workspace.client, _existing_journal(workspace.path)
+        self.authority, self.node = workspace.authority, workspace.node
+        self.task_id, self.task_epoch = workspace.task_id, workspace.epoch
+
+    @contextmanager
+    def _db(self):
+        db = sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True, timeout=5, isolation_level=None)
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute('PRAGMA query_only=ON')
+            yield db
+        finally:
+            db.close()
+
+    def call(self, *args, **kwargs):
+        raise WorkspaceError('workspace_read_only')
+
+
 class MeshWorkspace:
     """Owner-installed reference adapter; Linux private storage, neutral wire.
 
     Readers are trusted, bounded, read-only objects installed by the owner,
-    keyed by issuer. ``manifest(message_id, operation_id, capability_id)`` and
-    ``read(...)`` return independently authenticated metadata and full bytes.
+    keyed by issuer. ``manifest(reference_id, operation_id, capability_id)`` and
+    ``read(...)`` return owner-authenticated metadata and full bytes. The first
+    reference is the original A2A message ID for a foreign issuer, or the original
+    task ID for this authority's local-allocation reader. Local metadata never
+    borrows a remote message/fingerprint to satisfy the transport contract.
     They must not issue the original HTTP/model/tool request. Never accept a
     model-supplied URL, file path, executable, manifest or reader here.
     """
 
     @_safe
     def __init__(self, client, journal_path, authority, node, task_id, epoch,
-                 artifact_dir=None, artifact_readers=None):
+                 artifact_dir=None, artifact_readers=None, read_only=False):
         _check(callable(getattr(client, 'request', None)), 'workspace_client_required')
         self.client = client
         self.authority = _name(authority, 'authority')
         self.node = _name(node, 'node')
         self.task_id = _name(task_id, 'task_id')
         self.epoch = _epoch(epoch)
-        self.path = _journal_path(journal_path)
+        _check(type(read_only) is bool, 'workspace_read_only_invalid')
+        self.read_only = read_only
+        self.path = _existing_journal(journal_path) if read_only else _journal_path(journal_path)
         self.artifact_dir = _root(artifact_dir) if artifact_dir is not None else None
         self.readers = dict(artifact_readers or {})
         _check(all(isinstance(key, str) and callable(getattr(reader, 'manifest', None))
                    and callable(getattr(reader, 'read', None))
                    for key, reader in self.readers.items()), 'workspace_reader_invalid')
+        with self._db() as db:
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self._legacy_call_journal = not tables & {'workspace_identity', 'workspace_calls'} and {
+                'call_identity', 'capability_calls'} <= tables
+            if self._legacy_call_journal:
+                self._local_journal_identity(db)
+            if self.read_only and not self._legacy_call_journal:
+                _check({'workspace_identity', 'workspace_calls'} <= tables, 'workspace_original_journal_missing')
+                identity = db.execute('SELECT authority,node FROM workspace_identity').fetchmany(2)
+                _check(len(identity) == 1 and tuple(identity[0]) == (self.authority, self.node),
+                       'workspace_identity_mismatch')
+        if not self.read_only and not self._legacy_call_journal:
+            self._initialize_workspace()
+
+    def _initialize_workspace(self):
+        # A pre-existing thin-call journal needs no new tables/history merely to
+        # read its original local artifact. New Workspace writes initialize only
+        # when call() durably creates a genuine Workspace intent.
+        _check(not self.read_only, 'workspace_read_only')
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             db.execute('CREATE TABLE IF NOT EXISTS workspace_identity(authority TEXT,node TEXT)')
@@ -84,13 +143,15 @@ class MeshWorkspace:
                 _check(len(identity) == 1 and tuple(identity[0]) == (self.authority, self.node),
                        'workspace_identity_mismatch')
             db.commit()
+        self._legacy_call_journal = False
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(str(self.path), timeout=5, isolation_level=None)
+        path = self.path.as_uri() + '?mode=ro' if self.read_only else str(self.path)
+        db = sqlite3.connect(path, uri=self.read_only, timeout=5, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
-            db.execute('PRAGMA synchronous=FULL')
+            db.execute('PRAGMA query_only=ON' if self.read_only else 'PRAGMA synchronous=FULL')
             yield db
         finally:
             if db.in_transaction:
@@ -99,6 +160,7 @@ class MeshWorkspace:
 
     def _row(self, operation_id):
         _name(operation_id, 'operation_id')
+        _check(not self._legacy_call_journal, 'workspace_call_not_found')
         with self._db() as db:
             row = db.execute('SELECT * FROM workspace_calls WHERE operation_id=?',
                              (operation_id,)).fetchone()
@@ -109,8 +171,11 @@ class MeshWorkspace:
         return dict(row)
 
     def _remember(self, request):
+        _check(not self.read_only, 'workspace_read_only')
         encoded = json.dumps(request, sort_keys=True, separators=(',', ':'), allow_nan=False)
         fingerprint = hashlib.sha256(encoded.encode('utf8')).hexdigest()
+        if self._legacy_call_journal:
+            self._initialize_workspace()
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM workspace_calls WHERE operation_id=?',
@@ -279,6 +344,7 @@ class MeshWorkspace:
     @_safe
     def call(self, issuer, operation_id, decision_id, selection, candidates, rationale,
              lease_seconds=60, project_id='general', agent_id='capability-specialist'):
+        _check(not self.read_only, 'workspace_read_only')
         _name(issuer, 'issuer')
         _name(project_id, 'project_id')
         _name(agent_id, 'agent_id')
@@ -290,6 +356,19 @@ class MeshWorkspace:
         request = {'issuer': issuer, 'operation_id': operation_id, 'decision_id': decision_id,
                    'local_call': local, 'project_id': project_id, 'agent_id': agent_id}
         request['wire_message'] = self._render_message(request) if issuer != self.authority else None
+        if issuer == self.authority:
+            with self._db() as db:
+                has_thin_calls = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                                            "AND name='capability_calls'").fetchone()
+                old_local = has_thin_calls and db.execute('SELECT 1 FROM capability_calls WHERE operation_id=?',
+                                                          (operation_id,)).fetchone()
+                old_workspace = not self._legacy_call_journal and db.execute(
+                    'SELECT 1 FROM workspace_calls WHERE operation_id=?', (operation_id,)).fetchone()
+            if old_local and not old_workspace:
+                # Preserve the actual thin intent even when an owner explicitly
+                # calls it again: its own validator reconciles original IDs and
+                # epochs. Do not retroactively stamp a new Workspace history.
+                return self._local().call(**local)
         row = self._remember(request)
         if issuer == self.authority:
             if row['epoch'] != self.epoch:
@@ -338,10 +417,18 @@ class MeshWorkspace:
 
     @_safe
     def status(self, operation_id):
-        row = self._row(operation_id)
+        try:
+            row = self._row(operation_id)
+        except WorkspaceError as error:
+            if str(error) != 'workspace_call_not_found':
+                raise
+            original, unused_request, unused_stages = self._existing_local_call(operation_id)
+            return dict(_LocalCallReadback(self).result(operation_id), workspace_intent_present=False,
+                        intent_source='task_capability_calls', local_call_request_sha256=original['fingerprint'])
         if json.loads(row['request'])['issuer'] == self.authority:
             try:
-                return self._local().result(operation_id)
+                self._local_artifact_binding(row)
+                return _LocalCallReadback(self).result(operation_id)
             except Exception:
                 return self._report(row, 'unresolved', diagnostic='original_local_call_unobserved_no_replay')
         try:
@@ -352,6 +439,56 @@ class MeshWorkspace:
         except Exception:
             return self._report(row, 'unresolved', diagnostic='original_status_unavailable_no_replay')
 
+    def _local_journal_identity(self, db):
+        identities = db.execute('SELECT authority,node FROM call_identity').fetchmany(2)
+        _check(len(identities) == 1 and tuple(identities[0]) == (self.authority, self.node),
+               'workspace_original_local_journal_identity_changed')
+
+    def _existing_local_call(self, operation_id):
+        """Strict original task+operation lookup, not an op-only adoption/write."""
+        _name(operation_id, 'operation_id')
+        with self._db() as db:
+            db.execute('BEGIN')
+            self._local_journal_identity(db)
+            entries = db.execute('SELECT * FROM capability_calls WHERE operation_id=? AND task_id=? '
+                'AND length(request)<=196608', (operation_id, self.task_id)).fetchmany(2)
+        _check(len(entries) == 1, 'workspace_original_local_call_missing')
+        original = dict(entries[0])
+        request = json.loads(original['request'])
+        _check(isinstance(request, dict) and set(request) == {'operation_id', 'decision', 'plan', 'lease_seconds'}
+               and isinstance(request['plan'], dict) and isinstance(request['plan'].get('selections'), list)
+               and len(request['plan']['selections']) == 1, 'workspace_original_local_call_changed')
+        decision = request['decision']
+        expected = TaskCapabilityCalls._request(request['operation_id'], decision['decision_id'],
+            request['plan']['selections'][0], decision['candidates'], decision['rationale'], request['lease_seconds'])
+        encoded = json.dumps(expected, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False)
+        _check(original['operation_id'] == expected['operation_id'] == operation_id
+               and original['task_id'] == self.task_id and type(original['task_epoch']) is int
+               and original['task_epoch'] == _epoch(original['task_epoch'])
+               and original['decision_id'] == expected['decision']['decision_id']
+               and original['request'] == encoded
+               and original['fingerprint'] == hashlib.sha256(encoded.encode('utf8')).hexdigest(),
+               'workspace_original_local_call_changed')
+        stages = {name: original[name] for name in ('propose', 'reserve', 'link')}
+        _check(all(value in ('ready', 'attempted', 'confirmed') for value in stages.values())
+               and stages['reserve'] != 'ready', 'workspace_original_local_reserve_not_attempted')
+        return original, expected, stages
+
+    def _local_artifact_binding(self, row):
+        """Read an existing local-call intent without constructing/mutating it.
+
+        A Workspace intent alone may precede the first local call. Never create
+        a TaskCapabilityCalls row, repair stages or issue RPCs while reading an
+        artifact. The original normalized plan and epoch must agree in both
+        private journals; completed provider evidence comes from the reader.
+        """
+        local = json.loads(row['request'])['local_call']
+        expected = TaskCapabilityCalls._request(**local)
+        original, original_request, stages = self._existing_local_call(row['operation_id'])
+        _check(original['task_epoch'] == row['epoch'] and original_request == expected,
+               'workspace_original_local_call_changed')
+        return expected['plan'], stages, original['fingerprint']
+
     @_safe
     def artifact(self, operation_id):
         """Automatically retrieve only original bytes through an installed reader.
@@ -359,22 +496,66 @@ class MeshWorkspace:
         Byte verification is not independent attestation of execution/accuracy.
         No reader/expired lease/status failure must never trigger a new call.
         """
-        row = self._row(operation_id)
-        request = json.loads(row['request'])
-        report = self._report(row, 'artifact_unavailable')
-        reader = self.readers.get(request['issuer'])
-        if reader is None or self.artifact_dir is None or request['issuer'] == self.authority:
-            return dict(report, diagnostics=['owner_original_artifact_reader_not_configured'])
-        selection = request['local_call']['selection']
-        identity = self._remote_identity(row)
         try:
-            _check(row['delegate'] != 'ready', 'workspace_original_delegate_not_attempted')
-            manifest = reader.manifest(identity['message_id'], operation_id, selection['capability_id'])
+            row = self._row(operation_id)
+        except WorkspaceError as error:
+            if str(error) != 'workspace_call_not_found':
+                raise
+            # Artifact-only compatibility: retain the actual thin-call intent
+            # and its complete hash. Do not synthesize/persist Workspace intent
+            # or remote message history for a previously completed operation.
+            original, original_request, stages = self._existing_local_call(operation_id)
+            row = None
+            request = {'issuer': self.authority}
+            selection = original_request['plan']['selections'][0]
+            report = {'format': 'mesh-workspace-call/1', 'authority': self.authority,
+                'task_id': original['task_id'], 'original_epoch': original['task_epoch'],
+                'current_epoch': self.epoch, 'operation_id': original['operation_id'],
+                'decision_id': original['decision_id'], 'issuer': self.authority,
+                'request_sha256': original['fingerprint'], 'phase': 'artifact_unavailable',
+                'stages': stages, 'remote': None, 'routing': None, 'diagnostics': [],
+                'workspace_intent_present': False, 'intent_source': 'task_capability_calls',
+                'local_call_request_sha256': original['fingerprint'],
+                'artifact_source_kind': 'local_allocation', 'automatic_invocation_replay': False,
+                'retry_with_new_id': False, 'native_tools_intercepted': False, 'execution_verified': False}
+        else:
+            request = json.loads(row['request'])
+            selection = request['local_call']['selection']
+            report = dict(self._report(row, 'artifact_unavailable'), workspace_intent_present=True,
+                          intent_source='workspace')
+        reader = self.readers.get(request['issuer'])
+        if reader is None or self.artifact_dir is None:
+            return dict(report, diagnostics=['owner_original_artifact_reader_not_configured'])
+        try:
+            local = request['issuer'] == self.authority
+            if local:
+                if row is None:
+                    plan = original_request['plan']
+                else:
+                    plan, stages, fingerprint = self._local_artifact_binding(row)
+                    report = dict(report, local_call_request_sha256=fingerprint)
+                reference = self.task_id
+                report = dict(report, stages=stages, artifact_source_kind='local_allocation')
+                manifest = reader.manifest(reference, operation_id, selection['capability_id'])
+                _check(isinstance(manifest, dict) and manifest.get('format') == LOCAL_FORMAT
+                       and manifest.get('source_kind') == 'local_allocation'
+                       and manifest.get('task_id') == self.task_id
+                       and manifest.get('task_node') == self.node
+                       and type(manifest.get('task_epoch')) is int
+                       and manifest['task_epoch'] == report['original_epoch']
+                       and manifest.get('allocation_plan_sha256') == artifact_digest(plan),
+                       'workspace_local_artifact_binding_invalid')
+            else:
+                identity = self._remote_identity(row)
+                reference = identity['message_id']
+                _check(row['delegate'] != 'ready', 'workspace_original_delegate_not_attempted')
+                manifest = reader.manifest(reference, operation_id, selection['capability_id'])
+                _check(isinstance(manifest, dict) and manifest.get('sender') == self.authority
+                       and manifest.get('message_id') == reference
+                       and manifest.get('message_fingerprint') == digest(self._remote_message(row))
+                       and manifest.get('task_id') == digest([request['issuer'], self.authority, reference]),
+                       'workspace_artifact_origin_invalid')
             _check(isinstance(manifest, dict) and manifest.get('authority') == request['issuer']
-                   and manifest.get('sender') == self.authority
-                   and manifest.get('message_id') == identity['message_id']
-                   and manifest.get('message_fingerprint') == digest(self._remote_message(row))
-                   and manifest.get('task_id') == digest([request['issuer'], self.authority, identity['message_id']])
                    and manifest.get('operation_id') == operation_id
                    and manifest.get('capability_id') == selection['capability_id']
                    and type(manifest.get('capability_epoch')) is int
@@ -382,7 +563,7 @@ class MeshWorkspace:
                    and manifest.get('scope_sha256') == artifact_digest(selection['scope'])
                    and manifest.get('workload_sha256') == artifact_digest(selection['workload']),
                    'workspace_artifact_binding_invalid')
-            raw = reader.read(identity['message_id'], operation_id, selection['capability_id'])
+            raw = reader.read(reference, operation_id, selection['capability_id'])
             _check(isinstance(raw, bytes) and len(raw) <= MAX_ARTIFACT_BYTES,
                    'workspace_artifact_body_invalid')
             output = self.artifact_dir / (digest([self.authority, self.task_id, operation_id]) + '.json')
