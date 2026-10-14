@@ -86,6 +86,20 @@ class FrontierRefreshTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'context_conflict'):
             self.runtime(changed).status()
 
+    def test_completed_cached_request_checks_original_receipt_hash_without_refetch(self):
+        runtime = self.runtime()
+        first = runtime.refresh('original-check-v1')
+        changed = dict(first, request_id='replacement-check', next_due_at=first['next_due_at'] + DAY)
+        with runtime.db(write=True) as db:
+            db.execute('UPDATE runs SET receipt=? WHERE id=?', (json.dumps(changed), 'original-check-v1'))
+        for read in (runtime.receipt, runtime.refresh):
+            with self.subTest(reader=read.__name__), self.assertRaisesRegex(ValueError, 'receipt_invalid'):
+                read('original-check-v1')
+        self.assertEqual(4, len(self.calls))
+        with runtime.db() as db:
+            saved = db.execute('SELECT receipt FROM runs WHERE id=?', ('original-check-v1',)).fetchone()[0]
+        self.assertEqual(changed, json.loads(saved))  # No repair, new ID or overwritten evidence.
+
     def test_run_due_stable_schedule_and_only_due_fetches(self):
         first = self.runtime().run_due()
         self.assertEqual('mesh-frontier-test:initial', first['request_id'])

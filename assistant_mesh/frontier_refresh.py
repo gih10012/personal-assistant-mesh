@@ -463,7 +463,7 @@ class FrontierRefresh:
             if row and row['input_sha'] != config_sha:
                 raise ValueError('frontier_request_content_conflict')
             if row and row['status'] == 'completed':
-                return json.loads(row['receipt'], object_pairs_hook=_unique_object)
+                return self.receipt(request_id)
             db.execute('INSERT OR IGNORE INTO runs VALUES(?,?,?,\'collecting\',NULL,NULL,NULL)',
                        (request_id, config_sha, now))
             db.execute('UPDATE runs SET status=\'collecting\',retry_at=NULL WHERE id=?', (request_id,))
