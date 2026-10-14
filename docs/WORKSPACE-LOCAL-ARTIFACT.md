@@ -42,6 +42,94 @@ dispatch、原节点 actor、原 epoch/plan、settled provider context/nonce、
 `artifact_content_verified=true` 仅证明实际完整字节和正文匹配，
 `execution_verified`、托管 read grant、内容真实性/账号/模型证明仍 false。
 
+## 固定只读工具与独立候选
+
+2026-10-14 新增 [local_artifact_tool](../assistant_mesh/local_artifact_tool.py)，
+不再要求安装者逐次手改 wrapper。它不读/复制 worker 认证，不构造
+Client、Store 或 provider，不发 RPC。私有
+[source recipe](../deploy/local-artifact-source.json.example)仅引用原文件：
+
+```json
+{
+  "format": "mesh-local-artifact-source/1",
+  "owner_config_path": "/PRIVATE/original-producer-owner.json",
+  "owner_config_sha256": "PINNED_ORIGINAL_OWNER_CONFIG_SHA256",
+  "journal_path": "/PRIVATE/original-calls.sqlite"
+}
+```
+
+recipe 是 0600/0700、worktree 外的安装输入，其完整 SHA 由安装者 pin。
+原配置是 local 或旧 A2A producer 均可：authority/原 adapter/provider/DB
+绑定沿用；实际 local node 从原 `call_identity` 精确提取，再与原 intent、
+allocation 和 settled provider 核对。不改原配置的 sender，不伪造
+message_id，不补写 Workspace 历史，也不复制配置内的认证。
+
+既有 source owner 文件沿用原 ArtifactProducer 的 owned 0600/0700、
+single-link、精确 SHA 合同。某个祖先是 dotfiles Git 根不要求迁移/改写
+原私有配置；新的 recipe/candidate 仍须 worktree 外。真实首次 stage
+曾因把 Workspace 的 ancestor-worktree gate 加到既有引用而拒绝，
+该失败保留；改为复用原 producer 合同，没有放宽原 Workspace CLI 或
+宿主权限。
+
+由 Root 在新 owned 0700 空目录生成独立候选：
+
+```sh
+python3 -m assistant_mesh.local_artifact_tool stage \
+  --spec /PRIVATE/source.json --spec-sha256 PINNED_RECIPE_SHA256 \
+  --candidate-dir /PRIVATE/new-candidate --python-executable /usr/bin/python3
+```
+
+候选包含 source-only `local-artifact.pyz`、`reader-binding.json` 和最后发布
+的 `READY.json`，另有固定私有 `artifacts/` 空缓存。逐个非覆盖原子发布/
+fsync，完整 source 文件 SHA、bundle/binding SHA 保留；相同字节可重读，
+冲突文件永不覆盖。中途失败可能留下完整候选文件，保留它们并对账，
+不用新 operation/重执行业务修复。生成候选不是安装、注册或运行服务。
+
+pyz 仅包含库源码和许可证，不包含原 owner 配置/DB/认证/原文件正文。
+其入口固定 recipe 路径/SHA/cache，reader binding 明确 `local_task`，
+child 使用安装者选定的 Python `-I`；不改变宿主 HOME/CODEX_HOME、
+Shell、网络、MCP 或模型设置。目标有不同环境时由该节点 agent 适配
+同一三 ID/full-bytes 合同，本 Python/POSIX 包不是手机/Windows 的要求。
+绑定是 node-local 的绝对路径，不是可任意移动的安装包。Root 若应用
+到另一个稳定目录，先在该目录用同一原来源生成新候选并核对应 SHA，
+不要直接移动旧包、覆盖旧 reader 或恢复旧 DB。
+
+### 只读预检与明确消费
+
+```sh
+python3 -I /PRIVATE/new-candidate/local-artifact.pyz inspect \
+  --task-id ORIGINAL_SOURCE_TASK --operation-id ORIGINAL_OPERATION \
+  --capability-id ORIGINAL_CAPABILITY
+
+# 只有 Root 审查/应用后，由原 native Leader 的明确只读任务执行：
+python3 -I /PRIVATE/new-candidate/local-artifact.pyz consume \
+  --task-id ORIGINAL_SOURCE_TASK --operation-id ORIGINAL_OPERATION \
+  --capability-id ORIGINAL_CAPABILITY
+```
+
+`inspect` 核实际原文件的完整 raw bytes/base64 正文/双 SHA，不落正文或
+新 journal。它输出原完整 intent SHA/row SHA、整个 calls/provider journal
+的 schema、所有表完整行指纹及文件 identity 的前后观察，不以 COUNT
+替代。范围明确不包含并行工作的全 authority/native history，不能用
+全系统静止要求阻断无关任务。64 MiB 的逐 journal 指纹预算只适用于
+这个参考工具，超界要显式适配，不能拿不完整输出称全行一致。
+
+`consume` 只原子回收已验证原文件到固定缓存，保留原 task/op/cap/epoch
+及 `workspace_intent_present` 真值；没有重新准入、预留、续租、GET 或
+结算。不同 runtime 消费任务与原 source task 要分别记录。源码、工具
+自检和 Source 行不变不等于原 Leader 已消费；仍需实际 native 调用/
+完整 read/decode、Root 独立源/目的字节与原状态核验。
+
+2026-10-14 已生成临时私有候选，并对真实原校园产物运行了 `inspect`：
+完整147280B/正文109356B双 SHA核验；原 calls/provider journal 的 schema、
+文件 identity 和完整行前后相同，旧配置/reader保持；cache为空，没有
+真实 `consume`、生产应用/注册或新 native model。新7项隔离测试含真正
+fixed zip child/CommandArtifactReader与完整153600B正文传输、old A2A
+配置原字节保持、全行而非COUNT变化、unknown/pin/路径错配不消费、
+候选幂等/冲突不覆盖及 binary error 不混入 JSON。
+聚合相关104项/2.489s/0skip通过；首轮新fixture的1failure/2errors源于
+producer wrapper缺少read接口，真实stage的已知拒绝也保留，不改为成功。
+
 ## 最小增量安装
 
 先由 Root 审查并冻结独立 reader/Workspace 库，不替换正式 Worker、
@@ -73,6 +161,7 @@ actor 节点**，不凭当前任务迁移后的 node 替换。旧 epoch 产物�
 
 固定 local wrapper 从现有
 [三 ID reader 模板](../deploy/workspace-artifact-reader.py.example)改装：
+这是保留的低层接口示例；日常优先使用上面的生成工具，不手工改装。
 将 import/constructor 改为 `LocalArtifactProducer`，pin 新配置与冻结
 库，明确接收 `{task_id, operation_id, capability_id}` 三项安全编码。
 模式由已审查的程序决定，不是模型可注入参数。Workspace reader
