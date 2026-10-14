@@ -22,6 +22,9 @@ from collections import namedtuple
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .cloud_ui import RECEIPT_SOURCE as CURRENT_UI_SOURCE
+from .cloud_ui import STATUSES as CURRENT_UI_STATUSES
+from .cloud_ui import validate_receipt as validate_current_ui_receipt
 from .store import Conflict
 
 
@@ -167,14 +170,18 @@ def run_cli(argv, *, input, cwd, env, timeout, max_bytes):
 class CloudJobs:
     """Trusted local library, not an authentication endpoint.
 
-    `environments` is owner configuration {actual_env_id: [explicit_branches]}.
+    `environments` is owner configuration {verified_env_binding: [branches]}.
+    CLI bindings must be actual provider environment IDs. Current-UI-only
+    bindings may be owner-pinned references to independently verified published
+    setups; list them in ui_environments, never pass their display label to exec.
     Runtime binding locks the executable/home selection across journal reopen.
     Same-UID file writers and account changes inside that home are outside this
     boundary; Root must verify owner identity before effectful integration.
     """
     def __init__(self, state_dir, owner_binding, environments, *, executable,
                  codex_home=None, runner=run_cli, clock=time.time, timeout=60,
-                 max_bytes=4 * 1024 * 1024):
+                 max_bytes=4 * 1024 * 1024, ui_receipt_verifier=None,
+                 ui_environments=()):
         self.owner = _text(owner_binding, 'owner_binding')
         if (not isinstance(environments, dict) or not environments
                 or type(timeout) not in (int, float) or not 0 < timeout <= 300
@@ -189,6 +196,11 @@ class CloudJobs:
                    or '..' in branch or branch.endswith(('/', '.')) for branch in branches):
                 raise ValueError('invalid_cloud_branch_configuration')
             self.environments[env_id] = frozenset(branches)
+        if (not isinstance(ui_environments, (list, tuple, set, frozenset))
+                or any(not isinstance(item, str) or item not in self.environments
+                       for item in ui_environments)):
+            raise ValueError('invalid_cloud_ui_environment_configuration')
+        self.ui_environments = frozenset(ui_environments)
         self.executable = _text(executable, 'executable', 4096)
         if not Path(self.executable).is_absolute():
             raise ValueError('invalid_cloud_executable')
@@ -212,6 +224,9 @@ class CloudJobs:
         self.runs = _private_dir(self.path / 'runs', create=True)
         self.artifacts = _private_dir(self.path / 'artifacts', create=True)
         self.runner, self.clock, self.timeout, self.max_bytes = runner, clock, timeout, max_bytes
+        if ui_receipt_verifier is not None and not callable(ui_receipt_verifier):
+            raise ValueError('cloud_ui_verifier_callable_required')
+        self.ui_receipt_verifier = ui_receipt_verifier
         with self._transaction(initialize=True) as db:
             db.execute('CREATE TABLE IF NOT EXISTS cloud_job_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)')
             db.execute('''CREATE TABLE IF NOT EXISTS cloud_jobs(
@@ -224,10 +239,19 @@ class CloudJobs:
                 job_id TEXT NOT NULL,attempt INTEGER NOT NULL,sha256 TEXT NOT NULL,
                 bytes INTEGER NOT NULL,filename TEXT NOT NULL,created REAL NOT NULL,
                 PRIMARY KEY(job_id,attempt,sha256))''')
+            db.execute('''CREATE TABLE IF NOT EXISTS cloud_job_ui_receipts(
+                job_id TEXT PRIMARY KEY,body TEXT NOT NULL,fingerprint TEXT NOT NULL,
+                created REAL NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS cloud_job_ui_observations(
+                job_id TEXT NOT NULL,observed REAL NOT NULL,body TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,provider_status TEXT NOT NULL,
+                PRIMARY KEY(job_id,observed))''')
             recorded = dict(db.execute('SELECT key,value FROM cloud_job_metadata'))
             if not recorded:
                 if (db.execute('SELECT 1 FROM cloud_jobs LIMIT 1').fetchone()
-                        or db.execute('SELECT 1 FROM cloud_job_artifacts LIMIT 1').fetchone()):
+                        or db.execute('SELECT 1 FROM cloud_job_artifacts LIMIT 1').fetchone()
+                        or db.execute('SELECT 1 FROM cloud_job_ui_receipts LIMIT 1').fetchone()
+                        or db.execute('SELECT 1 FROM cloud_job_ui_observations LIMIT 1').fetchone()):
                     raise Conflict('cloud_job_namespace_missing')
                 for key, value in self.namespace.items():
                     db.execute('INSERT INTO cloud_job_metadata VALUES(?,?)', (key, value))
@@ -297,7 +321,27 @@ class CloudJobs:
                      and row['attempted'] in (0, 1)
                      and ((row['state'] == 'intent') == (row['attempted'] == 0)))
             if row['provider_id'] is not None:
-                valid = valid and _provider_url(row['provider_url']) == row['provider_id'] and row['state'] == 'submitted'
+                if row['receipt_source'] == CURRENT_UI_SOURCE:
+                    proof = self._current_ui_receipt(db, row, body)
+                    valid = valid and (proof['provider_task_id'] == row['provider_id']
+                                       and proof['provider_url'] == row['provider_url'])
+                    if row['observed'] is not None:
+                        observation = db.execute('SELECT * FROM cloud_job_ui_observations '
+                            'WHERE job_id=? AND observed=?', (job_id, row['observed'])).fetchone()
+                        if not observation:
+                            valid = False
+                        else:
+                            current = validate_current_ui_receipt(json.loads(observation['body']),
+                                self._current_ui_binding(row, body), created_at=row['created'])
+                            valid = valid and (dict(current, reopened=proof['reopened']) == proof
+                                and current['reopened']['observed_at'] == row['observed']
+                                and observation['body'] == _encoded(current)
+                                and observation['fingerprint'] == _digest([current, row['provider_status']])
+                                and observation['provider_status'] == row['provider_status']
+                                and row['provider_status'] in CURRENT_UI_STATUSES)
+                else:
+                    valid = valid and _provider_url(row['provider_url']) == row['provider_id']
+                valid = valid and row['state'] == 'submitted'
             else:
                 valid = valid and row['provider_url'] is None and row['state'] != 'submitted'
         except (ValueError, TypeError, KeyError):
@@ -308,7 +352,7 @@ class CloudJobs:
 
     @staticmethod
     def _view(row):
-        ui = row['receipt_source'] in ('official_ui_intent', 'owner_ui_receipt')
+        ui = row['receipt_source'] in ('official_ui_intent', 'owner_ui_receipt', CURRENT_UI_SOURCE)
         return {'format': PROTOCOL, 'job_id': row['id'], 'mesh_task_id': row['mesh_task_id'],
                 'mesh_epoch': json.loads(row['body'])['mesh_epoch'],
                 'request_id': row['request_id'],
@@ -396,6 +440,8 @@ class CloudJobs:
             if row['state'] != 'intent':
                 return self._view(row)
             self._intent(value)  # current deployment may have revoked env/ref
+            if value['environment_id'] in self.ui_environments:
+                raise PermissionError('cloud_environment_requires_current_ui')
             db.execute("UPDATE cloud_jobs SET state='submitting',attempted=1,receipt_source='cli_exec_intent' WHERE id=?",
                        (job_id,))
         try:
@@ -473,6 +519,129 @@ class CloudJobs:
                        (status, self.clock(), job_id))
         return self.get(job_id)
 
+    def _current_ui_binding(self, row, value):
+        return {'job_id': row['id'], 'intent_sha256': row['fingerprint'],
+                'owner_binding_sha256': self.namespace['owner'],
+                'mesh_task_id': value['mesh_task_id'], 'mesh_epoch': value['mesh_epoch'],
+                'request_id': value['request_id'], 'environment_id': value['environment_id']}
+
+    def _verify_current_ui(self, binding, receipt):
+        # Normal-UI tools may reflect account/chat text in their raw errors.
+        # Preserve the unknown launch boundary and expose only fixed categories.
+        try:
+            result = self.ui_receipt_verifier(json.loads(_encoded(binding)),
+                                              json.loads(_encoded(receipt)))
+        except Exception:
+            raise PermissionError('current_cloud_ui_verifier_unavailable') from None
+        if result is not True:
+            raise PermissionError('current_cloud_ui_receipt_not_verified')
+
+    def current_ui_binding(self, job_id):
+        """Owner reads original correlation hashes; no prompt, launch or URL guess."""
+        with self._transaction() as db:
+            row, value = self._row(db, job_id)
+            return self._current_ui_binding(row, value)
+
+    def _current_ui_receipt(self, db, row, value):
+        stored = db.execute('SELECT * FROM cloud_job_ui_receipts WHERE job_id=?',
+                            (row['id'],)).fetchone()
+        if not stored:
+            raise ValueError('current_cloud_ui_receipt_missing')
+        receipt = validate_current_ui_receipt(json.loads(stored['body']),
+            self._current_ui_binding(row, value), created_at=row['created'])
+        if stored['body'] != _encoded(receipt) or stored['fingerprint'] != _digest(receipt):
+            raise ValueError('current_cloud_ui_receipt_changed')
+        return receipt
+
+    def record_current_ui_receipt(self, job_id, receipt, *, owner_confirmed=False):
+        """Bind a current published-task receipt using a trusted normal-UI verifier.
+
+        This Mesh envelope is not an OpenAI schema. The verifier must actually
+        check the selected published environment, original single send, formal
+        Cloud execution location and reopening of the same saved task. It is a
+        Python integration hook, never JSON/model-controlled authorization.
+        No configured verifier means no new receipt, not fallback to a URL guess.
+        """
+        if owner_confirmed is not True:
+            raise PermissionError('cloud_reconciliation_owner_required')
+        if self.ui_receipt_verifier is None:
+            raise PermissionError('current_cloud_ui_verifier_not_configured')
+        with self._transaction() as db:
+            row, value = self._row(db, job_id)
+            if row['receipt_source'] not in ('official_ui_intent', CURRENT_UI_SOURCE):
+                raise Conflict('cloud_ui_submission_not_started')
+            binding = self._current_ui_binding(row, value)
+            verified = validate_current_ui_receipt(receipt, binding, created_at=row['created'])
+            if row['receipt_source'] == CURRENT_UI_SOURCE:
+                if self._current_ui_receipt(db, row, value) != verified:
+                    raise Conflict('current_cloud_ui_receipt_conflict')
+                return self._view(row)
+        # Outside the journal transaction: a normal UI probe may be slow. Its
+        # input copies cannot mutate the original local correlation or receipt.
+        self._verify_current_ui(binding, verified)
+        body, fingerprint = _encoded(verified), _digest(verified)
+        with self._transaction() as db:
+            row, value = self._row(db, job_id)
+            if row['receipt_source'] == CURRENT_UI_SOURCE:
+                if self._current_ui_receipt(db, row, value) != verified:
+                    raise Conflict('current_cloud_ui_receipt_conflict')
+                return self._view(row)
+            if row['receipt_source'] != 'official_ui_intent' or row['attempted'] != 1:
+                raise Conflict('cloud_ui_submission_not_started')
+            provider_id = verified['provider_task_id']
+            if row['provider_id'] is not None or db.execute(
+                    'SELECT 1 FROM cloud_jobs WHERE provider_id=?', (provider_id,)).fetchone():
+                raise Conflict('cloud_provider_already_bound')
+            db.execute('INSERT INTO cloud_job_ui_receipts VALUES(?,?,?,?)',
+                       (job_id, body, fingerprint, self.clock()))
+            db.execute("UPDATE cloud_jobs SET state='submitted',provider_id=?,provider_url=?,"
+                       "receipt_source=?,submission_error=NULL WHERE id=?",
+                       (provider_id, verified['provider_url'], CURRENT_UI_SOURCE, job_id))
+            return self._view(self._row(db, job_id)[0])
+
+    def record_current_ui_observation(self, job_id, receipt, status, *, owner_confirmed=False):
+        """Trusted UI observation for this exact saved task, never a Legacy call.
+
+        receipt must retain the original launch observation and supply a newer
+        reopened observation. Unknown visible state is not inferred complete.
+        """
+        if owner_confirmed is not True:
+            raise PermissionError('cloud_reconciliation_owner_required')
+        if self.ui_receipt_verifier is None:
+            raise PermissionError('current_cloud_ui_verifier_not_configured')
+        if not isinstance(status, str) or status not in CURRENT_UI_STATUSES:
+            raise ValueError('invalid_current_cloud_ui_status')
+        with self._transaction() as db:
+            row, value = self._row(db, job_id)
+            if row['receipt_source'] != CURRENT_UI_SOURCE:
+                raise Conflict('current_cloud_ui_receipt_required')
+            original = self._current_ui_receipt(db, row, value)
+            binding = self._current_ui_binding(row, value)
+            verified = validate_current_ui_receipt(receipt, binding, created_at=row['created'])
+            if (dict(verified, reopened=original['reopened']) != original
+                    or verified['reopened']['observed_at'] < original['reopened']['observed_at']):
+                raise Conflict('current_cloud_ui_observation_identity_mismatch')
+        self._verify_current_ui(dict(binding, expected_provider_status=status), verified)
+        with self._transaction() as db:
+            row, value = self._row(db, job_id)
+            if self._current_ui_receipt(db, row, value) != original:
+                raise Conflict('current_cloud_ui_receipt_conflict')
+            if row['observed'] is not None and verified['reopened']['observed_at'] < row['observed']:
+                raise Conflict('current_cloud_ui_observation_stale')
+            observed = verified['reopened']['observed_at']
+            observation = db.execute('SELECT * FROM cloud_job_ui_observations WHERE job_id=? AND observed=?',
+                                     (job_id, observed)).fetchone()
+            body, fingerprint = _encoded(verified), _digest([verified, status])
+            if observation:
+                if observation['body'] != body or observation['fingerprint'] != fingerprint:
+                    raise Conflict('current_cloud_ui_observation_conflict')
+            else:
+                db.execute('INSERT INTO cloud_job_ui_observations VALUES(?,?,?,?,?)',
+                           (job_id, observed, body, fingerprint, status))
+            db.execute('UPDATE cloud_jobs SET provider_status=?,observed=?,observation_error=NULL WHERE id=?',
+                       (status, observed, job_id))
+        return self.get(job_id)
+
     def _find(self, job_id, value, provider_id, max_pages):
         cursor, seen = None, set()
         for _ in range(max_pages):
@@ -514,6 +683,9 @@ class CloudJobs:
         with self._transaction() as db:
             row, value = self._row(db, job_id)
             provider_id = row['provider_id']
+            current_ui = row['receipt_source'] == CURRENT_UI_SOURCE
+        if current_ui:
+            return self._error(job_id, 'observation', 'current_cloud_ui_observation_required')
         if provider_id is None:
             return self._error(job_id, 'observation', 'provider_identity_unknown')
         try:
@@ -544,7 +716,7 @@ class CloudJobs:
             row, value = self._row(db, job_id)
             if row['attempted'] != 1:
                 raise Conflict('cloud_job_not_attempted')
-            if row['receipt_source'] in ('official_ui_intent', 'owner_ui_receipt'):
+            if row['receipt_source'] in ('official_ui_intent', 'owner_ui_receipt', CURRENT_UI_SOURCE):
                 raise Conflict('cloud_ui_receipt_requires_owner_ui_reconciliation')
             if row['provider_id'] is not None:
                 return self._bind_existing(row, provider_id)
@@ -565,6 +737,9 @@ class CloudJobs:
     def status_diagnostic(self, job_id):
         """Human status is auxiliary. Exit 1 can mean PENDING/APPLIED/ERROR."""
         value = self.get(job_id)
+        if value['receipt_source'] == CURRENT_UI_SOURCE:
+            return {'job_id': job_id, 'diagnostic_recognized': False, 'may_resubmit': False,
+                    'error': 'current_cloud_ui_observation_required'}
         provider_id = value['provider_task_id']
         if provider_id is None:
             raise Conflict('cloud_provider_identity_unknown')
@@ -585,6 +760,8 @@ class CloudJobs:
     def fetch_diff(self, job_id):
         """Save exact stdout privately for attempt 1; never apply or execute it."""
         value = self.get(job_id)
+        if value['receipt_source'] == CURRENT_UI_SOURCE:
+            raise Conflict('current_cloud_artifact_callback_required')
         if value['provider_task_id'] is None or value['provider_status'] not in ('ready', 'applied'):
             raise Conflict('cloud_diff_not_ready')
         result = self._invoke(job_id, ['diff', value['provider_task_id'], '--attempt', '1'])
