@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "enabled": false,
+  "authority_kind": "owner",
+  "state_dir": "/PRIVATE/owner-selected-enrollment-state",
+  "enrollment": {
+    "format": "mesh-enrollment/1",
+    "mesh_id": "replace-with-existing-mesh-identity",
+    "node_id": "replace-with-stable-owned-node-identity",
+    "owner_binding": "replace-with-existing-owner-binding",
+    "repo_pin": {
+      "repository": "https://github.com/gih10012/personal-assistant-mesh",
+      "commit": "0000000000000000000000000000000000000000"
+    },
+    "runtime": {
+      "kind": "interactive",
+      "expires_at": null,
+      "state_ref": "private:existing-persistent-authority-state"
+    },
+    "join": {
+      "peer_id": "replace-with-authorized-existing-peer",
+      "authority_id": "replace-with-original-authority",
+      "route_ref": "private:existing-join-transport",
+      "credential_ref": "private:scoped-reference-not-secret-value",
+      "trust_ref": "private:existing-owner-trust-record"
+    },
+    "continuation": {
+      "project_id": "mesh-self-maintenance",
+      "session_ref": "private:original-project-specialist",
+      "state_ref": "private:original-task-checkpoint"
+    }
+  },
+  "authorization": {
+    "enrollment_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "valid_until": 1,
+    "capabilities": [
+      {"id": "node-bootstrap-bytes", "actions": ["challenge.bytes.repeat"], "source_device": null, "proxy_binding": null}
+    ]
+  },
+  "verifier_id": "replace-with-independent-trusted-verifier",
+  "adapter": {
+    "argv": ["/PRIVATE/actual-node-executable", "/PRIVATE/reviewed-enrollment-stdio-adapter.mjs", "--repeat", "3"],
+    "pins": [
+      {"path": "/PRIVATE/actual-node-executable", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"path": "/PRIVATE/reviewed-enrollment-stdio-adapter.mjs", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "timeout_seconds": 10
+  },
+  "challenge": {
+    "operation_id": "replace-with-original-owner-approved-challenge-id",
+    "capability_id": "node-bootstrap-bytes",
+    "action": "challenge.bytes.repeat",
+    "revision": 1,
+    "ttl_seconds": 60,
+    "input": {"path": "/PRIVATE/input.bin", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+    "oracle": {"path": "/PRIVATE/independent-oracle.bin", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+    "proxy": null
+  },
+  "inventory": {
+    "commands": ["node", "git", "codex", "pi", "fish"],
+    "network_metadata": false,
+    "harness": {"name": "actual-native-harness", "version": "declared-not-invoked", "command": null},
+    "candidates": [
+      {"id": "node-bootstrap-bytes", "class": "compute.bytes", "revision": 1,
+       "actions": ["challenge.bytes.repeat"], "scope": {"task": "bootstrap-only"},
+       "resource_pool": "replace-with-real-shared-resource-reference",
+       "fault_domain": "replace-with-real-failure-domain-reference",
+       "source_device": null, "proxy_binding": null}
+    ]
+  }
+}
