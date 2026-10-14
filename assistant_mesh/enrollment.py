@@ -234,7 +234,7 @@ def result_envelope(challenge, output_bytes):
             'proxy': challenge['proxy']}
 
 
-def _private_directory(value):
+def _private_directory(value, create=True):
     """Linux/POSIX reference only; other hosts use equivalent private storage."""
     _require(os.name == 'posix', 'enrollment_private_storage_adapter_required')
     path = Path(value)
@@ -245,10 +245,11 @@ def _private_directory(value):
         _require(stat.S_ISDIR(item.st_mode) and item.st_uid in (0, os.getuid())
                  and (not item.st_mode & 0o022 or item.st_mode & stat.S_ISVTX),
                  'enrollment_private_directory_required')
-    try:
-        path.mkdir(mode=0o700)
-    except FileExistsError:
-        pass
+    if create:
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
     item = path.lstat()
     _require(stat.S_ISDIR(item.st_mode) and item.st_uid == os.getuid()
              and stat.S_IMODE(item.st_mode) == 0o700,
@@ -283,7 +284,37 @@ class EnrollmentJournal:
     an interface. Real Registry grants/pools and native permissions stay separate.
     """
     @_guard
-    def __init__(self, state_dir, document, authorization, verifier_id, clock=time.time):
+    def __init__(self, state_dir, document, authorization, verifier_id, clock=time.time, *, initialize=True):
+        _require(type(initialize) is bool, 'enrollment_initialize_flag_invalid')
+        metadata = self._configure(document, authorization, verifier_id, clock)
+        self._readonly = False
+        self.root = _private_directory(state_dir, create=initialize)
+        self.path = self.root / 'enrollment.sqlite'
+        _private_file(self.path, create=initialize)
+        with self._transaction() as db:
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+            expected = {'enrollment_metadata', 'enrollment_reports', 'enrollment_operations'}
+            _require((initialize and not tables) or tables == expected,
+                     'enrollment_journal_schema_invalid')
+            if initialize:
+                db.execute('CREATE TABLE IF NOT EXISTS enrollment_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)')
+                db.execute('''CREATE TABLE IF NOT EXISTS enrollment_reports(
+                    sha256 TEXT PRIMARY KEY,body TEXT NOT NULL)''')
+                db.execute('''CREATE TABLE IF NOT EXISTS enrollment_operations(
+                    id TEXT PRIMARY KEY,intent_sha256 TEXT NOT NULL,request_sha256 TEXT NOT NULL,request TEXT NOT NULL,
+                    state TEXT NOT NULL,result TEXT,result_sha256 TEXT,verification TEXT,
+                    registration_state TEXT NOT NULL,registration TEXT)''')
+            saved = dict(db.execute('SELECT key,value FROM enrollment_metadata'))
+            if not saved and initialize:
+                _require(not db.execute('SELECT 1 FROM enrollment_operations LIMIT 1').fetchone()
+                         and not db.execute('SELECT 1 FROM enrollment_reports LIMIT 1').fetchone(),
+                         'enrollment_journal_identity_missing')
+                db.executemany('INSERT INTO enrollment_metadata VALUES(?,?)', list(metadata.items()))
+            else:
+                _require(saved == metadata, 'enrollment_journal_identity_mismatch')
+
+    def _configure(self, document, authorization, verifier_id, clock):
+        """Shared binding validation; this helper performs no filesystem I/O."""
         self.document = validate_enrollment(document)
         self.verifier = _text(verifier_id, 200)
         authorization = _detached(authorization)
@@ -307,40 +338,52 @@ class EnrollmentJournal:
                 _text(capability['proxy_binding'])
             self.capabilities[capability['id']] = capability
         self.authorization, self.clock = authorization, clock
-        self.root = _private_directory(state_dir)
+        return {'format': ENROLLMENT_FORMAT,
+                'enrollment_sha256': document_sha256(self.document),
+                'authorization_sha256': document_sha256(authorization), 'verifier': self.verifier}
+
+    @classmethod
+    @_guard
+    def open_readonly(cls, state_dir, document, authorization, verifier_id, clock=time.time):
+        """Observe an existing journal without initialization, recovery or writes.
+
+        Expired/disabled installations can still read original challenges and
+        full results. Missing state is an error, never a reason to create a new
+        operation or authority. This is the POSIX reference storage adapter.
+        """
+        self = cls.__new__(cls)
+        metadata = self._configure(document, authorization, verifier_id, clock)
+        self._readonly = True
+        self.root = _private_directory(state_dir, create=False)
         self.path = self.root / 'enrollment.sqlite'
-        _private_file(self.path, create=True)
-        metadata = {'format': ENROLLMENT_FORMAT,
-                    'enrollment_sha256': document_sha256(self.document),
-                    'authorization_sha256': document_sha256(authorization), 'verifier': self.verifier}
+        _private_file(self.path)
         with self._transaction() as db:
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
-            _require(not tables or tables == {'enrollment_metadata', 'enrollment_reports', 'enrollment_operations'},
+            _require(tables == {'enrollment_metadata', 'enrollment_reports', 'enrollment_operations'},
                      'enrollment_journal_schema_invalid')
-            db.execute('CREATE TABLE IF NOT EXISTS enrollment_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)')
-            db.execute('''CREATE TABLE IF NOT EXISTS enrollment_reports(
-                sha256 TEXT PRIMARY KEY,body TEXT NOT NULL)''')
-            db.execute('''CREATE TABLE IF NOT EXISTS enrollment_operations(
-                id TEXT PRIMARY KEY,intent_sha256 TEXT NOT NULL,request_sha256 TEXT NOT NULL,request TEXT NOT NULL,
-                state TEXT NOT NULL,result TEXT,result_sha256 TEXT,verification TEXT,
-                registration_state TEXT NOT NULL,registration TEXT)''')
             saved = dict(db.execute('SELECT key,value FROM enrollment_metadata'))
-            if not saved:
-                _require(not db.execute('SELECT 1 FROM enrollment_operations LIMIT 1').fetchone()
-                         and not db.execute('SELECT 1 FROM enrollment_reports LIMIT 1').fetchone(),
-                         'enrollment_journal_identity_missing')
-                db.executemany('INSERT INTO enrollment_metadata VALUES(?,?)', list(metadata.items()))
-            else:
-                _require(saved == metadata, 'enrollment_journal_identity_mismatch')
+            _require(saved == metadata, 'enrollment_journal_identity_mismatch')
+        return self
+
+    def _writable(self):
+        _require(not self._readonly, 'enrollment_journal_readonly')
 
     @contextlib.contextmanager
     def _transaction(self):
-        _private_directory(self.root)
+        _private_directory(self.root, create=False)
         _private_file(self.path)
-        with contextlib.closing(sqlite3.connect(str(self.path), timeout=10, isolation_level=None)) as db:
+        # The constructor explicitly creates a new file when requested. A
+        # vanished existing journal must never be recreated by connect().
+        target = self.path.as_uri() + ('?mode=ro' if self._readonly else '?mode=rw')
+        with contextlib.closing(sqlite3.connect(target, timeout=10, isolation_level=None,
+                                               uri=True)) as db:
             db.row_factory = sqlite3.Row
-            db.execute('PRAGMA synchronous=FULL')
-            db.execute('BEGIN IMMEDIATE')
+            if self._readonly:
+                db.execute('PRAGMA query_only=ON')
+                db.execute('BEGIN')
+            else:
+                db.execute('PRAGMA synchronous=FULL')
+                db.execute('BEGIN IMMEDIATE')
             try:
                 yield db
             except BaseException:
@@ -381,6 +424,7 @@ class EnrollmentJournal:
 
     @_guard
     def record_adaptation(self, report):
+        self._writable()
         report = validate_adaptation_report(report)
         _require(all(report[name] == self.document[name] for name in ('mesh_id', 'node_id')),
                  'enrollment_report_identity_mismatch')
@@ -394,6 +438,7 @@ class EnrollmentJournal:
     @_guard
     def intent(self, operation_id, capability_id, action, input_bytes, expected_bytes,
                revision=1, ttl_seconds=60, proxy=None):
+        self._writable()
         _text(operation_id, 200)
         _text(capability_id, 200)
         _text(action, 200)
@@ -444,6 +489,7 @@ class EnrollmentJournal:
     @_guard
     def execute(self, operation_id, executor):
         """One owned callback attempt; crash/ACK loss is unknown, never retried."""
+        self._writable()
         _require(callable(executor), 'enrollment_executor_required')
         with self._transaction() as db:
             row = self._row(db, operation_id)
@@ -463,6 +509,7 @@ class EnrollmentJournal:
 
     @_guard
     def record_result(self, operation_id, envelope):
+        self._writable()
         envelope = _detached(envelope, _MAX_JSON_BYTES)
         _object(envelope, ('format', 'operation_id', 'request_sha256', 'nonce', 'result', 'continuation', 'proxy'))
         _unblob(envelope['result'])
@@ -492,6 +539,7 @@ class EnrollmentJournal:
         challenge. An observation/lease alone never gives it device control.
         This is not remote native-tool/process/model execution attestation.
         """
+        self._writable()
         _bytes(oracle_bytes)
         with self._transaction() as db:
             row = self._row(db, operation_id)
@@ -574,6 +622,7 @@ class EnrollmentJournal:
     @_guard
     def register(self, operation_id, registrar):
         """Explicit registry attempt, distinct from bytes/connection verification."""
+        self._writable()
         _require(callable(registrar), 'enrollment_registrar_required')
         with self._transaction() as db:
             row = self._row(db, operation_id)
@@ -604,6 +653,7 @@ class EnrollmentJournal:
     @_guard
     def reconcile_registration(self, operation_id, observer):
         """Only read original publication; missing receipt never permits replay."""
+        self._writable()
         _require(callable(observer), 'enrollment_registration_observer_required')
         with self._transaction() as db:
             row = self._row(db, operation_id)
@@ -659,3 +709,24 @@ class EnrollmentJournal:
             row = self._row(db, operation_id)
             _require(row['result'] is not None, 'enrollment_result_missing')
             return _unblob(json.loads(row['result'])['result'])
+
+    @_guard
+    def receipt(self, operation_id):
+        """Full original private evidence, not an authorization or summary.
+
+        Includes the exact challenge, complete result envelope and original
+        verification/registration. It stays readable after node/lease expiry.
+        The caller is responsible for keeping private input/artifact bytes out
+        of public logs and for independent source/device execution validation.
+        """
+        with self._transaction() as db:
+            row = self._row(db, operation_id)
+            envelope = json.loads(row['result']) if row['result'] else None
+            if envelope is not None:
+                _unblob(envelope['result'])
+            return {'format': 'mesh-enrollment-receipt/1',
+                    'enrollment_sha256': document_sha256(self.document),
+                    'status': self._view(row), 'challenge': json.loads(row['request']),
+                    'result': envelope,
+                    'verification': json.loads(row['verification']) if row['verification'] else None,
+                    'registration': json.loads(row['registration']) if row['registration'] else None}
