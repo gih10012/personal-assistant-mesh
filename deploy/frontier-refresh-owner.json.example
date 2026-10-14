@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "schedule_id": "mesh-frontier",
+  "task_context": {
+    "goal_ref": "KEEP-ORIGINAL-GOAL-REFERENCE",
+    "task_id": "PAM-007e",
+    "project_id": "personal-assistant-mesh"
+  },
+  "state_dir": "/PRIVATE/frontier-state",
+  "interval_seconds": 345600,
+  "retry_seconds": 3600,
+  "timeout_seconds": 15,
+  "sources": [
+    {"id":"openai-models","category":"models","url":"https://developers.openai.com/api/docs/models.md","required":true},
+    {"id":"chatgpt-codex-updates","category":"harness","url":"https://learn.chatgpt.com/docs/changelog","required":true},
+    {"id":"codex-release","category":"harness","url":"https://api.github.com/repos/openai/codex/releases/latest","required":true},
+    {"id":"codex-skills","category":"skills","url":"https://api.github.com/repos/openai/skills/commits/main","required":true},
+    {"id":"mcp-release","category":"protocol","url":"https://api.github.com/repos/modelcontextprotocol/modelcontextprotocol/releases/latest","required":true},
+    {"id":"a2a-release","category":"protocol","url":"https://api.github.com/repos/a2aproject/A2A/releases/latest","required":false},
+    {"id":"pi-release","category":"harness","url":"https://api.github.com/repos/earendil-works/pi/releases/latest","required":false}
+  ],
+  "local_metadata": []
+}
