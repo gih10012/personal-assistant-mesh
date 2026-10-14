@@ -1,0 +1,6 @@
+{
+  "format": "mesh-local-artifact-source/1",
+  "owner_config_path": "/PRIVATE/original-artifact-producer-owner.json",
+  "owner_config_sha256": "EXTERNALLY_PINNED_64_CHARACTER_LOWERCASE_SHA256",
+  "journal_path": "/PRIVATE/original-thin-call-journal.sqlite"
+}
