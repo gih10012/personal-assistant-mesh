@@ -126,6 +126,7 @@ class CommunicationFaultDomainTests(unittest.TestCase):
             if role == 'notifier':
                 peer.update(node='source-node', capabilities=['owner.notify'])
             peers.append(peer)
+        peers.extend(getattr(self, 'additional_peers', []))
         config = {'protocol': OWNER_PROTOCOL, 'database': str(self.path), 'account_file': str(account),
             'node_id': 'laptop', 'port': 0, 'peers': peers, 'channel_carrier': {
                 'owner_ref': 'owner-ref', 'witness_id': 'independent-witness', 'transport_mode': 'disabled'}}

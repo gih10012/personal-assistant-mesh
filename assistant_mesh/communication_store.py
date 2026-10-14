@@ -26,6 +26,8 @@ META_KEYS = frozenset(('cursor', 'owner_context', 'last_poll', 'activate_after_m
 CORE_SCHEMA = (
     'CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)',
     'CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY, body TEXT NOT NULL, created REAL NOT NULL)',
+    '''CREATE TABLE IF NOT EXISTS communication_inbox_order(
+        message_id TEXT PRIMARY KEY,sequence INTEGER NOT NULL UNIQUE CHECK(sequence>0))''',
     '''CREATE TABLE IF NOT EXISTS outbox(
         id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, body TEXT NOT NULL,
         status TEXT NOT NULL, client_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}',
@@ -174,6 +176,8 @@ class CommunicationStore:
             if type(created) not in (int, float) or not math.isfinite(created):
                 raise ValueError('communication_message_time_invalid')
             db.execute('INSERT INTO inbox VALUES(?,?,?)', (identity, json.dumps(message), self.clock()))
+            sequence = db.execute('SELECT COALESCE(MAX(sequence),0)+1 FROM communication_inbox_order').fetchone()[0]
+            db.execute('INSERT INTO communication_inbox_order VALUES(?,?)', (identity, sequence))
             context = message.get('context_token')
             if context:
                 previous = self._meta(db, 'owner_context', {})
@@ -217,6 +221,47 @@ class CommunicationStore:
         with self.transaction() as db:
             return self._enqueue(db, request_id, text)
 
+    def send_status(self, request_id):
+        """Owner-only original outbox lookup, including migrated media/unknown.
+
+        No new relay identity or client ID is attached to a historical row.
+        A missing record never authorizes another POST.
+        """
+        from .remote_notifications import request_id as checked_id
+        checked_id(request_id)
+        with self.transaction() as db:
+            row = db.execute('SELECT * FROM outbox WHERE id=?', (request_id,)).fetchone()
+            if row is None:
+                raise ValueError('send_not_found')
+            if (row['delivery_route'] != 'channel'
+                    or hashlib.sha256(row['body'].encode('utf8')).hexdigest() != row['fingerprint']):
+                raise Conflict('communication_original_send_changed')
+            return {'id': row['id'], 'status': row['status'], 'detail': json.loads(row['detail']),
+                    'delivery_route': row['delivery_route'], 'delivery_verified': False}
+
+    def inbox(self, after=0, limit=20):
+        """Legacy archive cursor is the ORIGINAL ordinal, not this DB's rowid."""
+        if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError('invalid_page')
+        with self.transaction() as db:
+            rows = db.execute('SELECT o.sequence,i.body FROM communication_inbox_order o '
+                'JOIN inbox i ON i.id=o.message_id WHERE o.sequence>? '
+                'ORDER BY o.sequence LIMIT ?', (after, limit)).fetchall()
+            output = []
+            for row in rows:
+                raw = json.loads(row['body'])
+                message = {key: raw.get(key) for key in (
+                    'message_id', 'from_user_id', 'to_user_id', 'create_time_ms', 'message_type')}
+                message['items'] = []
+                for item in raw.get('item_list', []):
+                    if not isinstance(item, dict):
+                        continue
+                    message['items'].append({'type': 1, 'text': item.get('text_item', {}).get('text', '')}
+                        if item.get('type') == 1 else {'type': item.get('type'), 'content_downloaded': False})
+                output.append(message)
+            return {'items': output, 'next_cursor': rows[-1]['sequence'] if rows else after,
+                    'source': 'mesh_archive', 'desktop_required': False}
+
     def _event(self, db, message_id):
         row = db.execute('SELECT e.*,i.body FROM communication_events e JOIN inbox i '
                          'ON i.id=e.message_id WHERE e.message_id=?', (message_id,)).fetchone()
@@ -238,7 +283,7 @@ class CommunicationStore:
         with self.transaction() as db:
             return [dict(row) for row in db.execute('SELECT message_id,kind,required_authority,state,'
                 'target_authority,post_attempted FROM communication_events '
-                "WHERE state!='confirmed' ORDER BY created,message_id LIMIT ?", (limit,))]
+                "WHERE state!='confirmed' ORDER BY post_attempted,created,message_id LIMIT ?", (limit,))]
 
     def register_reference(self, authority, task_id, task_row_sha256, control_id=None):
         """Authenticated executor's pointer only; never migrate execution rights."""

@@ -12,7 +12,8 @@ from pathlib import Path
 
 MODULES = ('communication_store.py', 'communication_migration.py',
            'communication_inbox.py', 'communication_broker.py',
-           'communication_producer.py', 'channel_checkpoint.py')
+           'communication_producer.py', 'communication_client.py',
+           'communication_runtime.py', 'communication_node.py', 'channel_checkpoint.py')
 
 
 def build(base_root, destination, support_root=None):
