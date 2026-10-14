@@ -298,6 +298,17 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(BootstrapError, 'unpinned_path'):
             self.tool()
 
+    def test_private_scope_metadata_and_bad_cli_flags_are_fixed_errors(self):
+        self.config['inventory']['candidates'][0]['scope']['access_token'] = 'PRIVATE-FIXTURE-SECRET'
+        self.save()
+        with self.assertRaisesRegex(BootstrapError, 'scope_contains_private_metadata'):
+            self.tool()
+        with contextlib.redirect_stdout(io.StringIO()) as output, contextlib.redirect_stderr(io.StringIO()) as errors:
+            code = main(['--config', str(self.path), 'plan', '--bad-flag', 'PRIVATE-FIXTURE-SECRET'])
+        self.assertEqual(1, code)
+        self.assertEqual('', errors.getvalue())
+        self.assertNotIn('PRIVATE-FIXTURE-SECRET', output.getvalue())
+
     def test_js_canonical_unicode_and_integer_wire_matches_existing_python_codec(self):
         value = {'\U0001f9ea': '设备😀\x7f', '\uffff': '\u2028', 'negative': -2, 'array': [None, True, 1]}
         source = "import {canonical} from " + json.dumps(ADAPTER.as_uri()) + "; process.stdout.write(canonical(JSON.parse(process.argv[1])));"

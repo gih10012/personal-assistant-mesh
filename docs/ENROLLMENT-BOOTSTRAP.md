@@ -118,10 +118,38 @@ token或把Alibaba的`cloud`当官方Cloud。VM退出后保存成果留在原Mes
 ## 当前验收边界
 
 风险测试覆盖真实独立JS进程、完整153600B输出/Unicode请求hash、只读
-冷恢复、原ID/unknown、当前停用、pin漂移、timeout、代理observer缺项
-和独立registrar注入。合成authority/registry明确标记synthetic；这不是
-第三物理设备、Windows/Harmony真机、模型推理、真实公网或生产注册。
-本分支实际隔离CLI/打包回执在完成运行后另追加；源码不顶替真实入网。
+冷恢复、原ID/unknown、当前停用、pin漂移、timeout、丢失原journal不
+重新初始化、代理observer缺项和独立registrar注入。新增17项及原
+enrollment/network/Cloud membership/HTTP合计106项在本分支通过
+（8.317s，0skip）；不是Root全量/公开CI或生产部署验收。
+合成authority/registry明确标记synthetic；这不是第三物理设备、
+Windows/Harmony真机、模型推理、真实公网或生产注册。
+
+2026-10-14 07:15:27 UTC，源commit
+`4c81110b1cb5d6d66575510a62bb3c55a382c1e0`的非测试标准CLI实际链完成。
+原`mesh-isolated-bootstrap-20261014-v1`仅一条journal operation，独立
+JS直系process自然exit0/reaped，stdout205344B/stderr0，完整153600B
+artifact与单独owner oracle逐字节一致。原request/nonce/continuation/
+完整result envelope和SQLite `mode=ro`全行独立核对；再次运行probe仅读
+实际原journal/全字节并返回`new_execution_attempted=false`。
+
+| 对象 | 实际SHA-256 |
+| --- | --- |
+| 原request | `20a972cad0c98fbcdcd9e314878ed2a7e317c0dcc304ecb4a9e3fbb5414cefee` |
+| 完整artifact | `a3217513b8a9255881606e02ed68242ebc17587f53879e05f4fbf8b93c25a4b7` |
+| 完整receipt | `b365030acb9e774538e9041476bfaa57a4e90aba3fdbd613279ba0ceec8027d9` |
+| 该冻结source小包（8456B） | `ed862d587defb7ff9373b6643097fb54f560ac1b03c2903cdf6d8721b676599b` |
+
+包包含说明文件，因此后续文档/源版本重建得到不同包hash是正常的，
+不能拿上表替代新包实际manifest/全文件核验。schema/authority为
+synthetic，状态`verified/not_registered`；独立挑战字节通过仍不是
+`native_execution_attested`、`managed_use_authorized`或全局入网。
+没有生产注册/凭据/服务/网络/模型调用或修改原43个协调任务。
+
+可用`deploy/probe-enrollment-adapter.py --state-dir /PRIVATE/isolated-new-root
+--operation-id ORIGINAL --repo-pin FULL_COMMIT`复现实验。仅在明确
+合成隔离空间使用；已有空间沿原ID/版本/阶段文件续接，原unknown不
+重跑。完整私有stage/receipt/journal保留给可信外层核验，不公开内容。
 
 Root下一接线：选择owner已授权设备/原challenge/原continuation，审查
 由该设备agent按环境编写的adapter，配置独立oracle及真实原authority

@@ -160,6 +160,9 @@ def _manifest(path):
         _require(isinstance(candidate['scope'], dict), 'bootstrap_candidate_invalid')
         # Owner declarative metadata is private, never an authorization/evidence claim.
         _encoded(candidate['scope'], 32768)
+        from .resources import _safe_metadata
+        _, redacted = _safe_metadata(candidate['scope'])
+        _require(not redacted, 'bootstrap_scope_contains_private_metadata')
         for key in ('resource_pool', 'fault_domain', 'source_device', 'proxy_binding'):
             if candidate[key] is not None:
                 _text(candidate[key], 512)
@@ -501,16 +504,21 @@ class EnrollmentBootstrap:
         return dict(receipt, bootstrap_binding=self.binding, owner_enabled=enabled)
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise BootstrapError('bootstrap_arguments_invalid')
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Owner-installed enrollment bootstrap; no native restrictions')
+    parser = _Parser(description='Owner-installed enrollment bootstrap; no native restrictions')
     parser.add_argument('--config', required=True)
     parser.add_argument('action', choices=('bootstrap', 'plan', 'inventory', 'record-adaptation',
                                          'challenge', 'run', 'verify', 'status', 'receipt',
                                          'record-result', 'register', 'reconcile'))
     parser.add_argument('--operation-id')
     parser.add_argument('--document-file')
-    args = parser.parse_args(argv)
     try:
+        args = parser.parse_args(argv)
         operation_actions = {'challenge', 'run', 'verify', 'status', 'receipt',
                              'record-result', 'register', 'reconcile'}
         _require((args.action in operation_actions) == (args.operation_id is not None),
