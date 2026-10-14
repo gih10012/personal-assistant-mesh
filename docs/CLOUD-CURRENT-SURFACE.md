@@ -22,6 +22,11 @@ mobile 的 **Codex** 选择该环境；初始化、保存草稿和 Publish 都�
 保留原 intent、stdin prompt 和 attempts=1，不需另造后台 OpenAI API。
 [官方 CLI](https://learn.chatgpt.com/docs/developer-commands#codex-cloud)。
 
+相关既有私有 home 的 auth 文件均为 0600；只读元数据确认 ChatGPT
+认证模式、已有 native token cache、无直接 API key，以及 owner 主账号
+后缀匹配布尔。未输出、复制或刷新 token；缓存存在不等于当前认证有效，
+也不证明新版环境授权。无需因此反复打开本人账号菜单或新登录。
+
 同 tag 官方源码仍通过 `task_url` 生成 `/codex/tasks/<id>`，环境发现使用
 repo/global environment 列表；exec 会先解析环境，再创建任务。不能把
 新版个人环境在 UI 可选直接当作这套 CLI 已兼容，也不能通过 exec 试探。
