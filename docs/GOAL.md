@@ -1,6 +1,6 @@
 # 持续 owner goal
 
-更新时间：2026-10-13。整个 goal **active，未完成**。本文件是后续 owner
+更新时间：2026-10-14。整个 goal **active，未完成**。本文件是后续 owner
 指令的有效目标合同，与 [PLAN](PLAN.md)、[TASKS](TASKS.json) 一起续接。
 2026-10-12 本人共同重规划并批准实施，随后在产品中明确清空旧 Goal、
 要求直接新建；新原生 Goal 已实核 active，objective 为本轮完整计划。
@@ -11,6 +11,12 @@
 本轮批准范围，2026-10-11 的“先收尾再 replan”暂停已由本人实施指令解除。
 
 ## 本轮批准的第一里程碑
+
+2026-10-14本人明确要求默认多agent/分支-worktree并行，已写AGENTS及
+[并行/续接规则](PARALLEL-WORK.md)。只有同一生产/桌面/账号状态的
+写操作串行，不把独立计划项串行。quota或Goal中断后实核原agent/
+handle，沿原分支、线程、检查点/ID继续；owner pause仍停，最新resume
+已生效。此补充不reset或缩小完整四线、长期目标、原43个task及依赖。
 
 2026-10-13晚间新增实际进展：独立Firefox协作扩展已通过正常临时加载，
 唯一NativeMessaging host的Firefox父进程/Unix peer与0600 wake事件已核。

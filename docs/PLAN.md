@@ -1,11 +1,25 @@
 # 持续执行计划
 
-更新时间：2026-10-13（本人批准共同重规划后的实施，原生 Goal 已 active）。以下是持续推进的优先级，
+更新时间：2026-10-14（本人批准共同重规划后的实施，原生 Goal 已 active）。以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
 
 ## 2026-10-12 批准实施：四线与实际验收
+
+2026-10-14本人再次明确默认多agent/分支树并行，已写
+[常驻执行规则](PARALLEL-WORK.md)和AGENTS。独立叶任务不排队等GUI/
+Cloud/OAuth；运维共享状态写入由Root串行，其余实现/测试/审查并行。
+Root＋三个分支专员持续补位；quota/Goal中断只在实核停止后沿原线程/
+worktree/ID续接，不把观察timeout当停止或重放未知操作。本人最新
+resume已生效，完整Goal active，无reset或范围缩小。
+
+上一片新增源码fedca23已实际push，精确CI38412908211 completed/success；
+新扩展同冻结source装载、真实preflight ready=true后已enable，仍未称
+Chat模型往返完成。原Leader提交的本机旧operator引用缺token file，
+实核发生在Client构造前/无intent DB/未POST；不修写原凭据、不换task
+ID，改用已授权SSH原VPS loopback operator引用。中断的SCP原handle
+已核退出0，接下来仅原task durable intent→一次POST。原源码和失败保留。
 
 2026-10-13晚间续接：普通Chat独立扩展已真正暂加载，唯一Firefox-owned
 native host与同队列wake事件通过；长Unix socket路径的真实失败已保留，

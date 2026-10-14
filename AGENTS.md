@@ -30,9 +30,29 @@ Leader's history or exposing credentials. Real anonymous OpenCode may be an
 explicitly selected temporary external execution capability; it is not the
 Codex/Pi Leader or a reason to impersonate clients or convert free calls to paid.
 
-Use parallel specialists for independent work when useful; assign non-overlapping
-file ownership and integrate/review their actual changes. Continue the Leader's
-native context and project specialist threads, using native compression/memory.
+Parallel implementation is the default for independent leaves of the approved
+task graph: code, research, documentation, tests and review should proceed at
+the same time when they do not depend on one another. Give each specialist a
+dedicated Git branch and worktree; record its task, owner, base commit and merge
+dependencies. Do not make unrelated work wait for GUI, deployment, OAuth or a
+single stalled branch. The coordinator reviews tested commits and merges them
+without overwriting other branches or the owner's changes. See
+`docs/PARALLEL-WORK.md` for the standing owner instruction.
+
+Serialize mutations to the same production state, credentials/account UI,
+desktop or migration target, not all project work. Keep unrelated development
+running while the operations owner executes a controlled change. The main
+coordination files have one writer; branch-specific docs can be parallel.
+
+Continue the Leader's native context and project specialist threads, using
+native compression/memory. If a specialist actually stops because of quota,
+transport interruption or a Goal interruption, retain its branch, checkpoint,
+original operation IDs and tool handles and continue the same specialist when
+capacity and the active owner Goal permit. Inspect authoritative agent/job
+state first: an observation timeout alone is not a stopped task. Do not restart
+an effectful operation, recreate completed work, mark stopped work complete or
+discard it. An explicit owner pause still suspends Goal work; a later owner
+resume allows the stopped specialists to continue without asking again.
 
 Maintain frontier awareness: every 3–5 days review official OpenAI/Codex/model/
 skill/protocol releases and relevant primary GitHub implementations. Let the
