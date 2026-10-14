@@ -293,6 +293,7 @@ class CommunicationStore:
         if digest(expected) != sha:
             raise ValueError('communication_delivery_receipt_invalid')
         with self.transaction() as db:
+            self.require_active(db)
             row = self._event(db, message_id)
             if (row['target_authority'] != authority or not row['post_attempted']
                     or receipt['protocol'] != RECEIPT_PROTOCOL
@@ -318,6 +319,7 @@ class CommunicationStore:
 
     def mark_delivery_unknown(self, message_id, authority):
         with self.transaction() as db:
+            self.require_active(db)
             row = self._event(db, message_id)
             if row['target_authority'] != authority or not row['post_attempted']:
                 raise Conflict('communication_original_target_changed')

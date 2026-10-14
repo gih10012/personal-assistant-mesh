@@ -18,8 +18,8 @@ from assistant_mesh.channel_state import ChannelState
 from assistant_mesh.communication_broker import OWNER_PROTOCOL, serve
 from assistant_mesh.communication_inbox import CommunicationInbox, deliver_once
 from assistant_mesh.communication_producer import relay_store_class
-from assistant_mesh.communication_migration import export_transfer, install_prepared, activate_prepared
-from assistant_mesh.communication_store import CommunicationStore, message_identity
+from assistant_mesh.communication_migration import export_transfer, install_prepared, activate_prepared, verify_prepared
+from assistant_mesh.communication_store import CommunicationStore, message_identity, RECEIPT_PROTOCOL
 from assistant_mesh.networking import digest
 from assistant_mesh.remote_notifications import PROTOCOL as NOTIFY_PROTOCOL, RemoteNotifications, text_fingerprint
 from assistant_mesh.store import Store, Conflict
@@ -208,6 +208,34 @@ class CommunicationFaultDomainTests(unittest.TestCase):
             self.activate()
         self.assertFalse(self.independent.status()['activated'])
 
+    def test_actual_identity_and_reference_lookup_columns_are_pinned_before_owner_verifier(self):
+        transfer = copy.deepcopy(self.transfer)
+        original_task = message_identity(self.old)
+        transfer['payload']['control_references'].append({'authority': 'cloud',
+            'control_id': 'original-control', 'task_id': original_task,
+            'row_sha256': digest('synthetic-control-source-row')})
+        transfer['payload']['legacy_relay_provenance'].append({'request_id': 'original-relay',
+            'peer': 'original-peer', 'post_attempted': 1, 'state': 'unknown'})
+        transfer['sha256'] = digest(transfer['payload'])
+        changes = (
+            ("UPDATE communication_identity SET identity=?,import_sha256=?",
+             (json.dumps(dict(transfer['payload']['identity'], origin_authority='other-origin')), '0' * 64)),
+            ("UPDATE communication_task_refs SET authority='other-authority'", ()),
+            ("UPDATE communication_control_refs SET task_id='other-task'", ()),
+            ("UPDATE communication_legacy_relays SET request_id='other-request'", ()),
+        )
+        for index, (statement, values) in enumerate(changes):
+            with self.subTest(statement=statement):
+                candidate = install_prepared(transfer, self.root / ('pinned-%d.sqlite' % index), transfer['sha256'])
+                self.assertTrue(verify_prepared(candidate, transfer, transfer['sha256'])['candidate_bytes_verified'])
+                with candidate.transaction() as db:
+                    db.execute(statement, values)
+                verifier = mock.Mock(side_effect=AssertionError('must reject before owner approval'))
+                with self.assertRaisesRegex(ValueError, 'communication_candidate_(identity|references)_changed'):
+                    activate_prepared(candidate, 'proof', verifier, transfer)
+                verifier.assert_not_called()
+                self.assertFalse(candidate.status()['activated'])
+
     def test_frozen_witness_incarnation_and_unknown_intent_transfer_without_reset(self):
         witness = CarrierWitness(self.original, 'original-witness', self.handoff)
         witness.enroll(self.binding, 'owner-ref', 'cloud')
@@ -390,6 +418,34 @@ class CommunicationFaultDomainTests(unittest.TestCase):
         self.assertEqual('laptop', moved.pending()[0]['target_authority'])
         self.assertEqual(1, moved.pending()[0]['post_attempted'])
         self.assertFalse(moved.status()['activated'])
+
+    def test_prepared_broker_executor_cannot_reconcile_or_mutate_imported_unknown(self):
+        self.activate()
+        message = self.message('original-unknown-before-prepared')
+        identity = message_identity(message)
+        with self.independent.transaction() as db:
+            self.independent._ingest_in_db(db, [message], 'move-cursor', 'fixture-owner', 'fixture-bot')
+        self.independent.prepare_delivery(identity, 'laptop')
+        self.independent.mark_delivery_unknown(identity, 'laptop')
+        transfer = export_transfer(self.path, 'cloud', 'owner-ref', self.binding, 'inactive-relocation')
+        self.path = self.root / 'inactive-communication.sqlite'
+        self.independent = install_prepared(transfer, self.path, transfer['sha256'])
+        before = self.independent.pending()
+        self.start_broker()  # disabled transport may inspect; no activation or carrier grant
+        receipt = {'protocol': RECEIPT_PROTOCOL,
+            'communication_id': self.independent.identity['communication_id'],
+            'message_id': identity, 'body_sha256': digest(message),
+            'execution_authority': 'laptop', 'task_id': None, 'accepted': 0}
+        receipt['receipt_sha256'] = digest(receipt)
+        for path, body in (('/communication/receipt', {'message_id': identity, 'receipt': receipt}),
+                           ('/communication/unknown', {'message_id': identity})):
+            with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as error:
+                self.clients['laptop'].request(path, body)
+            self.assertEqual(403, error.exception.code)
+            error.exception.close()
+        self.assertEqual(before, self.independent.pending())
+        self.assertFalse(self.independent.status()['activated'])
+        self.assertEqual([], self.wire)
 
 
 if __name__ == '__main__':

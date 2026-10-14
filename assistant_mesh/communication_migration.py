@@ -266,18 +266,23 @@ def verify_prepared(store, transfer, expected_sha256):
     _require(store.import_sha256 == expected_sha256 and store.identity == payload['identity'],
              'communication_candidate_identity_changed')
     with store.transaction() as db:
-        marker = db.execute('SELECT prepared,activation FROM communication_identity').fetchone()
-        _require(marker[0] == 1 and marker[1] is None, 'communication_candidate_not_complete_or_already_active')
+        marker = db.execute('SELECT identity,import_sha256,prepared,activation '
+                            'FROM communication_identity WHERE singleton=1').fetchone()
+        _require(marker is not None and json.loads(marker[0]) == payload['identity']
+                 and marker[1] == expected_sha256, 'communication_candidate_identity_changed')
+        _require(marker[2] == 1 and marker[3] is None, 'communication_candidate_not_complete_or_already_active')
         for table, rows in payload['tables'].items():
             actual = sorted([dict(row) for row in db.execute('SELECT * FROM ' + table)], key=canonical)
             _require(actual == sorted(rows, key=canonical), 'communication_candidate_rows_changed')
         actual = sorted([dict(row) for row in db.execute('SELECT * FROM communication_events')], key=canonical)
         _require(actual == sorted(payload['events'], key=canonical), 'communication_candidate_events_changed')
-        for table, field, expected in (
-                ('communication_task_refs', 'reference', payload['task_references']),
-                ('communication_control_refs', 'reference', payload['control_references']),
-                ('communication_legacy_relays', 'provenance', payload['legacy_relay_provenance'])):
-            actual = sorted([json.loads(row[0]) for row in db.execute('SELECT ' + field + ' FROM ' + table)], key=canonical)
+        for table, keys, field, references in (
+                ('communication_task_refs', ('authority', 'task_id'), 'reference', payload['task_references']),
+                ('communication_control_refs', ('authority', 'control_id', 'task_id'), 'reference', payload['control_references']),
+                ('communication_legacy_relays', ('request_id',), 'provenance', payload['legacy_relay_provenance'])):
+            actual = sorted([dict(row) for row in db.execute('SELECT * FROM ' + table)], key=canonical)
+            expected = [dict({key: reference[key] for key in keys}, **{field: canonical(reference)})
+                        for reference in references]
             _require(actual == sorted(expected, key=canonical), 'communication_candidate_references_changed')
         for table, rows in payload['fences'].items():
             actual = [dict(row) for row in db.execute('SELECT * FROM ' + table)]
