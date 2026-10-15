@@ -7,6 +7,23 @@
 
 ## 2026-10-12 批准实施：四线与实际验收
 
+2026-10-15本片已实际上线免费IP HTTPS及12h检查/受控reload，窄后端
+未配置仍failclosed；public TLS不代替OAuth身份或正式Cloud回调。
+本机frontier4日原计划已装timer，首次due=false、原SQLite/回执完整。
+鸿蒙原生source与公开SDK unsigned构建修正已合并；33原生编译/资源/
+打包任务全执行通过，商业手机构建/安装尚未验证。服务端interactive
+relay原journal/nonce/once-admit已合并，手机端原专员在独立分支接线，
+不让手机SDK或GUI串行阻挡服务端。
+
+Root当前旧Leader恢复不是重新apply：唯一原case在before完整备份
+阶段触发256MiB边界，--status实际只有prepared、无CAS/review，原
+guard仍在。保留286909413B原gzip和00..04全部文件；修流式完整备份
+验证、显式同prepared续接。若审核窗过期，原批准/意图不覆盖，追加
+fresh同非时窗绑定的明确批准，存在CAS则只能status对账。VPS当前
+剩1.6GB，不清理旧账本/历史来凑空间，不扩云费用。之后原已accepted
+Chat任务自然claim，不换ID。独立专员同时核CI一次A2A启动失败的真实
+原因，不能靠生产timeout/skip造绿。[当前交接](STATUS-2026-10-15.md)
+
 2026-10-15本人追加即时并行开发鸿蒙原生应用，覆盖下文历史“下一阶段
 才开工”的排程，不覆盖真机/系统权限验证边界。保留原四线：鸿蒙为
 第五条实现支路，复用PAM-005/006协议与授权，不另造不兼容Mesh。

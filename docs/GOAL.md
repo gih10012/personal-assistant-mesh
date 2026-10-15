@@ -12,6 +12,21 @@
 
 ## 本轮批准的第一里程碑
 
+2026-10-15最新实际进展：本人授权个人VPS免费IP公信证书及自动续期，
+已完成正式签发/加载、外部TLS/IP校验和七项窄路由边界，原管理API
+不公开。12h续期检查已启用、实际staging模拟续期通过；不是后续真实
+renewal已发生，更不是Chat/OAuth/官方Cloud模型已入网。本机4日前沿
+观察定时器也已启用，保留原回执/namespace，首次not-due未联网。
+
+鸿蒙原生首片已合并，公开OpenHarmony26 SDK下真实无增量unsigned
+HAP构建成功（33任务全执行、163817B）；手机工程保留HarmonyOS/
+phone配置，商业SDK/签名安装/真机能力仍待，不能当手机已接入。
+自动challenge/result relay服务端已合并，手机端薄适配继续并行。
+旧Leader原known-effect结案唯一apply在完整before备份阶段因286909413B
+gzip超工具上限拒绝，原任务/guard未改变；原case只到prepared，没有
+CAS intent/review。保留全部before和备份，下一仅显式同case续接，不
+重发旧输入/删除意图。微信里程碑简报accepted，未独立确认手机送达。
+
 2026-10-15本人明确追加“并行，并同步开始开发鸿蒙应用”。鸿蒙原生
 节点现为独立并行开发线，不再等四线全部结束才开工；原四线及完整
 联合验收不删减。专员先保存原检查点，再用独立分支/worktree开发
