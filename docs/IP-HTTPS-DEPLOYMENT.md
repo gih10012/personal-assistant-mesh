@@ -176,7 +176,29 @@ requires owner/Leader attention. No-email registration provides no email safety
 net. A true issuance+later-renewal+served-certificate change remains an actual
 operations acceptance, not satisfied by this source/template slice.
 
-Ten local pure tests cover safe new output, shell syntax, official immutable
+### Avoid two layers of renewal jitter
+
+The pinned Certbot **5.8.0** defaults `random_sleep_on_renew=True`. Its renewal
+handler, without a TTY, can sleep a uniformly selected 1–480 seconds after the
+`Processing` notice and before the first due renewal. `--dry-run` also enters
+that branch even when the certificate is not due; a no-renewal exit does not
+exercise it. This exceeds the rendered oneshot's `TimeoutStartSec=300` for some
+delays, independently of ACME network time. The exact version accepts
+`--no-random-sleep-on-renew` and sets that internal option false.
+[5.8.0 defaults](https://github.com/certbot/certbot/blob/v5.8.0/certbot/src/certbot/_internal/constants.py#L79),
+[5.8.0 renewal handling](https://github.com/certbot/certbot/blob/v5.8.0/certbot/src/certbot/_internal/renewal.py#L607-L648),
+[5.8.0 flag definition](https://github.com/certbot/certbot/blob/v5.8.0/certbot/src/certbot/_internal/cli/__init__.py#L426-L429).
+
+Every rendered `renew` argv, including staging and the explicit production-
+lineage staging dry-run, now disables this **internal** delay. `certonly` argv
+is unchanged. The 12-hour systemd cadence, 30-minute randomized start delay,
+300-second timeout, marker/reload order and no-force/no-extra-hook rules remain.
+This source diagnosis does not establish why any particular live job is still
+running or authorize replay: observe the original job/container receipt until
+its state is known. The specialist did not inspect production logs, terminate
+an in-flight renewal, issue a certificate or rerun the owner's dry-run.
+
+Eleven local pure tests cover safe new output, shell syntax, official immutable
 images, hardening/mounts, exact fail-closed routes/headers/body limits, no email,
 separate staging state, staging-only dry-run, hook/reload order and injection
 rejection, configured-MCP challenge passthrough and unchanged Cloud/unconfigured
@@ -185,5 +207,6 @@ success. The separate real SDK loopback tests verify actual missing/invalid
 issuer/audience/scope rejection and protected-resource challenges using only
 synthetic tokens; they are not public TLS/OAuth or actual Chat acceptance. Root
 must perform the pinned-image `nginx -t` and real public probes after sidecar
-configuration. This review does not change HTTP bootstrap assets, certificate
-issuance/hook/mount commands, or the unconfigured TLS configuration.
+configuration. Neither review changes HTTP bootstrap assets, certificate
+issuance/hook/mount commands, or the unconfigured TLS configuration. Only renew
+argv, its host wrapper and rendered plan gain the no-internal-sleep flag.

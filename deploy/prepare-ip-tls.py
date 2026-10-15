@@ -214,6 +214,9 @@ def certbot_command(config, mode, renew=False, dry_run=False):
         '--required-profile', 'shortlived', '--preferred-challenges', 'http',
         '--max-log-backups', '3', '--no-directory-hooks']
     if renew:
+        # v5.8.0 renew otherwise sleeps 1..480s without a TTY (also dry-run),
+        # longer than this oneshot's 300s timeout. systemd supplies the jitter.
+        command += ['--no-random-sleep-on-renew']
         if dry_run:
             # Certbot --dry-run normally selects staging. Override our explicit
             # production server, never test/force against production by accident.

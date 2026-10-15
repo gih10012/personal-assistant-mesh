@@ -123,6 +123,25 @@ class IPTLSPreparationTests(unittest.TestCase):
         self.assertNotIn(tls.PRODUCTION, dry)
         self.assertNotIn('--run-deploy-hooks', dry)
 
+    def test_every_renew_disables_only_internal_sleep_retaining_scheduler_jitter(self):
+        for mode in ('staging', 'production'):
+            for dry_run in (False, True):
+                with self.subTest(mode=mode, dry_run=dry_run):
+                    command = tls.certbot_command(self.config, mode, renew=True, dry_run=dry_run)
+                    self.assertEqual(1, command.count('--no-random-sleep-on-renew'))
+                    self.assertEqual('renew', command[command.index(tls.CERTBOT) + 1])
+                    self.assertNotIn('--force-renewal', command)
+                    self.assertNotIn('--run-deploy-hooks', command)
+            self.assertNotIn('--no-random-sleep-on-renew', tls.certbot_command(self.config, mode))
+        assets = tls.render(self.config)
+        self.assertIn('--no-random-sleep-on-renew', assets['renew.sh'])
+        dry = json.loads(assets['plan.json'])['commands']['dry_run_production_renewal']
+        self.assertEqual(1, dry.count('--no-random-sleep-on-renew'))
+        self.assertEqual(tls.STAGING, dry[dry.index('--server') + 1])
+        self.assertIn('TimeoutStartSec=300', assets['personal-assistant-mesh-ip-renew.service'])
+        self.assertIn('OnUnitActiveSec=12h', assets['personal-assistant-mesh-ip-renew.timer'])
+        self.assertIn('RandomizedDelaySec=30min', assets['personal-assistant-mesh-ip-renew.timer'])
+
     def test_gateway_hardening_and_renew_hook_never_mounts_docker_socket_in_container(self):
         assets = tls.render(self.config)
         command = json.loads(assets['plan.json'])['commands']['run_gateway_foreground']
