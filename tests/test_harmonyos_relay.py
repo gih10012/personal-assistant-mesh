@@ -55,6 +55,7 @@ class HarmonyRelayTests(unittest.TestCase):
         self.assertEqual(1, transport.count('await transport.request('))
         self.assertIn('maxRedirects: 0', transport)
         self.assertIn('usingCache: false', transport)
+        self.assertIn("if (action !== 'status') { requireValue(this.sharingEnabled, 'mesh_local_permission_revoked'); }", transport)
         self.assertIn('transport.destroy()', transport)
         self.assertNotIn('setInterval(', source)
         snapshot = source.split('export class NodeSnapshot {', 1)[1].split('\n}', 1)[0].lower()

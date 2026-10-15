@@ -264,6 +264,9 @@ export class NativeServices {
   private async relayRequest(row: RelayRecord, scopedToken: string, action: string, argumentsJson: string): Promise<RelayResponse> {
     this.relayReady(row, scopedToken);
     requireValue(action === 'challenge' || action === 'result' || action === 'status', 'mesh_relay_action_invalid');
+    // Recheck after async digest/flush: a revoked local sharing toggle must
+    // prevent a fresh managed request even while the app stays foreground.
+    if (action !== 'status') { requireValue(this.sharingEnabled, 'mesh_local_permission_revoked'); }
     const raw: string = '{"format":"mesh-enrollment-relay-request/1","binding":' + canonicalRelayBinding(row.binding) +
       ',"action":' + JSON.stringify(action) + ',"arguments":' + argumentsJson + '}';
     requireValue(raw.length <= 262144, 'mesh_relay_request_too_large');
