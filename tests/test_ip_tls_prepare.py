@@ -67,6 +67,26 @@ class IPTLSPreparationTests(unittest.TestCase):
         self.assertIn('access_log off;', config)
         self.assertIn('error_log /dev/null crit;', config)
 
+    def test_configured_mcp_preserves_sdk_oauth_challenge_cloud_keeps_token_gate(self):
+        mcp = tls.route(self.config, '/mcp', 18685, ('POST', 'GET', 'DELETE'), 65536)
+        self.assertNotIn('$mesh_bearer', mcp)
+        self.assertIn('proxy_pass http://127.0.0.1:18685/mcp;', mcp)
+        self.assertIn('proxy_set_header Authorization $http_authorization;', mcp)
+        self.assertIn('proxy_intercept_errors off;', mcp)
+        self.assertNotIn('proxy_hide_header', mcp)
+        self.assertIn('if ($mesh_json = 0) { return 415; }', mcp)
+        cloud = tls.route(self.config, '/cloud/node', 18686, ('POST',), 8388608)
+        self.assertIn('if ($mesh_bearer = 0) { return 401; }', cloud)
+        self.assertIn('if ($http_origin != "") { return 400; }', cloud)
+        self.assertIn('proxy_next_upstream off;', cloud)
+
+    def test_missing_mcp_sidecar_never_falls_back_to_unauthenticated_proxy(self):
+        mcp = tls.route(self.config, '/mcp', None, ('POST', 'GET', 'DELETE'), 65536)
+        self.assertIn('if ($mesh_bearer = 0) { return 401; }', mcp)
+        self.assertIn('return 503;', mcp)
+        self.assertNotIn('proxy_pass', mcp)
+        self.assertNotIn('resource_metadata=', mcp)  # No imaginary ready OAuth server.
+
     def test_issuance_uses_exact_official_digest_shortlived_webroot_and_no_email(self):
         plan = json.loads(tls.render(self.config)['plan.json'])
         command = plan['commands']['issue_production']
