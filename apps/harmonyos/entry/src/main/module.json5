@@ -8,6 +8,7 @@
       "name": "EntryAbility", "srcEntry": "./ets/entryability/EntryAbility.ets",
       "description": "$string:module_desc", "icon": "$media:app_icon",
       "label": "$string:app_name", "exported": true, "launchType": "singleton",
+      "startWindowIcon": "$media:app_icon", "startWindowBackground": "$color:start_window_background",
       "skills": [{ "entities": ["entity.system.home"], "actions": ["action.system.home"] }]
     }],
     "requestPermissions": [{ "name": "ohos.permission.INTERNET" }]

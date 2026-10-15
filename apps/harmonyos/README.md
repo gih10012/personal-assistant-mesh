@@ -1,8 +1,10 @@
 # HarmonyOS native Mesh node
 
 2026-10-15：原生 Stage/ArkTS/HAP 工程源码，**尚未通过 Harmony SDK 编译或
-真机验证**。本机没有 Hvigor、ohpm、hdc、Harmony SDK；没有下载或改装
-工具链、配对手机、创建证书、签名、安装 HAP、使用真实凭据或生产网络。
+真机验证**。宿主没有全局 Hvigor、ohpm、hdc、Harmony SDK；首片之后仅在
+私有临时目录核验官方构建工具/公开 OpenHarmony SDK，见
+[隔离构建记录](BUILD-VALIDATION.md)。没有改装全局工具链、配对手机、
+创建证书、签名、安装 HAP、使用真实凭据或生产网络。
 这不是 WebView/手机遥控面板，也不是重新实现一套 Mesh。
 
 ## 现有源码
@@ -60,15 +62,17 @@ byteOffset/byteLength范围。平台源码检查另核同应用互斥/intent-bef
 Node23+/22.18+才能
 直接strip TS；较旧CI明确skip该运行层，绝不算ArkCompiler通过。
 
-当前 build-preflight 实际 exit2：hvigor=false、ohpm=false、hdc=false、
-sdk_configured=false；compile_attempted=false、hap_compiled=false。
-只有Node/Java不提供ArkUI编译器。所有 `.json5` 使用合法JSON子集方便
-schema检查，但这不能证明SDK类型、装饰器、资源打包或手机生命周期。
+未配置隔离工具路径的宿主 build-preflight 仍实际 exit2：hvigor=false、
+ohpm=false、hdc=false、sdk_configured=false；其 compile_attempted=false、
+hap_compiled=false 表示该只读脚本从不执行编译，不是抹去之后的隔离
+OpenHarmony HAP构建证据。所有 `.json5` 使用合法JSON子集方便schema
+检查；schema测试本身不能证明SDK类型、资源打包或手机生命周期。
 
-本工程 default product 配置 compile/target `7.0.0(26)`，compatible
+本工程 default product 配置 compile/target `26.0.0`，compatible
 `5.0.0(12)`；网络认证适配另有API23 runtime guard。API26来自当前
-官方 HarmonyOS7 开发资料，**工程版本字符串/modelVersion/Hvigor组合
-尚须真实SDK解析验证**，不是已经被编译器接受的声明。`signingConfigs`
+官方 HarmonyOS7 开发资料；依据[官方工具版本表](https://developer.huawei.com/consumer/en/doc/harmonyos-releases/deveco-studio-new-features-2600)
+同步 modelVersion=`26.0.0`，对应 release CLT26.0.0.821/Hvigor6.26.4。
+**项目配置更正不等于真实 Harmony SDK 构建成功**。`signingConfigs`
 为空，无本机路径/证书/设备ID入仓。
 
 后续拥有匹配 SDK 的环境先导入 `apps/harmonyos` 到 DevEco Studio，按

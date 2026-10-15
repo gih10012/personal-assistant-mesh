@@ -146,7 +146,7 @@ export class NativeServices {
   }
   private async digestText(text: string): Promise<string> {
     const utf8: buffer.Buffer = buffer.from(text, 'utf-8');
-    return this.digest(exactByteView(utf8.buffer, utf8.byteOffset, utf8.byteLength));
+    return this.digest(exactByteView(utf8.buffer, utf8.byteOffset, utf8.length));
   }
   async executeApprovedChallenge(raw: string): Promise<string> {
     requireValue(this.enrollment !== null && this.sharingEnabled && this.foreground && !this.busy,

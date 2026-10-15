@@ -98,7 +98,7 @@ test('native digest input helper excludes allocator slab bytes around a UTF8 buf
   const slab = Buffer.allocUnsafe(128); slab.fill(0x7f);
   const text = '鸿蒙🙂'; const utf8 = Buffer.from(text, 'utf8'); utf8.copy(slab, 17);
   const value = slab.subarray(17, 17 + utf8.length);
-  const selected = exactByteView(value.buffer, value.byteOffset, value.byteLength);
+  const selected = exactByteView(value.buffer, value.byteOffset, value.length);
   assert.equal(digest(selected), digest(utf8)); assert.equal(selected.length, utf8.length);
   assert.notEqual(digest(new Uint8Array(slab.buffer)), digest(selected));
   assert.throws(() => exactByteView(value.buffer, -1, value.byteLength), /byte_range/);

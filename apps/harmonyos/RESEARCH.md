@@ -29,7 +29,10 @@ AgentExtensionAbility 的 API26 onAgentInvoked 在官方声明中标为systemapi
 样例仍为API9/Hvigor2.3，不直接复制成HarmonyOS7版本保证；华为当前
 [DevEco官方页](https://developer.huawei.com/consumer/cn/deveco-studio)提供
 CLI与Linux模拟器信息，但IDE系统要求列Windows/macOS。原型结构采用
-同一Stage入口，具体Hvigor/modelVersion/SDK26组合须实际工具链核验。
+同一Stage入口。[官方26.0.0工具表](https://developer.huawei.com/consumer/en/doc/harmonyos-releases/deveco-studio-new-features-2600)
+进一步确认 release CLT26.0.0.821/Hvigor6.26.4/ohpm26.0.0.630/Node24.14.1，
+modelVersion及compile/target新格式为26.0.0；首稿旧格式已最小更正。
+具体本机工具链与实际编译结果另见 [隔离构建记录](BUILD-VALIDATION.md)。
 本片未复制上游样例实现代码，工程/图标由本项目新写，许可证沿仓库MIT。
 
 本轮若干华为doccenter页面仅返回空JS壳/抓取timeout，官方SDK源码与
