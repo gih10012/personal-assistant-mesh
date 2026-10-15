@@ -108,10 +108,13 @@ python3 -m unittest tests.test_harmonyos_node tests.test_harmonyos_relay \
   tests.test_enrollment_relay tests.test_enrollment tests.test_enrollment_bootstrap tests.test_cloud_http
 ```
 
-24个同源 Node cases（原12+新增relay12）；Python另调用真实
+首片24个同源 Node cases（原12+新增relay12），后续SDK编译修正增加1个
+共享状态读取用例，当前25项通过；Python另调用真实
 `EnrollmentRelay` 原 intent/admission/result，交给同一 `Protocol.ts` 验证
 完整 canonical binding/result/hash，另检查原生适配调用顺序。测试组有包含
 关系，不相加冒充不同系统验收。它们不运行 NetworkKit、Preferences flush
-或手机生命周期，不证明 Harmony SDK/HAP、真机TLS或完整 Mesh 入网。
-原隔离 public OpenHarmony 编译环境可另对固定 commit 复核；不要把旧HAP
-自动称为已包含本片客户端。
+或手机生命周期，不证明商业 Harmony SDK、真机TLS或完整 Mesh 入网。
+固定83bb76e客户端与021e482配置的真实 public OpenHarmony 完整unsigned
+构建已独立通过，含4处控制流类型错误的原失败及最小修正，详见
+[SDK构建记录](BUILD-VALIDATION.md)。该新HAP包含客户端源码，但采用
+public SDK/default设备overlay，不能拿旧HAP或新HAP冒称手机运行通过。

@@ -109,3 +109,40 @@ nonce/journal，不请求真实能力grant。本叶未接relay或另造入网协
 phone/HarmonyOS工程再次完整unsigned构建；确认真实手机版本/合法调试
 授权后才能签名、安装、验证picker/网络/前后台和原Mesh挑战闭环。SDK
 签名安装与生产入网由Root单运维，不因本公开SDK构建成功而自动执行。
+
+## 原 relay 客户端固定版本再次编译
+
+对最终客户端 `83bb76eb6938022f6d9d2f44db739572489feab4`（含HTTP前本人
+共享撤权再核）合入上述 `021e482` 配置/资源，独立组装源码树 `752b653`，
+没有改作者worktree。首轮真实无增量CompileArkTS拒绝4处比较：
+NativeServices第330/334行，早期guard把result_state窄为not_submitted，
+却看不到begin/observe helper已经写成attempted/acknowledged；第367行
+同样看不到challenge_state的attempted/granted变化。
+
+修正仅增加 `relayResultState` / `relayChallengeState` 两个纯读取函数，
+让原生调用者在转换helper之后明确读取**同一原记录当前状态**。没有
+强制类型转换、@ts-ignore、关闭检查、复制状态/替换ID，未改变早期阻重
+guard、合法转换、unknown处理、单次POST或权限规则。新增同源Node用例
+覆盖begin、accept、cold-resume、observe后读回，再确认原请求不能重做。
+
+再次实际执行相同无网/空个人home、no-daemon/no-incremental、关闭签名
+的完整构建，复用已核SDK/工具且旧工具目录只读挂载。独立新副本仍仅
+采用上表3项OpenHarmony平台overlay，全部实际业务源码与审查树逐字
+一致；不是借用上一份不含relay的HAP。
+
+- 首轮失败原日志SHA256：
+  `7a72fe9e2d1e04423737f3c32d498b83656803934e5edfdc95a9c5502b3ed2fa`。
+- 修正后实际exit0，3.786s，33 tasks全执行、0缓存；CompileArkTS、资源、
+  PackageHap与PackingCheck通过，17条异常/syscap警告完整保留。
+- 新 `entry-default-unsigned.hap` 222032 B，SHA256
+  `68eb0decef0d69040d7d62252407a9b4219eb4bf38691b554621896c468b27ec`，
+  ZIP完整性检查通过。没有签名/安装/手机网络或API调用。
+- 完整成功日志SHA256：
+  `c56b01fa2658eea3c0083df4f975338a0ea17ef1329bafdd89709e450e278f6f`。
+- 25项同源Node测试通过、0跳过；相关Python22项0.837s通过，其中真实
+  authority/同TS JSON对齐不是NetworkKit/手机执行。Python另出现既有
+  SQLite connection ResourceWarning，原日志保留，不抑制或冒称零警告。
+
+首片SDK/旧HAP/所有旧失败日志未覆盖；新客户端产物与日志另存在私有
+临时目录，不提交生成包。**商业HarmonyOS SDK、真实手机、TLS relay路由/
+live-task validator/credential部署、完整入网仍未验**，不由编译通过推导。

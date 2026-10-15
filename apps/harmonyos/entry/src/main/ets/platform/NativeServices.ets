@@ -10,7 +10,7 @@ import {
   RelayClientConfig, RelayRecord, RelayResponse, ResultEnvelope, acceptRelayChallenge,
   beginOperation, beginRelayChallenge, beginRelayResult, canonicalChallenge, canonicalEnrollment,
   canonicalRelayBinding, canonicalResult, coldResume, coldResumeRelays, deviceState, exactByteView,
-  newRelayRecord, observeRelayStatus, report, requireManualChallengeUnclaimed, requireValue,
+  newRelayRecord, observeRelayStatus, relayChallengeState, relayResultState, report, requireManualChallengeUnclaimed, requireValue,
   validateChallenge, validateEnrollment, validateHello, validateJoinUrl, validateRelayClientConfig,
   validateRelayResponse, validateRelayUrl, validateResultEnvelope
 } from '../core/Protocol';
@@ -327,11 +327,11 @@ export class NativeServices {
     try {
       const value: RelayResponse = await this.relayRequest(row, scopedToken, 'result', canonical);
       observeRelayStatus(row, value, 'result');
-      requireValue(row.result_state === 'acknowledged', 'mesh_relay_original_result_not_confirmed');
+      requireValue(relayResultState(row) === 'acknowledged', 'mesh_relay_original_result_not_confirmed');
       await this.persist();
       return JSON.stringify(value);
     } catch (error) {
-      if (row.result_state === 'attempted') { row.result_state = 'unknown'; }
+      if (relayResultState(row) === 'attempted') { row.result_state = 'unknown'; }
       await this.persist();
       throw new Error('mesh_relay_result_unconfirmed_observe_original_status_only');
     }
@@ -364,7 +364,8 @@ export class NativeServices {
       await this.executeChallenge(row.challenge_json, row);
       return await this.relayResult(row, scopedToken); // Complete result, one original POST.
     } catch (error) {
-      if (row.challenge_state === 'attempted' || row.challenge_state === 'granted') { row.challenge_state = 'unknown'; }
+      const state: string = relayChallengeState(row);
+      if (state === 'attempted' || state === 'granted') { row.challenge_state = 'unknown'; }
       await this.persist();
       throw new Error('mesh_relay_unconfirmed_original_identity_and_result_preserved');
     } finally { this.busy = false; }

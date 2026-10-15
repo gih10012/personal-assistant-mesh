@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   acceptRelayChallenge, beginOperation, beginRelayChallenge, beginRelayResult, canonicalChallenge,
   canonicalEnrollment, canonicalRelayBinding, canonicalResult, coldResume, coldResumeRelays,
-  newRelayRecord, observeRelayStatus, requireManualChallengeUnclaimed, validateRelayClientConfig,
+  newRelayRecord, observeRelayStatus, relayChallengeState, relayResultState, requireManualChallengeUnclaimed, validateRelayClientConfig,
   validateRelayResponse, validateRelayUrl, validateResultEnvelope
 } from '../entry/src/main/ets/core/Protocol.ts';
 
@@ -142,6 +142,23 @@ test('result POST attempted/ACK loss is observation-only, same bytes never autho
   observeRelayStatus(rows[0], f.reply('status'), 'status');
   assert.equal(rows[0].result_state, 'acknowledged');
   assert.throws(() => beginRelayResult(rows[0], hash), /observe_only/);
+});
+test('native state rereads observe the same record after transition and cold-resume helper mutations', () => {
+  const f = fixture();
+  assert.equal(relayChallengeState(f.row), 'not_requested');
+  beginRelayChallenge(f.row); assert.equal(relayChallengeState(f.row), 'attempted');
+  acceptRelayChallenge(f.row, f.reply(), f.enrollment, f.enrollmentHash, f.binding.request_sha256, 1001);
+  assert.equal(relayChallengeState(f.row), 'granted');
+  assert.equal(relayResultState(f.row), 'not_submitted');
+  beginRelayResult(f.row, digest(canonicalResult(f.result)));
+  assert.equal(relayResultState(f.row), 'attempted');
+  coldResumeRelays([f.row]);
+  assert.equal(relayChallengeState(f.row), 'unknown');
+  assert.equal(relayResultState(f.row), 'unknown');
+  observeRelayStatus(f.row, f.reply('status'), 'status');
+  assert.equal(relayResultState(f.row), 'acknowledged');
+  assert.throws(() => beginRelayResult(f.row, digest(canonicalResult(f.result))), /observe_only/);
+  assert.throws(() => beginRelayChallenge(f.row), /observe_only/);
 });
 test('provider-reported without matching full-envelope hash cannot settle a result ACK', () => {
   const f = fixture(); beginRelayResult(f.row, digest(canonicalResult(f.result)));

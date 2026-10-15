@@ -330,6 +330,10 @@ export function beginRelayResult(row: RelayRecord, resultHash: string): void {
   requireValue(row.result_state === 'not_submitted', 'mesh_relay_original_result_observe_only');
   row.result_sha256 = resultHash; row.result_state = 'attempted'; // Flush BEFORE POST, never re-POST unknown.
 }
+// Native callers must reread the same mutable record after transition helpers.
+// ArkTS/TS cannot infer those helpers' property writes across an async boundary.
+export function relayResultState(row: RelayRecord): string { return row.result_state; }
+export function relayChallengeState(row: RelayRecord): string { return row.challenge_state; }
 export function observeRelayStatus(row: RelayRecord, v: RelayResponse, action: string): void {
   validateRelayResponse(v, row.binding, action);
   row.status_json = JSON.stringify(v.status);
