@@ -1,0 +1,14 @@
+{
+  "protocol": "mesh-communication-execution-companion/1",
+  "task_server_config": "/PRIVATE/selected-task-producer.json",
+  "broker_client_config": "/PRIVATE/executor-broker-client.json",
+  "notification_client_config": "/PRIVATE/notifier-broker-client.json",
+  "communication_id": "REPLACE_WITH_EXTERNALLY_VERIFIED_64_HEX_ID",
+  "accept_ordinary": false,
+  "poll_interval_seconds": 1,
+  "new_task_route": {
+    "required": ["agent", "mesh.node:laptop"],
+    "project_id": "personal-assistant-local",
+    "agent_id": "local-owner-assistant"
+  }
+}

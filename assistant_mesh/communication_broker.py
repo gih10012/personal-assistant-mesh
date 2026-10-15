@@ -19,6 +19,7 @@ from .channel import Channel, ILink
 from .channel_authority import ChannelAuthority, validate_config, validate_peer
 from .channel_carrier import CarrierFence
 from .communication_store import CommunicationStore
+from .communication_client import ORIGIN_HEADER, IDENTITY_HEADER, control_origin
 from .config import private_json, read_secret
 from .legacy_fenced_receiver import FencedChannelOwnerControl, OwnedFencedSupervisor
 from .networking import digest, identifier
@@ -55,7 +56,7 @@ class Broker:
         carrier = validate_config(config['channel_carrier'])
         self.peers = [(read_secret(peer['token_file']), peer) for peer in config['peers']]
         for index, (secret, peer) in enumerate(self.peers):
-            if peer.get('role') not in ('channel_carrier', 'notifier', 'worker', 'agent_peer', 'executor', 'viewer'):
+            if peer.get('role') not in ('channel_carrier', 'notifier', 'worker', 'agent_peer', 'executor', 'viewer', 'owner_client'):
                 raise ValueError('communication_peer_role_invalid')
             if peer.get('role') == 'executor':
                 identifier(peer['execution_authority'])
@@ -65,6 +66,10 @@ class Broker:
                 identifier(peer['node'])
                 if 'owner.notify' not in peer.get('capabilities', []):
                     raise ValueError('communication_notifier_capability_required')
+            if peer.get('role') == 'owner_client':
+                control_origin(peer['legacy_control_url'])
+                identifier(peer['owner_ref'])
+                identifier(peer['origin_authority'])
             if any(hmac.compare_digest(secret, previous) for previous, _ in self.peers[:index]):
                 raise ValueError('communication_credential_alias_forbidden')
         self.config, self.store = config, CommunicationStore(config['database'])
@@ -73,6 +78,11 @@ class Broker:
         identity = self.store.identity
         if carrier['owner_ref'] != identity['owner_ref']:
             raise ValueError('communication_original_owner_changed')
+        for _, peer in self.peers:
+            if peer.get('role') == 'owner_client' and (
+                    peer['owner_ref'] != identity['owner_ref']
+                    or peer['origin_authority'] != identity['origin_authority']):
+                raise ValueError('communication_owner_client_binding_changed')
         self.ilink = ILink(config['account_file'])  # validates file; no external IO
         binding = digest([NOTIFY_PROTOCOL, self.ilink.base,
             self.ilink.account['ilink_user_id'], self.ilink.account['ilink_bot_id']])
@@ -98,6 +108,35 @@ class Broker:
         if not isinstance(header, str) or not header.startswith('Bearer '):
             return None
         return next((peer for secret, peer in self.peers if hmac.compare_digest(secret, header[7:])), None)
+
+    def owner_dispatch(self, method, path, body, peer, origin, identity):
+        """Narrow old Claw wire; its token does not inherit execution/operator APIs."""
+        parsed = urlsplit(path)
+        if (peer.get('role') != 'owner_client' or parsed.query or parsed.fragment
+                or not isinstance(origin, str) or not isinstance(identity, str)
+                or not hmac.compare_digest(identity, self.store.identity['communication_id'])
+                or control_origin(origin) != control_origin(peer['legacy_control_url'])):
+            raise PermissionError('communication_owner_original_binding_required')
+        path = parsed.path
+        if method == 'GET' and path == '/v1/status' and not body:
+            status = self.store.status()
+            return {'leader': None, 'leader_state_scope': 'not_a_leader_authority',
+                'outbox': status['outbox'], 'channel_error': self.store.get('channel_error'),
+                'last_poll': self.store.get('last_poll'), 'communication_id': identity,
+                'origin_execution_authority': self.store.identity['origin_authority'],
+                'physical_host': self.config['node_id'], 'delivery_verified': False}
+        if method != 'POST' or not isinstance(body, dict):
+            raise PermissionError('communication_owner_route_forbidden')
+        if path == '/v1/inbox' and not set(body) - {'after', 'limit'}:
+            return self.store.inbox(body.get('after', 0), body.get('limit', 20))
+        if path == '/v1/notify/status' and set(body) == {'request_id'}:
+            return self.store.send_status(body['request_id'])
+        if path == '/v1/notify' and set(body) == {'request_id', 'text'}:
+            self.store.enqueue(body['request_id'], body['text'])
+            return {'id': body['request_id']}
+        if path == '/v1/notify/media':
+            raise ValueError('communication_media_unsupported_before_enqueue')
+        raise PermissionError('communication_owner_route_forbidden')
 
     def dispatch(self, path, body, peer):
         parsed = urlsplit(path)
@@ -130,8 +169,13 @@ class Broker:
             return self.store.register_reference(authority, **body)
         if path == '/communication/control_reference' and set(body) == {'task_id', 'task_row_sha256', 'control_id'}:
             return self.store.register_reference(authority, **body)
-        if path == '/communication/pending' and set(body) == {'limit'}:
-            return {'events': self.store.pending(body['limit'])}
+        if path == '/communication/pending' and set(body) in (
+                {'limit'}, {'limit', 'accept_ordinary'}):
+            # Authority is the authenticated peer binding, NEVER a posted
+            # selector. Legacy clients retain the ordinary-candidate view;
+            # current companions send their owner's explicit policy.
+            return {'events': self.store.pending(body['limit'], authority,
+                                                 body.get('accept_ordinary', True))}
         if path == '/communication/prepare' and set(body) == {'message_id', 'authority'}:
             if body['authority'] != authority:
                 raise PermissionError('communication_executor_binding_changed')
@@ -179,8 +223,17 @@ def _serve_locked(config, ready, handoff_verifier, operation_verifier, before_ch
         def do_GET(self):
             if self.path == '/healthz':
                 self.reply(200, {'ok': True, 'kind': 'communication_broker'})
-            else:
+                return
+            peer = api.principal(self.headers.get('Authorization', ''))
+            if peer is None:
+                return self.reply(401, {'error': 'authentication_required'})
+            try:
+                self.reply(200, api.owner_dispatch('GET', self.path, {}, peer,
+                    self.headers.get(ORIGIN_HEADER), self.headers.get(IDENTITY_HEADER)))
+            except (PermissionError, ValueError, KeyError, TypeError):
                 self.reply(403, {'error': 'route_forbidden'})
+            except Exception:
+                self.reply(500, {'error': 'operation_unconfirmed'})
         def do_POST(self):
             peer = api.principal(self.headers.get('Authorization', ''))
             if peer is None:
@@ -192,7 +245,11 @@ def _serve_locked(config, ready, handoff_verifier, operation_verifier, before_ch
                 if not 0 <= size <= (8 * 1024 * 1024 + 65536 if large else 128 * 1024):
                     return self.reply(413, {'error': 'body_too_large'})
                 body = json.loads(self.rfile.read(size)) if size else {}
-                self.reply(200, api.dispatch(self.path, body, peer))
+                if peer['role'] == 'owner_client':
+                    self.reply(200, api.owner_dispatch('POST', self.path, body, peer,
+                        self.headers.get(ORIGIN_HEADER), self.headers.get(IDENTITY_HEADER)))
+                else:
+                    self.reply(200, api.dispatch(self.path, body, peer))
             except PermissionError:
                 self.reply(403, {'error': 'route_forbidden'})
             except Conflict:

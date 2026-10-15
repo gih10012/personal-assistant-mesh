@@ -7,18 +7,29 @@ An unknown ACK is reconciled through this SAME receipt, never another POST.
 import json
 
 from .communication_store import PROTOCOL, RECEIPT_PROTOCOL, message_identity
-from .networking import canonical, digest, identifier
+from .networking import canonical, digest, identifier, native_scope
 from .store import Conflict
 
 
 class CommunicationInbox:
-    def __init__(self, store, execution_authority, communication_id):
+    def __init__(self, store, execution_authority, communication_id, new_task_route=None):
         if not callable(getattr(store, '_ingest_in_db', None)):
             raise ValueError('communication_original_ingest_extraction_required')
         identifier(execution_authority)
         if not isinstance(communication_id, str) or len(communication_id) != 64:
             raise ValueError('communication_identity_invalid')
         self.store, self.authority, self.communication_id = store, execution_authority, communication_id
+        if new_task_route is not None:
+            if (not isinstance(new_task_route, dict)
+                    or set(new_task_route) != {'required', 'project_id', 'agent_id'}
+                    or not isinstance(new_task_route['required'], list)
+                    or not all(isinstance(item, str) for item in new_task_route['required'])
+                    or not {'agent', 'mesh.node:' + execution_authority} <= set(new_task_route['required'])
+                    or 'leader' in new_task_route['required']):
+                raise ValueError('communication_new_task_route_invalid')
+            identifier(new_task_route['project_id'])
+            identifier(new_task_route['agent_id'])
+        self.new_task_route = json.loads(json.dumps(new_task_route))
         with store.transaction() as db:
             db.execute('CREATE TABLE IF NOT EXISTS communication_inbox_receipts('
                 'communication_id TEXT NOT NULL,message_id TEXT NOT NULL,body_sha256 TEXT NOT NULL,'
@@ -58,6 +69,21 @@ class CommunicationInbox:
             accepted = self.store._ingest_in_db(db, [message],
                 'communication-projection-' + message_id,
                 message.get('from_user_id'), message.get('to_user_id'))
+            if original is None and self.new_task_route is not None and event.get('kind') == 'message':
+                # Trusted owner's route for NEW local autonomous work only.
+                # Old controls/tasks/receipts and native history never migrate.
+                task = db.execute('SELECT context,scope FROM tasks WHERE id=?', (message_id,)).fetchone()
+                if task is not None:
+                    route = self.new_task_route
+                    context = json.loads(task['context'])  # retain original /goal and /plan
+                    context.update(project_id=route['project_id'], agent_id=route['agent_id'],
+                        authority='local:' + self.authority,
+                        origin={'kind': 'communication', 'communication_id': self.communication_id,
+                                'message_id': message_id})
+                    context['session_scope'] = native_scope(self.authority, route['project_id'],
+                                                           route['agent_id'], self.communication_id)
+                    db.execute('UPDATE tasks SET required=?,context=?,scope=? WHERE id=?',
+                        (canonical(route['required']), canonical(context), context['session_scope'], message_id))
             task = db.execute('SELECT id FROM tasks WHERE id=?', (message_id,)).fetchone()
             receipt = {'protocol': RECEIPT_PROTOCOL, 'communication_id': self.communication_id,
                 'message_id': message_id, 'body_sha256': event['body_sha256'],

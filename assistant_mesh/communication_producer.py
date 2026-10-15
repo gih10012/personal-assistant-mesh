@@ -21,6 +21,12 @@ def relay_store_class(original_store):
                 # and receiver receipt carry the one original relay identity.
                 explicit = True
             return super()._enqueue(db, request_id, text, delivery_route, explicit)
+
+        def enqueue_media(self, request_id, items):
+            # Existing text-only NotificationRelay cannot carry media_items.
+            # Reject before either outbox or relay reservation; native media
+            # tools are unaffected and historical media rows remain readable.
+            raise ValueError('communication_media_relay_unsupported_before_enqueue')
     return RelayStore
 
 

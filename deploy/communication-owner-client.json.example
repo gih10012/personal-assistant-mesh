@@ -1,0 +1,11 @@
+{
+  "control_url": "http://127.0.0.1:17680",
+  "token_file": "/PRIVATE/original-owner-reference.token",
+  "mesh_communication": {
+    "protocol": "mesh-communication-owner-client/1",
+    "control_url": "http://127.0.0.1:17684",
+    "token_file": "/PRIVATE/communication-owner-client.token",
+    "communication_id": "REPLACE_WITH_EXTERNALLY_VERIFIED_64_HEX_ID",
+    "legacy_control_url": "http://127.0.0.1:17680"
+  }
+}

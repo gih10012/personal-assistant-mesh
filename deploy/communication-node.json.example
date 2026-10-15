@@ -1,0 +1,5 @@
+{
+  "protocol": "mesh-communication-node-owner/1",
+  "node_config": "/PRIVATE/original-node-with-quiet-server-reference.json",
+  "task_server_config": "/PRIVATE/same-node-task-producer-with-original-owner-relay.json"
+}

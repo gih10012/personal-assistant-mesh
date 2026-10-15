@@ -20,7 +20,7 @@ from .communication_store import (
 from .channel_checkpoint import _COLUMNS, _schema
 from .networking import canonical, digest, identifier
 
-TRANSFER = 'mesh-communication-transfer/1'
+TRANSFER = 'mesh-communication-transfer/2'
 FENCE_TABLES = ('channel_carrier_witness', 'channel_carrier_accounts',
                 'channel_carrier_candidates', 'channel_carrier_intents', 'channel_canonical_intents')
 
@@ -63,6 +63,14 @@ def export_transfer(database, origin_authority, owner_ref, account_binding,
                  'communication_original_route_missing')
         references = []
         independent_source = 'communication_identity' in names
+        if independent_source:
+            _require('communication_inbox_order' in names,
+                     'communication_original_archive_order_missing')
+            inbox_order = [dict(row) for row in db.execute(
+                'SELECT message_id,sequence FROM communication_inbox_order ORDER BY sequence')]
+        else:
+            inbox_order = [{'message_id': row['id'], 'sequence': row['rowid']} for row in db.execute(
+                'SELECT rowid,id FROM inbox ORDER BY rowid')]
         if independent_source:
             _require(db.execute('SELECT prepared FROM communication_identity').fetchone()[0] == 1,
                      'communication_source_candidate_incomplete')
@@ -115,7 +123,7 @@ def export_transfer(database, origin_authority, owner_ref, account_binding,
                 'owner_ref': owner_ref, 'account_binding': account_binding,
                 'receiver_incarnation': incarnation,
                 'communication_id': digest([PROTOCOL, origin_authority, account_binding, incarnation])},
-            'tables': tables, 'schemas': schemas, 'fences': fences,
+            'tables': tables, 'schemas': schemas, 'fences': fences, 'inbox_order': inbox_order,
             'task_references': references, 'control_references': controls,
             'events': ([dict(row) for row in db.execute('SELECT * FROM communication_events ORDER BY message_id')]
                        if independent_source else []),
@@ -135,7 +143,7 @@ def validate_transfer(transfer, expected_sha256):
     payload = transfer['payload']
     keys = {'protocol', 'purpose', 'transfer_id', 'captured_at', 'identity', 'tables', 'schemas',
             'fences', 'task_references', 'control_references', 'legacy_relay_provenance', 'events',
-            'activation_authorized', 'runnable_tasks_or_native_history_copied'}
+            'activation_authorized', 'runnable_tasks_or_native_history_copied', 'inbox_order'}
     _require(isinstance(payload, dict) and set(payload) == keys and payload.get('protocol') == TRANSFER
         and payload.get('purpose') == 'communication_state_split'
         and payload.get('activation_authorized') is False
@@ -181,6 +189,15 @@ def validate_transfer(transfer, expected_sha256):
         and meta.get('owner_notification_receiver_incarnation') == identity['receiver_incarnation'],
         'communication_original_meta_changed')
     inbox = {row['id']: json.loads(row['body']) for row in rows['inbox']}
+    order = payload['inbox_order']
+    _require(isinstance(order, list) and len(order) == len(inbox)
+        and all(isinstance(item, dict) and set(item) == {'message_id', 'sequence'}
+                and isinstance(item['message_id'], str) and item['message_id'] in inbox
+                and type(item['sequence']) is int and 0 < item['sequence'] <= 2 ** 63 - 1
+                for item in order), 'communication_original_archive_order_invalid')
+    _require(len({item['message_id'] for item in order}) == len(inbox)
+        and len({item['sequence'] for item in order}) == len(order),
+        'communication_original_archive_order_invalid')
     event_keys = {'message_id', 'body_sha256', 'kind', 'required_authority', 'target_authority',
                   'state', 'post_attempted', 'receipt', 'created', 'updated'}
     for event in payload['events']:
@@ -222,6 +239,9 @@ def install_prepared(transfer, database, expected_sha256):
                 columns = _COLUMNS[table]
                 db.execute('INSERT INTO ' + table + '(' + ','.join(columns) + ') VALUES(' +
                            ','.join('?' for _ in columns) + ')', tuple(row[key] for key in columns))
+        for item in payload['inbox_order']:
+            db.execute('INSERT INTO communication_inbox_order VALUES(?,?)',
+                       (item['message_id'], item['sequence']))
         for reference in payload['task_references']:
             db.execute('INSERT INTO communication_task_refs VALUES(?,?,?)',
                        (reference['authority'], reference['task_id'], canonical(reference)))
@@ -276,6 +296,9 @@ def verify_prepared(store, transfer, expected_sha256):
             _require(actual == sorted(rows, key=canonical), 'communication_candidate_rows_changed')
         actual = sorted([dict(row) for row in db.execute('SELECT * FROM communication_events')], key=canonical)
         _require(actual == sorted(payload['events'], key=canonical), 'communication_candidate_events_changed')
+        actual = [dict(row) for row in db.execute('SELECT * FROM communication_inbox_order ORDER BY sequence')]
+        _require(actual == sorted(payload['inbox_order'], key=lambda row: row['sequence']),
+                 'communication_candidate_archive_order_changed')
         for table, keys, field, references in (
                 ('communication_task_refs', ('authority', 'task_id'), 'reference', payload['task_references']),
                 ('communication_control_refs', ('authority', 'control_id', 'task_id'), 'reference', payload['control_references']),
