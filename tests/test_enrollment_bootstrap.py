@@ -18,7 +18,8 @@ from unittest import mock
 
 from assistant_mesh.enrollment import (EnrollmentError, EnrollmentJournal,
                                       document_sha256, result_envelope)
-from assistant_mesh.enrollment_bootstrap import BootstrapError, EnrollmentBootstrap, main
+from assistant_mesh.enrollment_bootstrap import (BootstrapError, EnrollmentBootstrap,
+                                                _adapter_bytes, main)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,8 +38,17 @@ def owned_file(path, raw):
 
 def fixture(directory, adapter=None, argv=None, kind='interactive'):
     now = int(time.time())
-    node = Path(shutil.which('node') or '/unavailable/node').resolve()
-    script = adapter or ADAPTER
+    # Hosted runners can put Node/repositories below group-writable tool/cache
+    # ancestors. Exercise the actual pinned-executable policy from a private
+    # owner fixture, not by weakening it or chmod'ing the host installation.
+    node = directory / 'fixture-node'
+    if not node.exists():
+        shutil.copyfile(Path(shutil.which('node') or '/unavailable/node').resolve(), node)
+        node.chmod(0o700)
+    script = adapter or directory / 'enrollment-stdio-adapter.mjs'
+    if adapter is None and not script.exists():
+        shutil.copyfile(ADAPTER, script)
+        script.chmod(0o600)
     document = {'format': 'mesh-enrollment/1', 'mesh_id': 'isolated-owner-mesh',
         'node_id': 'isolated-adapter', 'owner_binding': 'synthetic-owner-not-production',
         'repo_pin': {'repository': 'https://github.com/gih10012/personal-assistant-mesh', 'commit': 'a' * 40},
@@ -152,8 +162,7 @@ class BootstrapTests(unittest.TestCase):
     def test_owned_adapter_failure_never_replays_or_accepts_new_operation_identity(self):
         script = self.directory / 'failing.mjs'
         owned_file(script, b"import fs from 'node:fs'; fs.writeFileSync('effect-marker', 'once', {flag:'wx'}); process.exitCode=1;")
-        self.config, self.path, self.payload = fixture(self.directory, adapter=script,
-            argv=[str(Path(shutil.which('node')).resolve()), str(script)])
+        self.config, self.path, self.payload = fixture(self.directory, adapter=script)
         tool, challenge = self.ready()
         first = tool.run(challenge['operation_id'])
         self.assertEqual('unknown', first['status']['state'])
@@ -266,8 +275,7 @@ class BootstrapTests(unittest.TestCase):
     def test_adapter_timeout_keeps_unknown_and_owned_process_reaped(self):
         script = self.directory / 'hanging.mjs'
         owned_file(script, b'setInterval(() => {}, 1000);')
-        self.config, self.path, self.payload = fixture(self.directory, adapter=script,
-            argv=[str(Path(shutil.which('node')).resolve()), str(script)])
+        self.config, self.path, self.payload = fixture(self.directory, adapter=script)
         self.config['adapter']['timeout_seconds'] = 1
         self.save()
         tool, challenge = self.ready()
@@ -297,6 +305,29 @@ class BootstrapTests(unittest.TestCase):
         self.save()
         with self.assertRaisesRegex(BootstrapError, 'unpinned_path'):
             self.tool()
+
+    def test_writable_host_cache_remains_rejected_while_private_fixture_is_usable(self):
+        shared = self.directory / 'shared-tool-cache'
+        shared.mkdir(mode=0o777)
+        shared.chmod(0o777)
+        script = shared / 'untrusted-adapter.mjs'
+        script.write_bytes(ADAPTER.read_bytes())
+        script.chmod(0o600)
+        with self.assertRaisesRegex(BootstrapError, 'adapter_path_unsafe'):
+            _adapter_bytes({'path': str(script), 'sha256': digest(script)})
+        with mock.patch(__name__ + '.ADAPTER', script):
+            # A new owner fixture copies bytes out of the writable cache; it
+            # does not enroll or execute the original untrusted path.
+            private = self.directory / 'private-owner-fixture'
+            private.mkdir(mode=0o700)
+            config, path, payload = fixture(private)
+        tool = EnrollmentBootstrap(path)
+        tool.bootstrap()
+        challenge = tool.challenge('original-bootstrap-challenge')
+        tool.run(challenge['operation_id'])
+        self.assertEqual(153600, tool.verify(challenge['operation_id'])['artifact_bytes'])
+        self.assertEqual(0o777, shared.stat().st_mode & 0o777)
+        self.assertTrue(str(config['adapter']['argv'][0]).startswith(str(private)))
 
     def test_private_scope_metadata_and_bad_cli_flags_are_fixed_errors(self):
         self.config['inventory']['candidates'][0]['scope']['access_token'] = 'PRIVATE-FIXTURE-SECRET'
