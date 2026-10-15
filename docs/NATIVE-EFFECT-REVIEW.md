@@ -1,0 +1,144 @@
+# Owner review of one known-effects native failure
+
+`scripts/review_native_effects.py` is a narrow, owner-local recovery tool for the
+independently audited `exclusive-auth-copy-query-close/1` case. It is not an
+agent tool, generic approval/guard-clear endpoint, zero-effect quota retry or
+permission boundary on native Shell. No Worker, server or production schema is
+changed merely by installing or auditing this candidate.
+
+The reviewed turn failed with `server_overloaded` after six commands and two
+original-process observation calls. The known write was an exclusive new private
+auth file, not a zero-effect turn. The old frozen Store's `claim` examines guarded
+tasks even when their status is `failed`; a status-only change cannot unblock its
+scope. Conversely, clearing the flag and making the old input `pending` would
+replay work. This tool does neither of those incomplete operations.
+
+## Required independent owner evidence
+
+The private 0600 case spec binds the original task/epoch/scope/native thread and
+turn, complete task/checkpoint/session digests, exact full rollout and selected
+segment, every call's source/command/full-output digest, original chunk IDs and
+the two observation handles. It has a short reviewer time window, at most 30
+minutes. A model-supplied `reviewed` boolean is rejected.
+
+Admission is also bound to a **code-owned closed historical case**, not merely
+digests supplied by that private spec. Opaque public SHA pins cover every byte of
+the six JavaScript call envelopes, complete shell commands (including prefixes,
+tails and options), both observation envelopes, selected record counts and
+original task/thread/turn/segment identity. A second bundle binds all remaining
+spec fields except its short review time window, including source, auth, Worker
+generation and private-path bindings. There is no CLI/environment/spec override
+to admit a future case. Different source or generation requires independent
+source/case review; refreshing a time window alone grants nothing and changes
+the exact spec digest requiring explicit owner approval. Do not blindly extend
+an expired spec. Configured paths are not proof of authority: the operations
+owner must still independently confirm the original ledger and live identity.
+
+Audit actually reparses the complete bytes and all six command/event/output
+associations. It verifies all eight outputs are bound to original calls, chunks
+join to the complete native stdout, both original handles terminate, no later
+turn/unknown effect exists, and the exact failed terminal has no final answer.
+The auth-copy AST must still use `O_CREAT | O_EXCL | O_WRONLY`, a 0600 file, 0700
+directory, a bounded plain existing SSH auth read and a closed complete write.
+The original post-copy account result must confirm authentication; no new model
+or account RPC is sent to obtain that evidence.
+
+The AST and shell-shape checks are additional checks on this fixed case, **not a
+general Shell/JavaScript effect verifier**. Independent review found five paths
+that those old checks alone accepted: a write before the copy heredoc, a write
+before the query heredoc, a changed `chmod` target, a write after `rg &&`, and a
+non-tool JavaScript `fetch` after the native call. They are now all rejected by
+whole-source/command pins even if a private spec is repinned. None of those
+synthetic strings was executed. This does not assert that arbitrary future
+commands, app-server bookkeeping or external effects have been audited.
+
+Fresh fixed read-only observers on the authority and already-authorized local
+SSH peer check auth file identities/complete hashes/generations and authorized
+account-binding hashes, emitting only booleans and metadata. They also inspect
+the pinned Codex source's `account/read(refreshToken=False)` and owned-runtime
+close/reap structure. Actual process generations and original native time-window
+survivors are checked alongside original terminal receipts and ledger idleness;
+a PID, exit code or process absence alone is not settlement. Account validity
+*now*, lack of all native bookkeeping, or closure of arbitrary external effects
+is not inferred from this evidence.
+
+The same original ledger must contain no active task on this Worker or scope,
+no selected task children/allocation/delegation bindings, and no other guarded
+same-scope task. Dependency schemas, the original artifact chunks and a strict
+complete old-history prefix are checked. Native history, auth bytes, private
+specs and before snapshots never enter the public repository.
+
+## Explicit owner operation, not automatic recovery
+
+Run from the frozen source root, with its normal package import path:
+
+```sh
+python3 -m scripts.review_native_effects --spec-file /PRIVATE/owner-review.json
+```
+
+Only after independent review and authority to settle this exact known-effects
+failure may the operations owner add `--apply --approve-spec-sha256 <digest>`.
+The digest identifies the approved private case; it is not itself evidence that
+effects are safe or that an account action was authorized. A stale/edited spec,
+different generation, incomplete receipt or unreviewed command is refused.
+
+Before the single compare-and-swap, an exclusive private same-case directory
+retains a durable intent, full original task/checkpoint/session, original gzip
+artifact, complete unchanged rollout gzip and a streamed consistent read-
+transaction SQL backup. Backup gzip readback and source `quick_check` are
+verified. This works with Python 3.6 without `Connection.backup()`. Never restore
+that historical backup over the live ledger.
+
+One transaction appends a new full-history artifact and append-only review row,
+preserves the old chunks, preserves `native_sessions.state` byte-for-byte, and
+promotes only its complete artifact reference. It retains original task input,
+failure result and checkpoint fields; appends an explicit non-zero-effect owner
+review; settles only this guard; and marks the original task `failed` with a new
+fencing epoch. It never queues the old input, starts a turn, resumes a Goal,
+sets a Goal, changes native history files or mutates auth. A separate already-
+authorized pending task may subsequently be claimed by the normal Worker.
+
+An existing/partial intent or lost commit ACK must use the same spec's
+`--status` readback. No automatic reapply, replacement case ID, deleted intent or
+reset of an old unknown is permitted. Status can read an expired original spec;
+it cannot grant a new mutation or accept a regenerated spec after an intent.
+Readback checks the exact originally approved spec digest and before-state
+digests, typed receipt invariants, the original task's failed/new-epoch state and
+all preserved fields/checkpoint, the unchanged complete old chunks, and every
+uncompressed byte of the retained full-history artifact. A journal row or a
+receipt string alone is not proof of successful settlement. A later authorized
+task may advance the live native session; readback does not restore or require
+that live session to remain at this historical artifact. The append-only
+journal and retained private before snapshots preserve original uncertainty
+and every earlier failure.
+
+## Validation scope
+
+Twenty-two synthetic risk tests exercise the actual parser, original stdout
+binding, O_EXCL rejection, authenticated post-check, source/process generations,
+dependencies, strict history prefix, CAS race, lost ACK and append-only journal.
+They also demonstrate that status-only `failed` still blocks, and that reviewed
+failure permits only the new pending task while preserving its native context.
+The five original parser counterexamples, private case/source/generation repins,
+expired same-spec readback, changed checkpoint, missing old/new history and
+subsequent live-session progress are covered. Tests explicitly replace the
+code-owned manifest with synthetic fixture pins in process; the installed tool
+has no such override.
+
+The original production turn passed the author's prior complete read-only
+parser and both live observers under Python 3.6; those private receipts remain
+historical evidence, not fresh approval of this repair. Independent peer review
+then read only the exact eight selected call sources over existing authorized
+SSH: all complete source/command pins matched, only the six native execution
+calls and two empty original-handle observations were present, and the complete
+shell/JS envelopes and original copy target were inspected for the five gaps.
+That review did not execute recorded code, read auth or call a model/account RPC.
+The old SSH quote-splice delimiter and `input_text` native output encoding were
+verified from actual records, not invented by the fixture. The private case's
+expired time window was not extended by this specialist.
+
+No production `--apply`, new model/RPC, service operation or auth write was
+performed by the implementation specialist. Deployment, explicit review
+settlement and the original Leader's next real task remain operations-owner
+work. This one Linux owner repair is not a universal node-platform requirement,
+global failure recovery or completion of the Mesh goal.
