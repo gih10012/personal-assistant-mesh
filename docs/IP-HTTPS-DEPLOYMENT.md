@@ -102,10 +102,15 @@ then executes these commands; existing paths/state must be inspected/backed up.
    failure keep the existing nginx generation and original certificate; never
    restore an old Mesh database or restart unrelated application services.
 6. Externally verify public CA/IP hostname trust and actual served certificate,
-   `/mcp` and `/cloud/node` without bearer => 401, unconfigured authenticated-
-   shaped requests/resource metadata => 503, wrong Host/path/query/management
-   paths => rejection. These results prove TLS/boundaries, not Chat/Cloud
-   integration or usable OAuth. Only then configure audited sidecar ports.
+   unconfigured `/mcp` and `/cloud/node` without bearer => 401, unconfigured
+   authenticated-shaped requests/resource metadata => 503, wrong
+   Host/path/query/management paths => rejection. These results prove
+   TLS/boundaries, not Chat/Cloud integration or usable OAuth. Only then
+   configure audited sidecar ports. Once the real authenticated MCP SDK sidecar
+   is selected, missing/invalid bearer must reach its verifier and return its
+   standard 401 `WWW-Authenticate` protected-resource metadata challenge; do
+   not substitute a challenge-less nginx 401 or configure an unauthenticated
+   backend to make linking work.
 
 ## Narrow gateway and container boundaries
 
@@ -119,10 +124,19 @@ protocol/session/auth decisions to the SDK. Body caps are 64 KiB for MCP and
 cookies, expectation/upgrade headers are rejected. Public metadata is GET-only,
 small and forwarded without bearer. No wildcard route or dynamic upstream exists.
 
-Nginx's bearer shape check is **not token authentication**: authenticated MCP
-OAuth subject/client/scope and Cloud task/lease token checks remain mandatory in
-the dedicated loopback sidecars. No operator bearer or generic management port
-is selected. Proxy requests reconstruct fixed validated Host, X-Forwarded-Proto
+Nginx's bearer shape check for Cloud and unconfigured routes is **not token
+authentication**. With an explicitly configured `/mcp` port, nginx does not
+preempt missing/invalid bearer: the actual MCP SDK performs OAuth verification
+on every request and supplies the RFC 9728 challenge. Upstream errors and their
+`WWW-Authenticate` headers pass through unchanged. Cloud's shape gate remains;
+its task/lease token verifier is still mandatory. MCP owner/subject/client/scope
+and Cloud task/lease bindings remain enforced in their respective sidecars.
+Public resource metadata alone does not make either endpoint authorized or
+Chat connected.
+[Official OpenAI MCP authentication](https://developers.openai.com/plugins/build/auth#implementing-token-verification).
+
+No operator bearer or generic management port is selected. Proxy requests
+reconstruct fixed validated Host, X-Forwarded-Proto
 `https` and real peer address; caller forwarding headers are not trusted. No
 automatic upstream retry can replay an effectful request.
 
@@ -162,8 +176,14 @@ requires owner/Leader attention. No-email registration provides no email safety
 net. A true issuance+later-renewal+served-certificate change remains an actual
 operations acceptance, not satisfied by this source/template slice.
 
-Eight local pure tests cover safe new output, shell syntax, official immutable
+Ten local pure tests cover safe new output, shell syntax, official immutable
 images, hardening/mounts, exact fail-closed routes/headers/body limits, no email,
 separate staging state, staging-only dry-run, hook/reload order and injection
-rejection. They do not run nginx, issue certificates or claim production TLS
-success. Root must perform the pinned-image `nginx -t` and real public probes.
+rejection, configured-MCP challenge passthrough and unchanged Cloud/unconfigured
+token gates. They do not run nginx, issue certificates or claim production TLS
+success. The separate real SDK loopback tests verify actual missing/invalid
+issuer/audience/scope rejection and protected-resource challenges using only
+synthetic tokens; they are not public TLS/OAuth or actual Chat acceptance. Root
+must perform the pinned-image `nginx -t` and real public probes after sidecar
+configuration. This review does not change HTTP bootstrap assets, certificate
+issuance/hook/mount commands, or the unconfigured TLS configuration.

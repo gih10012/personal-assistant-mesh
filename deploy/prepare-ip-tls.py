@@ -70,6 +70,7 @@ def forwarding(ip):
         proxy_buffering off;
         proxy_request_buffering on;
         proxy_cache off;
+        proxy_intercept_errors off;
         proxy_next_upstream off;
 '''.replace('__IP__', ip)
 
@@ -81,8 +82,13 @@ def route(config, path, port, methods, body_limit, metadata=False):
     if metadata:
         directives += ['        if ($http_content_length !~ "^(0)?$") { return 413; }']
     else:
-        directives += ['        if ($mesh_bearer = 0) { return 401; }',
-                       '        if ($mesh_json = 0) { return 415; }']
+        # The authenticated MCP SDK must see missing/invalid tokens so its 401
+        # includes the RFC 9728 protected-resource metadata challenge. A bare
+        # nginx 401 hides OAuth discovery. No sidecar is still fail-closed;
+        # Cloud retains its separate task-token gate and verifier.
+        if path != '/mcp' or port is None:
+            directives += ['        if ($mesh_bearer = 0) { return 401; }']
+        directives += ['        if ($mesh_json = 0) { return 415; }']
     if port is None:
         directives += ['        return 503;', '    }']
         return '\n'.join(directives)
