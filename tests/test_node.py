@@ -3,6 +3,7 @@ import hashlib
 import contextlib
 import io
 import json
+import errno
 import socket
 import stat
 import tempfile
@@ -40,11 +41,14 @@ class NodeTests(unittest.TestCase):
     def tearDown(self):
         for node in reversed(self.nodes):
             node.stop()
+            if node.server_thread is not None:
+                self.assertFalse(node.server_thread.is_alive(), 'owned node HTTP thread did not stop')
         for server, thread in self.external_servers:
             if thread.is_alive():
                 server.shutdown()
             thread.join(timeout=3)
             server.server_close()
+            self.assertFalse(thread.is_alive(), 'external fixture HTTP thread did not stop')
         self.tmp.cleanup()
 
     def private(self, name, value):
@@ -60,14 +64,7 @@ class NodeTests(unittest.TestCase):
             path.chmod(0o600)
         return str(path)
 
-    @staticmethod
-    def free_port():
-        with socket.socket() as sock:
-            sock.bind(('127.0.0.1', 0))
-            return sock.getsockname()[1]
-
-    def config(self, name, port=None, central=False, start_worker=False, other=None):
-        port = self.free_port() if port is None else port
+    def config(self, name, port=0, central=False, start_worker=False, other=None):
         capabilities = ['agent', 'mesh.node:' + name] + (['leader'] if central else [])
         server = {'node_id': name, 'database': str(self.directory / (name + '.db')), 'port': port,
                   'peers': [
@@ -98,39 +95,72 @@ class NodeTests(unittest.TestCase):
         value.update(changes)
         Path(path).write_text(json.dumps(value))
 
+    def start_owned(self, node):
+        try:
+            node.start()
+        except ValueError:
+            error = node.server_error
+            if error is None:
+                raise
+            self.fail('owned fixture start failed: type=%s errno=%s' %
+                      (type(error).__name__, getattr(error, 'errno', None)))
+
     def start_external(self, config):
         value = json.loads(Path(config['local_server_config']).read_text())
-        ready, current = threading.Event(), []
+        ready, errors = threading.Event(), []
         def installed(server, api, channel):
             api.store.clock = lambda: self.now
-            current.append(server)
+            # Let the actual listener retain its kernel-assigned port. Store
+            # that bound address for clients and intentional same-port restart,
+            # never sample and close a temporary "free port" socket.
+            port = server.server_address[1]
+            self.rewrite(config['local_server_config'], port=port)
+            self.rewrite(config['local_worker_config'], control_url='http://127.0.0.1:' + str(port))
+            self.external_servers.append((server, threading.current_thread()))
             ready.set()
-        thread = threading.Thread(target=serve, args=(value, installed), daemon=True)
+        def run_server():
+            try:
+                serve(value, installed)
+            except Exception as exc:
+                errors.append(exc)
+                ready.set()
+        thread = threading.Thread(target=run_server, daemon=True)
         thread.start()
         self.assertTrue(ready.wait(3))
-        self.external_servers.append((current[0], thread))
-        return current[0], thread
+        if errors:
+            thread.join(timeout=3)
+            # No exception bodies: even fixture diagnostics should not teach
+            # production callers to log credential-bearing URLs/arguments.
+            self.fail('external fixture start failed: type=%s errno=%s' %
+                      (type(errors[0]).__name__, getattr(errors[0], 'errno', None)))
+        return self.external_servers[-1][0], thread
 
     def pair(self, client_factory=Client, maintenance=True, alice_grants=None, bob_grants=None):
         alice_config = self.config('alice', other='bob')
         bob_config = self.config('bob', central=True, other='alice')
-        alice_worker = json.loads(Path(alice_config['local_worker_config']).read_text())
-        bob_worker = json.loads(Path(bob_config['local_worker_config']).read_text())
-        for config, other, worker in ((alice_config, 'bob', bob_worker), (bob_config, 'alice', alice_worker)):
+        for config in (alice_config, bob_config):
             grants = alice_grants if config['node_id'] == 'alice' else bob_grants
             if grants is not None:
                 value = json.loads(Path(config['local_server_config']).read_text())
                 value['peers'][-1]['capabilities'] = grants
                 Path(config['local_server_config']).write_text(json.dumps(value))
             config['auto_maintenance'] = maintenance
+
+        def connect_peer(config, other, worker):
             client = {'control_url': worker['control_url'],
                       'token_file': self.secret(other + '-from-' + config['node_id'])}
             config['peers'] = [{'node': other, 'authority': other,
                                 'client_config': self.private(config['node_id'] + '-to-' + other + '.json', client),
                                 'report_results': True}]
-        alice, bob = self.node(alice_config, client_factory=client_factory), self.node(bob_config)
+        # Resolve each peer only after its real socket is already bound. The
+        # two authorities cannot accidentally reserve the same released port.
         self.start_external(bob_config)
-        alice.start()
+        bob_worker = json.loads(Path(bob_config['local_worker_config']).read_text())
+        connect_peer(alice_config, 'bob', bob_worker)
+        alice = self.node(alice_config, client_factory=client_factory, server_runner=serve)
+        self.start_owned(alice)
+        connect_peer(bob_config, 'alice', alice.worker_config)
+        bob = self.node(bob_config)
         bob.start()
         # Actual credential-bound central-worker heartbeat/claim elects its
         # preconfigured central Leader, not the isolated node supervisor.
@@ -350,6 +380,51 @@ class NodeTests(unittest.TestCase):
         one.stop()
         two.start()
         self.assertIsNotNone(two.lock_file)
+
+    def test_pair_binds_kernel_ports_before_constructing_peer_clients(self):
+        configured_ports = []
+        actual_serve = serve
+
+        def observed_serve(config, ready=None):
+            configured_ports.append(config['port'])
+            return actual_serve(config, ready)
+
+        with patch('tests.test_node.serve', observed_serve):
+            alice, bob = self.pair()
+        self.assertEqual([0, 0], configured_ports)
+        alice_port = alice.server.server_address[1]
+        bob_port = self.external_servers[-1][0].server_address[1]
+        self.assertGreater(alice_port, 0)
+        self.assertGreater(bob_port, 0)
+        self.assertNotEqual(alice_port, bob_port)
+        self.assertEqual('http://127.0.0.1:' + str(alice_port), alice.worker_config['control_url'])
+        self.assertEqual('http://127.0.0.1:' + str(bob_port), bob.worker_config['control_url'])
+        self.assertEqual(alice.worker_config['control_url'], bob.peers['alice']['client']['control_url'])
+        self.assertEqual(bob.worker_config['control_url'], alice.peers['bob']['client']['control_url'])
+        self.assertEqual(bob_port, json.loads(Path(bob.config['local_server_config']).read_text())['port'])
+        self.assertTrue(alice.probe('bob'))
+        self.assertTrue(bob.probe('alice'))
+
+    def test_real_occupied_listener_exposes_original_failure_and_stops_owned_thread(self):
+        with socket.socket() as occupied:
+            occupied.bind(('127.0.0.1', 0))
+            occupied.listen()
+            node = self.node(self.config('alice', port=occupied.getsockname()[1]))
+            with self.assertRaisesRegex(AssertionError, 'type=OSError errno=' + str(errno.EADDRINUSE)):
+                self.start_owned(node)
+            self.assertIsInstance(node.server_error, OSError)
+            self.assertEqual(errno.EADDRINUSE, node.server_error.errno)
+            self.assertFalse(node.server_thread.is_alive())
+            self.assertIsNone(node.lock_file)
+
+    def test_external_fixture_bind_failure_reports_type_errno_without_thread_traceback(self):
+        with socket.socket() as occupied:
+            occupied.bind(('127.0.0.1', 0))
+            occupied.listen()
+            config = self.config('bob', central=True, port=occupied.getsockname()[1])
+            with self.assertRaisesRegex(AssertionError, 'type=OSError errno=' + str(errno.EADDRINUSE)):
+                self.start_external(config)
+        self.assertEqual([], self.external_servers)
 
     def test_real_a2a_disconnect_local_work_and_reconnect_same_scope(self):
         alice, bob = self.pair()
