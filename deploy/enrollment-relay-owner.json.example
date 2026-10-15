@@ -1,0 +1,20 @@
+{
+  "format": "mesh-enrollment-relay-owner/1",
+  "enabled": false,
+  "resource_url": "https://mesh.example.test/enrollment/node",
+  "token_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "binding": {
+    "mesh_id": "existing-owner-mesh",
+    "node_id": "existing-interactive-phone",
+    "owner_binding": "existing-owner-binding",
+    "enrollment_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "operation_id": "existing-owner-enrollment-operation",
+    "request_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+    "expires_at": 2100000000,
+    "task_id": "existing-original-mesh-task",
+    "task_epoch": 1,
+    "entry_request_id": "existing-original-owner-request"
+  },
+  "max_request_bytes": 1048576
+}
