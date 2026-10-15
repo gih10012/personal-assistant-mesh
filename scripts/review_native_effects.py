@@ -46,6 +46,32 @@ SUPPORTED_RECORDS = {
     'response_item:custom_tool_call_output', 'compacted:', 'world_state:',
     'event_msg:thread_settings_applied', 'event_msg:task_complete'}
 
+# One independently inspected historical case, not a general Shell/JS auditor.
+# Opaque pins include the COMPLETE JS input and command, including shell
+# prefixes/tails/options. Private spec repinning cannot add another code path.
+# No task/thread/account identifier or command body is published here. Changing
+# this code-owned manifest requires another independent source/case review.
+CLOSED_CASE = {
+    'bundle_sha256': '5bb21514b1ef7bbd16d29d2bcd1a5f4ce08e8b513f0408f8831c0be6f3540dfb',
+    'bindings_sha256': 'dd009784a39bb2078d685dbcc78607b8a3c19a92f1c2c2db08f5d9462c814766',
+    'commands': {
+        'metadata_read': 'ba6bcf5999c7e43be7faec8dc4a4c06dcce8f37676fac4b0e4a9f651142b9393',
+        'local_account_query': '4896d0ab18f7a7ae06721326f05744986e8a5939b014d800d357510da251c631',
+        'code_read': '3f2aae77d225ac6c1e814a0b3ad328d0ecf97af6fedf9f1c09e2b90202f1904a',
+        'worker_config_read': 'fdcb9088ab9e7df456aa8984578d047f27a59e64b9a1cd37bba7fa1f689b1b78',
+        'exclusive_auth_copy': '5abc87bdb9044ef1ed3dc57e2fc169410434031b3d2a4d0794d08b2c832a3534',
+        'authority_account_query': '30e321dcd1841bd2b6b9215b5ff6ec08d938bd2adf8249303758da21b97dfe20'},
+    'inputs': frozenset((
+        'fe29132c7c16565ed9ecf67e5f8ce9873cd11ff5f54f7f1d0c4c6b40b822e3fe',
+        '9309ea99e42f864ca3adffea4d7ab155f558bc4e89b67844ead93871123b971d',
+        '76bd1acd6296d4178a74bb5acedf39f9c204fe0e6a06e661204950ac78b41ef3',
+        'eacfd01a3f83ffc2ddc8fbdccf539e53130188538372a0612b68eb29b3eb4066',
+        '58412228de2fea527b21d3333ba6294c255a0a692d191d5f9294c6de6eaa78ba',
+        '5a2bf6cd67784fbb28f0b4827224ed9569f81de60852ec57596508a9ab79c2ee')),
+    'poll_inputs': frozenset((
+        '43fa1826999d09aab7b8468aa4b987ee45aa5fef0211bb02421d25e32c04a9dc',
+        'c66f7a131c25fd213404032dca0417c5e9b056d9761af5561aa2d7b7fd316fb0'))}
+
 
 class ReviewDenied(ValueError):
     """Fixed, non-content-bearing denial; never include paths or provider text."""
@@ -127,6 +153,25 @@ def private_directory(path):
     return path
 
 
+def closed_case_bundle(spec):
+    identity = {key: spec['expected'][key] for key in
+                ('task_id', 'epoch', 'scope', 'thread_id', 'turn_id', 'selected_sha256', 'selected_size')}
+    return {'case': spec['case'], 'identity': identity, 'commands': spec['commands'],
+            'polls': spec['polls'], 'record_counts': spec['record_counts']}
+
+
+def closed_case_bindings(spec):
+    # A different auth/source/worker/transport/path generation is NOT another
+    # instance of this historical case. A time window is the only mutable
+    # review control, still separately fresh-observed and explicitly approved.
+    return {key: value for key, value in spec.items() if key not in ('issued_at', 'expires_at')}
+
+
+def closed_command(command, roles):
+    require(sha(command.encode('utf8')) in {CLOSED_CASE['commands'][role] for role in roles},
+            'closed_case_command_mismatch')
+
+
 def load_spec(path, allow_expired=False):
     raw, version = read_checked(path, private=True, limit=MAX_SPEC)
     value = parse(raw.decode('utf8'))
@@ -173,6 +218,10 @@ def load_spec(path, allow_expired=False):
                 'reviewed_digest_required')
     require(expected['auth_file'].get('mode') == 0o600 and expected['auth_file'].get('size', 0) > 0,
             'reviewed_auth_metadata_required')
+    require(digest(closed_case_bundle(value)) == CLOSED_CASE['bundle_sha256'],
+            'closed_case_bundle_mismatch')
+    require(digest(closed_case_bindings(value)) == CLOSED_CASE['bindings_sha256'],
+            'closed_case_bindings_mismatch')
     return value, version
 
 
@@ -275,6 +324,7 @@ def inspect_copy_command(command, auth_path):
     require(any(isinstance(n, ast.If) and _name(n.test) == 'r.returncode'
                 and any(isinstance(x, ast.Raise) for x in ast.walk(n)) for n in tree.body),
             'auth_source_read_failure_not_fenced')
+    closed_command(command, ('exclusive_auth_copy',))
 
 
 def inspect_query_command(command):
@@ -310,6 +360,7 @@ def inspect_query_command(command):
                     'query_unreviewed_function')
             if name == 'open':
                 require(len(node.args) == 1 and not node.keywords, 'query_open_not_readonly')
+    closed_command(command, ('local_account_query', 'authority_account_query'))
 
 
 def inspect_read_command(command, role):
@@ -323,6 +374,7 @@ def inspect_read_command(command, role):
     require(verbs and set(verbs) <= allowed, 'read_shell_program_changed')
     if role == 'code_read':
         require('<<' not in command and '\n' not in command, 'code_read_shape_changed')
+        closed_command(command, (role,))
         return
     tree = python_body(command)
     allowed_calls = {'Path.home', 'base64.urlsafe_b64decode', 'bool', 'json.dumps', 'json.loads',
@@ -339,6 +391,7 @@ def inspect_read_command(command, role):
                 'read_unreviewed_function')
             if name == 'open':
                 require(len(node.args) == 1 and not node.keywords, 'read_open_not_readonly')
+    closed_command(command, (role,))
 
 
 def command_from_call(source):
@@ -347,6 +400,7 @@ def command_from_call(source):
             'unreviewed_nested_native_tool')
     matches = list(re.finditer(r'cmd\s*:\s*("(?:[^"\\]|\\.)*")', source))
     require(len(matches) == 1, 'single_recorded_command_required')
+    require(sha(source.encode('utf8')) in CLOSED_CASE['inputs'], 'closed_case_js_input_mismatch')
     return parse(matches[0].group(1))
 
 
@@ -416,6 +470,7 @@ def inspect_rollout(spec, selected):
                     require(cid in polls and isinstance(native_source, str), 'unreviewed_native_call')
                     poll = polls[cid]
                     require(sha(native_source.encode()) == poll['input_sha256']
+                            and sha(native_source.encode()) in CLOSED_CASE['poll_inputs']
                             and re.findall(r'tools\.([\w]+)\s*\(', native_source) == ['write_stdin'],
                             'unreviewed_poll_code')
                     handle = re.search(r'session_id\s*:\s*(\d+)', native_source)
@@ -1039,12 +1094,75 @@ def review_status(spec_path):
         row = None
         if db.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?',
                        ('table', 'native_effect_reviews')).fetchone():
-            row = db.execute('SELECT task_id,source_epoch,receipt FROM native_effect_reviews WHERE id=?',
+            row = db.execute('SELECT * FROM native_effect_reviews WHERE id=?',
                              (case_id,)).fetchone()
         if row:
             require(row['task_id'] == spec['expected']['task_id'] and row['source_epoch'] == spec['expected']['epoch'],
                     'review_record_identity_conflict')
-            return dict(parse(row['receipt']), applied=True, outcome_unknown=False,
+            proof, receipt = parse(row['proof']), parse(row['receipt'])
+            before_task, before_session = parse(row['before_task']), parse(row['before_session'])
+            require(isinstance(proof, dict) and isinstance(before_task, dict)
+                    and isinstance(before_session, dict) and proof.get('spec_sha256') == version['sha256']
+                    and digest(before_task) == spec['expected']['task_sha256']
+                    and digest(before_session) == spec['expected']['session_sha256']
+                    and row['closed_epoch'] == row['source_epoch'] + 1,
+                    'review_record_spec_or_before_conflict')
+            artifact = digest([NAMESPACE, 'full-history', case_id, spec['expected']['rollout_file']['sha256']])
+            expected_receipt = {'protocol': PROTOCOL, 'id': case_id, 'task_id': row['task_id'],
+                'source_epoch': row['source_epoch'], 'closed_epoch': row['closed_epoch'],
+                'complete_artifact': artifact, 'status': 'failed', 'effects_zero': False,
+                'outcome': 'known_effects_failed_reviewed', 'original_input_requeued': False,
+                'original_failure_retained': True, 'original_task_thread_and_turn_preserved': True,
+                'original_checkpoint_retained_in_private_review': True,
+                'native_session_state_changed': False, 'old_chunks_changed': False,
+                'full_rollout_sha256': spec['expected']['rollout_file']['sha256']}
+            require(isinstance(receipt, dict) and all(receipt.get(key) == value
+                    and type(receipt.get(key)) is type(value) for key, value in expected_receipt.items())
+                    and row['complete_artifact'] == artifact
+                    and row['before_artifact'] == before_session['artifact'], 'review_record_receipt_conflict')
+            task = db.execute('SELECT * FROM tasks WHERE id=?', (row['task_id'],)).fetchone()
+            require(task is not None and dict(task) == dict(before_task, status='failed',
+                    epoch=row['closed_epoch'], node=None, deadline=None, checkpoint=task['checkpoint']),
+                    'review_original_task_not_settled')
+            checkpoint = parse(task['checkpoint'])
+            expected_checkpoint = dict(parse(before_task['checkpoint']), side_effect_started=False,
+                owner_effect_review={'protocol': PROTOCOL, 'id': case_id,
+                    'outcome': 'known_effects_failed_reviewed', 'original_guard_was_true': True,
+                    'effects_zero': False, 'original_input_requeue_authorized': False})
+            require(digest(checkpoint) == digest(expected_checkpoint),
+                    'review_original_guard_not_settled')
+            old = spec['expected']['old_artifact']
+            old_sum, old_size, old_parts = hashlib.sha256(), 0, 0
+            for index, body in db.execute('SELECT part,body FROM session_chunks WHERE id=? ORDER BY part',
+                                          (old['id'],)):
+                require(index == old_parts and isinstance(body, bytes) and len(body) <= 65536,
+                        'review_old_artifact_changed')
+                old_sum.update(body)
+                old_size += len(body)
+                old_parts += 1
+                require(old_size <= MAX_FILE, 'review_old_artifact_changed')
+            require(old_parts == old['parts'] and old_size == old['compressed_size']
+                    and old_sum.hexdigest() == old['compressed_sha256'], 'review_old_artifact_changed')
+            packed, part = io.BytesIO(), 0
+            for index, body in db.execute('SELECT part,body FROM session_chunks WHERE id=? ORDER BY part',
+                                          (artifact,)):
+                require(index == part and isinstance(body, bytes) and len(body) <= 65536,
+                        'review_complete_artifact_changed')
+                packed.write(body)
+                part += 1
+                require(packed.tell() <= MAX_FILE, 'review_complete_artifact_changed')
+            require(part > 0, 'review_complete_artifact_changed')
+            packed.seek(0)
+            checksum, size = hashlib.sha256(), 0
+            with gzip.GzipFile(fileobj=packed, mode='rb') as history:
+                for block in iter(lambda: history.read(65536), b''):
+                    size += len(block)
+                    require(size <= MAX_FILE, 'review_complete_artifact_changed')
+                    checksum.update(block)
+            require(size == spec['expected']['rollout_file']['size']
+                    and checksum.hexdigest() == spec['expected']['rollout_file']['sha256'],
+                    'review_complete_artifact_changed')
+            return dict(receipt, applied=True, outcome_unknown=False,
                         read_only=True, retry_authorized=False)
     phases = []
     if directory.exists():
@@ -1056,6 +1174,8 @@ def review_status(spec_path):
                 state = parse(raw.decode())
                 require(state.get('id') == case_id and state.get('protocol') == PROTOCOL,
                         'review_intent_identity_conflict')
+                if name == '00-intent.json':
+                    require(state.get('spec_sha256') == version['sha256'], 'review_intent_spec_conflict')
                 phases.append(state.get('state'))
     return {'protocol': PROTOCOL, 'id': case_id, 'read_only': True,
             'ledger_review_present': False, 'durable_phases': phases,

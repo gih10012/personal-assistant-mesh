@@ -21,6 +21,19 @@ segment, every call's source/command/full-output digest, original chunk IDs and
 the two observation handles. It has a short reviewer time window, at most 30
 minutes. A model-supplied `reviewed` boolean is rejected.
 
+Admission is also bound to a **code-owned closed historical case**, not merely
+digests supplied by that private spec. Opaque public SHA pins cover every byte of
+the six JavaScript call envelopes, complete shell commands (including prefixes,
+tails and options), both observation envelopes, selected record counts and
+original task/thread/turn/segment identity. A second bundle binds all remaining
+spec fields except its short review time window, including source, auth, Worker
+generation and private-path bindings. There is no CLI/environment/spec override
+to admit a future case. Different source or generation requires independent
+source/case review; refreshing a time window alone grants nothing and changes
+the exact spec digest requiring explicit owner approval. Do not blindly extend
+an expired spec. Configured paths are not proof of authority: the operations
+owner must still independently confirm the original ledger and live identity.
+
 Audit actually reparses the complete bytes and all six command/event/output
 associations. It verifies all eight outputs are bound to original calls, chunks
 join to the complete native stdout, both original handles terminate, no later
@@ -29,6 +42,15 @@ The auth-copy AST must still use `O_CREAT | O_EXCL | O_WRONLY`, a 0600 file, 070
 directory, a bounded plain existing SSH auth read and a closed complete write.
 The original post-copy account result must confirm authentication; no new model
 or account RPC is sent to obtain that evidence.
+
+The AST and shell-shape checks are additional checks on this fixed case, **not a
+general Shell/JavaScript effect verifier**. Independent review found five paths
+that those old checks alone accepted: a write before the copy heredoc, a write
+before the query heredoc, a changed `chmod` target, a write after `rg &&`, and a
+non-tool JavaScript `fetch` after the native call. They are now all rejected by
+whole-source/command pins even if a private spec is repinned. None of those
+synthetic strings was executed. This does not assert that arbitrary future
+commands, app-server bookkeeping or external effects have been audited.
 
 Fresh fixed read-only observers on the authority and already-authorized local
 SSH peer check auth file identities/complete hashes/generations and authorized
@@ -79,20 +101,41 @@ authorized pending task may subsequently be claimed by the normal Worker.
 An existing/partial intent or lost commit ACK must use the same spec's
 `--status` readback. No automatic reapply, replacement case ID, deleted intent or
 reset of an old unknown is permitted. Status can read an expired original spec;
-it cannot grant a new mutation. The append-only journal and retained private
-before snapshots preserve original uncertainty and every earlier failure.
+it cannot grant a new mutation or accept a regenerated spec after an intent.
+Readback checks the exact originally approved spec digest and before-state
+digests, typed receipt invariants, the original task's failed/new-epoch state and
+all preserved fields/checkpoint, the unchanged complete old chunks, and every
+uncompressed byte of the retained full-history artifact. A journal row or a
+receipt string alone is not proof of successful settlement. A later authorized
+task may advance the live native session; readback does not restore or require
+that live session to remain at this historical artifact. The append-only
+journal and retained private before snapshots preserve original uncertainty
+and every earlier failure.
 
 ## Validation scope
 
-Seventeen synthetic risk tests exercise the actual parser, original stdout
+Twenty-two synthetic risk tests exercise the actual parser, original stdout
 binding, O_EXCL rejection, authenticated post-check, source/process generations,
 dependencies, strict history prefix, CAS race, lost ACK and append-only journal.
 They also demonstrate that status-only `failed` still blocks, and that reviewed
 failure permits only the new pending task while preserving its native context.
-The original production turn has additionally passed the candidate's complete
-read-only parser and both live observers under Python 3.6; private evidence is
-retained separately. The old SSH quote-splice delimiter and `input_text` native
-output encoding were verified from actual records, not invented by the fixture.
+The five original parser counterexamples, private case/source/generation repins,
+expired same-spec readback, changed checkpoint, missing old/new history and
+subsequent live-session progress are covered. Tests explicitly replace the
+code-owned manifest with synthetic fixture pins in process; the installed tool
+has no such override.
+
+The original production turn passed the author's prior complete read-only
+parser and both live observers under Python 3.6; those private receipts remain
+historical evidence, not fresh approval of this repair. Independent peer review
+then read only the exact eight selected call sources over existing authorized
+SSH: all complete source/command pins matched, only the six native execution
+calls and two empty original-handle observations were present, and the complete
+shell/JS envelopes and original copy target were inspected for the five gaps.
+That review did not execute recorded code, read auth or call a model/account RPC.
+The old SSH quote-splice delimiter and `input_text` native output encoding were
+verified from actual records, not invented by the fixture. The private case's
+expired time window was not extended by this specialist.
 
 No production `--apply`, new model/RPC, service operation or auth write was
 performed by the implementation specialist. Deployment, explicit review

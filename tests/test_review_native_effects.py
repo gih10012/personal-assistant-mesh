@@ -1,5 +1,6 @@
 """Synthetic native bytes exercise the real parser and one-shot DB transition."""
 import base64
+import ast
 import collections
 import contextlib
 import gzip
@@ -84,9 +85,21 @@ class NativeEffectReviewTests(unittest.TestCase):
         self.rollout.chmod(0o600)
         self.spec = self.make_spec()
         self.private(self.spec_path, self.spec)
+        # Synthetic tests replace the CODE-owned fixture pins, never a CLI or
+        # owner-spec override. The installed script admits only its real case.
+        self.closed_patch = patch.object(review, 'CLOSED_CASE', self.closed_manifest())
+        self.closed_patch.start()
 
     def tearDown(self):
+        self.closed_patch.stop()
         self.temp.cleanup()
+
+    def closed_manifest(self):
+        return {'bundle_sha256': review.digest(review.closed_case_bundle(self.spec)),
+                'bindings_sha256': review.digest(review.closed_case_bindings(self.spec)),
+                'commands': {item['role']: item['command_sha256'] for item in self.spec['commands']},
+                'inputs': frozenset(item['input_sha256'] for item in self.spec['commands']),
+                'poll_inputs': frozenset(item['input_sha256'] for item in self.spec['polls'])}
 
     @staticmethod
     def encode(records):
@@ -230,6 +243,9 @@ class NativeEffectReviewTests(unittest.TestCase):
         self.spec['expected'].update(rollout_file=review.read_checked(self.rollout, True)[1],
             selected_sha256=review.sha(self.encode(self.records)), selected_size=len(self.encode(self.records)))
         self.private(self.spec_path, self.spec)
+        # Preserve the original semantic tests below while explicitly binding
+        # their synthetic bytes as TEST code, not accepting private repinning.
+        review.CLOSED_CASE.update(self.closed_manifest())
 
     def test_default_audit_real_six_command_parser_has_no_mutation_or_secret_output(self):
         before = {t: self.rows(t) for t in ('tasks', 'native_sessions', 'session_chunks')}
@@ -422,10 +438,111 @@ class NativeEffectReviewTests(unittest.TestCase):
 
     def test_shell_quoted_heredoc_is_parsed_not_unescaped_or_executed(self):
         quoted = self.commands[4].replace("<<'PY'", "<<'\"'\"'PY'\"'\"'") + "'"
-        review.inspect_copy_command(quoted, str(self.auth))
+        self.assertEqual(ast.dump(review.python_body(self.commands[4])), ast.dump(review.python_body(quoted)))
+        with self.assertRaisesRegex(review.ReviewDenied, 'closed_case_command_mismatch'):
+            review.inspect_copy_command(quoted, str(self.auth))
         for bad in (quoted.replace('PY', 'PY;touch', 1), quoted + ';echo something'):
             with self.assertRaises(review.ReviewDenied):
                 review.inspect_copy_command(bad, str(self.auth))
+
+    def test_complete_code_pins_reject_all_five_previously_admitted_effect_paths(self):
+        cases = (
+            lambda: review.inspect_copy_command('printf unsettled > /synthetic/unreviewed; ' + self.commands[4], str(self.auth)),
+            lambda: review.inspect_query_command('printf unsettled > /synthetic/unreviewed; ' + self.commands[1]),
+            lambda: review.inspect_copy_command(self.commands[4].replace('os.chmod(str(p),0o700)',
+                "os.chmod('/synthetic/unreviewed',0o700)"), str(self.auth)),
+            lambda: review.inspect_read_command("rg readonly public-file && python3 -c 'open(\"/synthetic/unreviewed\",\"w\").write(\"unsettled\")'", 'code_read'),
+            lambda: review.command_from_call('text(await tools.exec_command({cmd:"rg read only"})); await fetch("https://synthetic.invalid/effect", {method:"POST"});'),
+        )
+        for index, check in enumerate(cases):
+            with self.subTest(case=index), self.assertRaisesRegex(review.ReviewDenied, 'closed_case_'):
+                check()  # Parse only; none of these strings is executed.
+
+    def test_private_spec_repins_cannot_add_another_case_command_or_poll(self):
+        original = json.loads(json.dumps(self.spec))
+        for key in ('task_id', 'thread_id', 'turn_id', 'selected_sha256'):
+            self.spec = json.loads(json.dumps(original))
+            value = self.spec['expected'][key]
+            self.spec['expected'][key] = ('e' * 64 if key.endswith('sha256') or key == 'task_id'
+                                          else '01a11b74-271f-7852-bb37-523928cc2333')
+            self.private(self.spec_path, self.spec)
+            with self.subTest(identity=key), self.assertRaisesRegex(review.ReviewDenied, 'closed_case_bundle_mismatch'):
+                review.load_spec(str(self.spec_path))
+        for kind in ('commands', 'polls'):
+            self.spec = json.loads(json.dumps(original))
+            self.spec[kind][0]['input_sha256'] = 'f' * 64
+            self.private(self.spec_path, self.spec)
+            with self.subTest(kind=kind), self.assertRaisesRegex(review.ReviewDenied, 'closed_case_bundle_mismatch'):
+                review.load_spec(str(self.spec_path))
+        for key in ('authority_sources', 'local_observer', 'worker', 'review_root'):
+            self.spec = json.loads(json.dumps(original))
+            if key == 'authority_sources':
+                next(iter(self.spec[key].values()))['sha256'] = 'f' * 64
+            elif key == 'local_observer':
+                self.spec[key]['uid'] += 1
+            elif key == 'worker':
+                self.spec[key]['start_ticks'] += 1
+            else:
+                self.spec[key] += '-another-root'
+            self.private(self.spec_path, self.spec)
+            with self.subTest(binding=key), self.assertRaisesRegex(review.ReviewDenied, 'closed_case_bindings_mismatch'):
+                review.load_spec(str(self.spec_path))
+
+    def test_readback_requires_exact_approved_spec_and_actual_settlement_artifact(self):
+        approval = review.read_checked(self.spec_path, True)[1]['sha256']
+        with self.observed():
+            result = review.apply_review(str(self.spec_path), approval)
+        self.assertTrue(result['applied'])
+        self.spec['expires_at'] += 1  # Even a short new window is not the same approval.
+        self.private(self.spec_path, self.spec)
+        with self.assertRaisesRegex(review.ReviewDenied, 'review_record_spec_or_before_conflict'):
+            review.review_status(str(self.spec_path))
+        self.spec['expires_at'] -= 1
+        self.private(self.spec_path, self.spec)
+        # Restore exact original JSON, including bytes, not a new grant.
+        self.assertEqual(approval, review.read_checked(self.spec_path, True)[1]['sha256'])
+        self.assertTrue(review.review_status(str(self.spec_path))['applied'])
+        with self.store.transaction() as db:
+            db.execute('UPDATE tasks SET status=? WHERE id=?', ('pending', self.task))
+        with self.assertRaisesRegex(review.ReviewDenied, 'review_original_task_not_settled'):
+            review.review_status(str(self.spec_path))
+        with self.store.transaction() as db:
+            db.execute('UPDATE tasks SET status=? WHERE id=?', ('failed', self.task))
+            db.execute('DELETE FROM session_chunks WHERE id=?', (result['complete_artifact'],))
+        with self.assertRaisesRegex(review.ReviewDenied, 'review_complete_artifact_changed'):
+            review.review_status(str(self.spec_path))
+
+    def test_readback_checks_preserved_checkpoint_and_old_history_not_just_receipt(self):
+        approval = review.read_checked(self.spec_path, True)[1]['sha256']
+        with self.observed():
+            review.apply_review(str(self.spec_path), approval)
+        original = next(row for row in self.rows('tasks') if row['id'] == self.task)['checkpoint']
+        changed = dict(json.loads(original), unrelated_new_field='not_original_checkpoint')
+        with self.store.transaction() as db:
+            db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(changed), self.task))
+        with self.assertRaisesRegex(review.ReviewDenied, 'review_original_guard_not_settled'):
+            review.review_status(str(self.spec_path))
+        with self.store.transaction() as db:
+            db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (original, self.task))
+            db.execute('UPDATE session_chunks SET body=? WHERE id=?', (b'changed-old-history', self.old))
+        with self.assertRaisesRegex(review.ReviewDenied, 'review_old_artifact_changed'):
+            review.review_status(str(self.spec_path))
+
+    def test_expired_same_spec_readback_allows_later_native_session_progress(self):
+        approval = review.read_checked(self.spec_path, True)[1]['sha256']
+        with self.observed():
+            result = review.apply_review(str(self.spec_path), approval)
+        # A new authorized task may advance this continuous session; status is
+        # about the retained original review, not restoring old live state.
+        with self.store.transaction() as db:
+            db.execute('UPDATE native_sessions SET state=?,artifact=?,updated=?',
+                (json.dumps(dict(self.state, subsequent_task='new-authorized-task')), 'd' * 64, 456))
+        with patch.object(review.time, 'time', return_value=self.spec['expires_at'] + 1):
+            readback = review.review_status(str(self.spec_path))
+        self.assertTrue(readback['applied'])
+        self.assertFalse(readback['retry_authorized'])
+        self.assertEqual(result['complete_artifact'], readback['complete_artifact'])
+        self.assertEqual('d' * 64, self.rows('native_sessions')[0]['artifact'])
 
     def test_raw_authenticated_false_even_repinned_cannot_settle(self):
         wrong = json.dumps({'account': {'authenticated': False, 'type': 'chatgpt', 'plan': 'plus'}, 'limits': {}})
