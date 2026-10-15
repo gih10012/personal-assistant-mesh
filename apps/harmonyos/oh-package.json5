@@ -1,0 +1,8 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "personal-assistant-mesh-harmony-node",
+  "version": "0.1.0",
+  "description": "Native interactive HarmonyOS capability node; not a second Mesh",
+  "dependencies": {},
+  "devDependencies": {}
+}
