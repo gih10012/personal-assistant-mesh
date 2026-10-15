@@ -11,6 +11,7 @@ struct Index {
   @State endpoint: string = '';
   @State token: string = '';
   @State challenge: string = '';
+  @State relayConfig: string = '';
   @State operationId: string = '';
   @State output: string = '';
   @State share: boolean = false;
@@ -51,6 +52,33 @@ struct Index {
     try { this.output = await (this.native as NativeServices).executeApprovedChallenge(this.challenge); this.status = '完整 provider-reported 成果已保存，等待原 Mesh 独立核验'; }
     catch (error) { this.status = '未完成；按原 operation ID 查询，禁止换 ID 自动重做'; }
   }
+  async bindRelay(): Promise<void> {
+    try {
+      this.operationId = await (this.native as NativeServices).bindRelay(this.relayConfig);
+      this.status = '原 relay/任务/epoch/nonce 已绑定；没有清除旧 unknown；凭据另填且只在内存';
+    } catch (error) { this.status = '原 relay 配置不匹配；未换 URL、身份或清除旧记录'; }
+  }
+  async runRelay(): Promise<void> {
+    try {
+      this.output = await (this.native as NativeServices).runRelay(this.operationId, this.token);
+      this.status = '原 relay 动作完成；仅明确许可才执行，完整结果保留；状态见下方，不等于已注册';
+    } catch (error) { this.status = '原请求未确认或权限不可用；本地成果保留，后续只查原状态，不换 ID 重做'; }
+    finally { this.token = ''; }
+  }
+  async submitRelay(): Promise<void> {
+    try {
+      this.output = await (this.native as NativeServices).submitRelayOriginalResult(this.operationId, this.token);
+      this.status = '原结果首次回传/状态查回完成；结果 POST 若曾 attempted/unknown，本次只读查状态';
+    } catch (error) { this.status = '回传未确认；完整本地结果仍可查，只查原状态，不自动重复上传'; }
+    finally { this.token = ''; }
+  }
+  async queryRelay(): Promise<void> {
+    try {
+      this.output = await (this.native as NativeServices).queryRelayStatus(this.operationId, this.token);
+      this.status = '远端原状态已查回；哈希一致才确认接收，不将本地 unknown 重新执行';
+    } catch (error) { this.status = '原状态暂不可查；未执行、重传或改投其他入口；本地结果仍可读'; }
+    finally { this.token = ''; }
+  }
   query(): void {
     try { this.output = (this.native as NativeServices).originalResult(this.operationId); }
     catch (error) { this.status = '原记录未找到，不代表未执行；没有重试'; }
@@ -76,7 +104,7 @@ struct Index {
         Button('绑定原身份').enabled(this.ready && this.foreground).onClick(() => { this.bind(); })
         TextInput({ text: this.endpoint, placeholder: '本人授权的 HTTPS 加入入口（无自动公网回退）' })
           .onChange((value: string) => { this.endpoint = value; })
-        TextInput({ text: this.token, placeholder: '仅本次连接的 scoped peer token，不落盘' }).type(InputType.Password)
+        TextInput({ text: this.token, placeholder: '仅本次动作的 scoped token（peer/单 operation relay 不混用），不落盘' }).type(InputType.Password)
           .onChange((value: string) => { this.token = value; })
         Button('核对原 peer（非注册）').enabled(this.ready && this.foreground).onClick(() => { this.connect(); })
         Button('系统文件选择器：选择一个文件').enabled(this.ready && this.foreground).onClick(() => { this.choose(); })
@@ -86,6 +114,20 @@ struct Index {
           })
           Text('本人允许当前 Mesh 挑战使用选定能力').fontSize(12)
         }
+        TextArea({ text: this.relayConfig, placeholder: '本人提供的 mesh-enrollment-relay-client/1：原 /enrollment/node URL + 完整 binding，不含 token' })
+          .height(130).onChange((value: string) => {
+            this.relayConfig = value; this.share = false; if (this.native !== null) { this.native.setSharing(false); }
+          })
+        Button('绑定原远程任务（不重置记录）').enabled(this.ready && this.foreground).onClick(() => { this.bindRelay(); })
+        TextInput({ text: this.operationId, placeholder: '原 operation ID：远程调度/只读查回/本地完整结果' })
+          .onChange((value: string) => { this.operationId = value; })
+        Button('远程领取 → 执行一次 → 完整回传').enabled(this.ready && this.foreground && this.share)
+          .onClick(() => { this.runRelay(); })
+        Text('领取/结果提交曾未确认时，上方动作只查原状态；不会重做。需要匹配原任务的可信服务端与单 operation token。').fontSize(12)
+        Row({ space: 10 }) {
+          Button('原结果首次回传').enabled(this.ready && this.foreground && this.share).onClick(() => { this.submitRelay(); })
+          Button('远端原状态').enabled(this.ready && this.foreground).onClick(() => { this.queryRelay(); })
+        }
         TextArea({ text: this.challenge, placeholder: '原 mesh-enrollment-challenge/1；仅字节 recipe 或选定文件完整只读（≤64KiB）' })
           .height(150).onChange((value: string) => { this.challenge = value; this.share = false; if (this.native !== null) { this.native.setSharing(false); } })
         Row({ space: 10 }) {
@@ -93,8 +135,6 @@ struct Index {
           Button('声明能力').enabled(this.ready).onClick(() => { this.inventory(); })
           Button('动态状态').enabled(this.ready).onClick(() => { this.dynamicState(); })
         }
-        TextInput({ text: this.operationId, placeholder: '原 operation ID：只读查回完整结果/unknown' })
-          .onChange((value: string) => { this.operationId = value; })
         Button('原结果查回，不重做').enabled(this.ready).onClick(() => { this.query(); })
         TextArea({ text: this.output, placeholder: '私有完整结果；不要贴公共仓库/日志' }).height(220).enabled(false)
       }.padding(20).width('100%')

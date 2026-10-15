@@ -37,7 +37,7 @@ def owned(path, value):
     return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
-def fixture(directory):
+def fixture(directory, payload=None):
     now = int(time.time())
     document = {'format': 'mesh-enrollment/1', 'mesh_id': 'synthetic-mesh',
         'node_id': 'synthetic-phone', 'owner_binding': 'synthetic-owner',
@@ -48,7 +48,7 @@ def fixture(directory):
                  'trust_ref': 'private:owner-root'},
         'continuation': {'project_id': '合成手机入网', 'session_ref': 'native:original-specialist',
                          'state_ref': 'private:original-checkpoint'}}
-    payload = bytes(range(256)) * 200
+    payload = bytes(range(256)) * 200 if payload is None else payload
     # Bootstrap's existing owner recipe is retained, but the remote executor
     # does not need this POSIX adapter, Node, Python, or this journal.
     adapter = owned(directory / 'never-invoked.adapter', b'SYNTHETIC_NOT_EXECUTABLE')

@@ -64,7 +64,8 @@ class HarmonyNodeTests(unittest.TestCase):
         return node
 
     def test_same_protocol_typescript_behavior_tests_run_without_harmony_sdk(self):
-        run = subprocess.run([self.node(), '--test', str(APP / 'test/protocol.test.mjs')],
+        run = subprocess.run([self.node(), '--test', str(APP / 'test/protocol.test.mjs'),
+                              str(APP / 'test/relay.test.mjs')],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
         self.assertEqual(0, run.returncode, run.stderr.decode(errors='replace'))
 
