@@ -1037,6 +1037,18 @@ def prepared_directory(spec, version, auth, case_id):
     return directory, intent, intent_file
 
 
+def backup_authorizer(action, first, second, unused_db, unused_trigger):
+    # SQLite's stable C API opcodes, sometimes absent from Python 3.6 sqlite3:
+    # https://www.sqlite.org/c3ref/c_alter_table.html (29/30/31 respectively).
+    denied = {sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_PRAGMA,
+              getattr(sqlite3, 'SQLITE_CREATE_VTABLE', 29),
+              getattr(sqlite3, 'SQLITE_DROP_VTABLE', 30)}
+    if action in denied or (action == getattr(sqlite3, 'SQLITE_FUNCTION', 31)
+                            and isinstance(second, str) and second.lower() == 'load_extension'):
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
 def verify_prepared_backup(context, path):
     """Read every saved gzip/SQL byte; restore only a private disposable DB."""
     metadata = digest_checked_backup(path)
@@ -1058,13 +1070,7 @@ def verify_prepared_backup(context, path):
             db.row_factory = sqlite3.Row
             page_size = db.execute('PRAGMA page_size').fetchone()[0]
             db.execute('PRAGMA max_page_count=' + str(max(1, restoration_bound // page_size)))
-            def authorize(action, first, second, unused_db, unused_trigger):
-                denied = {sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_CREATE_VTABLE,
-                          sqlite3.SQLITE_DROP_VTABLE, sqlite3.SQLITE_PRAGMA}
-                if action in denied or action == sqlite3.SQLITE_FUNCTION and second == 'load_extension':
-                    return sqlite3.SQLITE_DENY
-                return sqlite3.SQLITE_OK
-            db.set_authorizer(authorize)
+            db.set_authorizer(backup_authorizer)
             pending, pending_size, committed = '', 0, False
             import codecs
             decoder = codecs.getincrementaldecoder('utf8')()
