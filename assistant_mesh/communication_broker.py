@@ -169,8 +169,13 @@ class Broker:
             return self.store.register_reference(authority, **body)
         if path == '/communication/control_reference' and set(body) == {'task_id', 'task_row_sha256', 'control_id'}:
             return self.store.register_reference(authority, **body)
-        if path == '/communication/pending' and set(body) == {'limit'}:
-            return {'events': self.store.pending(body['limit'])}
+        if path == '/communication/pending' and set(body) in (
+                {'limit'}, {'limit', 'accept_ordinary'}):
+            # Authority is the authenticated peer binding, NEVER a posted
+            # selector. Legacy clients retain the ordinary-candidate view;
+            # current companions send their owner's explicit policy.
+            return {'events': self.store.pending(body['limit'], authority,
+                                                 body.get('accept_ordinary', True))}
         if path == '/communication/prepare' and set(body) == {'message_id', 'authority'}:
             if body['authority'] != authority:
                 raise PermissionError('communication_executor_binding_changed')

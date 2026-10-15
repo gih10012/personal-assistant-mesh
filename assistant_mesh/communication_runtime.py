@@ -33,7 +33,8 @@ class Dispatcher:
         self.accept_ordinary, self.limit = accept_ordinary, limit
 
     def step(self):
-        pending = self.client.request('/communication/pending', {'limit': self.limit})
+        pending = self.client.request('/communication/pending',
+            {'limit': self.limit, 'accept_ordinary': self.accept_ordinary})
         if not isinstance(pending, dict) or set(pending) != {'events'} or not isinstance(pending['events'], list):
             raise ValueError('communication_pending_invalid')
         reports = []

@@ -277,13 +277,30 @@ class CommunicationStore:
             return dict(row, protocol=PROTOCOL, communication_id=self.identity['communication_id'],
                         origin_authority=self.identity['origin_authority'], message=json.loads(row.pop('body')))
 
-    def pending(self, limit=20):
-        if type(limit) is not int or not 0 < limit <= 100:
+    def pending(self, limit=20, authority=None, accept_ordinary=True):
+        """Filter an authenticated executor's candidates BEFORE the page limit.
+
+        The unscoped default remains the owner-side diagnostic view. A scoped
+        query never grants delivery or changes an attempted original target;
+        prepare_delivery's writer transaction still makes that decision.
+        """
+        if (type(limit) is not int or not 0 < limit <= 100
+                or type(accept_ordinary) is not bool):
             raise ValueError('communication_limit_invalid')
+        clauses = ["state!='confirmed'"]
+        values = []
+        if authority is not None:
+            identifier(authority)
+            clauses += ['(required_authority IS NULL OR required_authority=?)',
+                        '(target_authority IS NULL OR target_authority=?)']
+            values += [authority, authority]
+        clauses.append('(? OR post_attempted!=0 OR required_authority IS NOT NULL)')
+        values += [int(accept_ordinary), limit]
         with self.transaction() as db:
             return [dict(row) for row in db.execute('SELECT message_id,kind,required_authority,state,'
                 'target_authority,post_attempted FROM communication_events '
-                "WHERE state!='confirmed' ORDER BY post_attempted,created,message_id LIMIT ?", (limit,))]
+                'WHERE ' + ' AND '.join(clauses) +
+                ' ORDER BY post_attempted,created,message_id LIMIT ?', tuple(values))]
 
     def register_reference(self, authority, task_id, task_row_sha256, control_id=None):
         """Authenticated executor's pointer only; never migrate execution rights."""
