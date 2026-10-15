@@ -231,7 +231,10 @@ def gateway_command(config, test=False):
         '--tmpfs', '/var/cache/nginx:rw,noexec,nosuid,size=32m']
     command += mount(root + '/config', '/mesh-config', True)
     command += mount(root + '/webroot', '/mesh-webroot', True)
-    command += mount(root + '/letsencrypt-production', '/etc/letsencrypt', True)
+    # Certificate live symlinks need archive, but the public gateway must not
+    # receive Certbot's accounts/ ACME private keys or renewal configuration.
+    command += mount(root + '/letsencrypt-production/live', '/etc/letsencrypt/live', True)
+    command += mount(root + '/letsencrypt-production/archive', '/etc/letsencrypt/archive', True)
     command += ['--entrypoint', 'nginx', NGINX, '-c', '/mesh-config/nginx-current.conf']
     return command + (['-t'] if test else ['-g', 'daemon off;'])
 
@@ -291,8 +294,30 @@ Unit=personal-assistant-mesh-ip-renew.service
 [Install]
 WantedBy=timers.target
 '''
+    gateway = '''[Unit]
+Description=Dedicated Mesh IP HTTPS gateway, not the management API
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+[Service]
+Type=simple
+User=root
+ExecStart=__START__
+ExecStop=__STOP__
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=null
+StandardError=journal
+[Install]
+WantedBy=multi-user.target
+'''.replace('__START__', shell(gateway_command(config)))
+    gateway = gateway.replace('__STOP__', shell(docker + ['stop', '--time', '20', CONTAINER]))
     directories = [root] + [root + '/' + p for p in ('config', 'bin', 'docker-client',
-        'letsencrypt-production', 'letsencrypt-staging', 'work-production', 'work-staging',
+        'letsencrypt-production', 'letsencrypt-production/live', 'letsencrypt-production/archive',
+        'letsencrypt-staging', 'work-production', 'work-staging',
         'logs-production', 'logs-staging')]
     plan = {'format': 'mesh-ip-tls-owner-plan/1', 'renders_only': True,
         'requires_serial_operations_owner': True, 'public_ip': config['public_ip'],
@@ -310,6 +335,7 @@ WantedBy=timers.target
         'issuance_or_account_created': False, 'renewal_interval_hours': 12}
     return {'nginx-http.conf': nginx(config), 'nginx-tls.conf': nginx(config, tls=True),
             'nginx-current.conf': nginx(config), 'deploy-hook.sh': hook, 'renew.sh': renew,
+            'personal-assistant-mesh-ip-tls.service': gateway,
             'personal-assistant-mesh-ip-renew.service': service,
             'personal-assistant-mesh-ip-renew.timer': timer,
             'plan.json': json.dumps(plan, indent=2, sort_keys=True) + '\n'}
