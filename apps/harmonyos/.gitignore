@@ -1,0 +1,10 @@
+.hvigor/
+oh_modules/
+node_modules/
+local.properties
+*.hap
+*.app
+*.p12
+*.p7b
+*.cer
+signing/
