@@ -34,18 +34,19 @@
 - 小艺/端A2A/GUI/外围蓝牙设备仅有独立适配研究边界，未注册extension，
   不凭发现耳机授予控制权。未内置模型，报告 harness.available=false。
 
-当前 provider 由本机应用内明确导入原 challenge、执行、读回完整结果；
-外层可通过已有 bootstrap 的 `record-result`/独立 oracle接入。**没有**
-臆造现有 server 不支持的 enrollment REST URL，没有假装手机已注册或
-Leader已经远程调用。后续在原 authority 接一个受限的 challenge/result
-relay，保持同一contract与原nonce/结果，才能验收自动远程调度。
+首片手工导入/读回仍保留。本片另增[原 relay 薄客户端](RELAY.md)：
+原 owner config → `/enrollment/node` 一次领取 → 本地 intent flush → 原能力
+执行 → 完整原结果首次回传；未知 POST 后只查原状态/结果 hash，不重做或
+重传。复用已实现的受限 authority relay 与原 nonce/continuation，不另造
+Node Membership。**源码/协议可测不等于手机已入网**：正式路由、真实 task
+validator、单 op token 与真机网络尚需 Root 独立接线验收。
 
 ## 验证与构建
 
 ```sh
 # 在仓库根目录；仅同一TS逻辑实际执行，不是ArkTS类型检查或HAP编译
-node --test apps/harmonyos/test/protocol.test.mjs
-python3 -m unittest tests.test_harmonyos_node -q
+node --test apps/harmonyos/test/protocol.test.mjs apps/harmonyos/test/relay.test.mjs
+python3 -m unittest tests.test_harmonyos_node tests.test_harmonyos_relay -q
 
 # 只检查当前工具/项目配置，不安装、下载或签名；缺SDK时exit2
 node apps/harmonyos/tools/build-preflight.mjs

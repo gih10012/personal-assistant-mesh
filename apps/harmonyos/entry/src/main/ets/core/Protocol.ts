@@ -42,6 +42,28 @@ export interface DeviceState {
   state: string; capabilities: CapabilityState[]; native_features_restricted: boolean;
   xiaoyi_adapter: string; gui_adapter: string; background_residency: string;
 }
+export interface RelayBinding {
+  mesh_id: string; node_id: string; owner_binding: string; enrollment_sha256: string;
+  operation_id: string; request_sha256: string; nonce: string; expires_at: number;
+  task_id: string; task_epoch: number; entry_request_id: string;
+}
+export interface RelayClientConfig { format: string; resource_url: string; binding: RelayBinding; }
+export interface RelayRecord {
+  resource_url: string; binding: RelayBinding; challenge_state: string; result_state: string;
+  challenge_json: string; status_json: string; result_sha256: string;
+}
+export interface RelayStatus {
+  format: string; mesh_id: string; node_id: string; runtime_kind: string; operation_id: string;
+  request_sha256: string; expires_at: number; state: string; result_sha256: string | null;
+  managed_use_authorized: boolean; native_execution_attested: boolean; automatic_replay: boolean;
+}
+export interface RelayResponse {
+  format: string; binding: RelayBinding; action: string; status: RelayStatus;
+  may_execute_original_challenge: boolean; automatic_retry: boolean; automatic_replay: boolean;
+  relay_performed_verification: boolean; relay_performed_registration: boolean;
+  managed_use_authorized: boolean; native_execution_attested: boolean; native_features_restricted: boolean;
+  challenge?: Challenge; identical_existing_result?: boolean; original_result_retained?: boolean;
+}
 export const MAX_BYTES: number = 65536;
 export function exactByteView(data: ArrayBuffer, offset: number, length: number): Uint8Array {
   requireValue(Number.isSafeInteger(offset) && Number.isSafeInteger(length) && offset >= 0 &&
@@ -179,4 +201,141 @@ export function deviceState(nodeId: string, foreground: boolean, shared: boolean
   return { state: foreground ? 'ACTIVE' : 'SUSPENDED', capabilities: [bytes, file],
     native_features_restricted: false, xiaoyi_adapter: 'not_connected', gui_adapter: 'not_verified',
     background_residency: 'not_promised_interactive_node' };
+}
+
+// Same owner-pinned /enrollment/node wire as EnrollmentRelay, not a second
+// enrollment protocol. These fields contain NO credential or picker-grant URI.
+export function validateRelayUrl(value: string): void {
+  const suffix: string = '/enrollment/node';
+  requireValue(typeof value === 'string' && value.endsWith(suffix), 'mesh_relay_https_required');
+  const origin: string = value.slice(0, -suffix.length);
+  validateJoinUrl(origin);
+  const port: string = origin.slice(8).split(':')[1];
+  requireValue(port === undefined || port === '443', 'mesh_relay_https_required');
+}
+export function validateRelayBinding(v: RelayBinding): void {
+  shape(v, ['mesh_id', 'node_id', 'owner_binding', 'enrollment_sha256', 'operation_id',
+    'request_sha256', 'nonce', 'expires_at', 'task_id', 'task_epoch', 'entry_request_id']);
+  text(v.mesh_id); text(v.node_id); text(v.owner_binding); text(v.operation_id);
+  text(v.task_id); text(v.entry_request_id);
+  hash(v.enrollment_sha256); hash(v.request_sha256); hash(v.nonce);
+  integer(v.expires_at, 1); integer(v.task_epoch, 1);
+}
+export function canonicalRelayBinding(v: RelayBinding): string {
+  validateRelayBinding(v);
+  return '{"enrollment_sha256":' + quote(v.enrollment_sha256) + ',"entry_request_id":' + quote(v.entry_request_id) +
+    ',"expires_at":' + String(v.expires_at) + ',"mesh_id":' + quote(v.mesh_id) + ',"node_id":' + quote(v.node_id) +
+    ',"nonce":' + quote(v.nonce) + ',"operation_id":' + quote(v.operation_id) + ',"owner_binding":' + quote(v.owner_binding) +
+    ',"request_sha256":' + quote(v.request_sha256) + ',"task_epoch":' + String(v.task_epoch) + ',"task_id":' + quote(v.task_id) + '}';
+}
+export function validateRelayClientConfig(v: RelayClientConfig, enrollment: Enrollment, enrollmentHash: string): void {
+  shape(v, ['format', 'resource_url', 'binding']);
+  requireValue(v.format === 'mesh-enrollment-relay-client/1', 'mesh_relay_config_invalid');
+  validateRelayUrl(v.resource_url); validateRelayBinding(v.binding);
+  requireValue(v.binding.mesh_id === enrollment.mesh_id && v.binding.node_id === enrollment.node_id &&
+    v.binding.owner_binding === enrollment.owner_binding && v.binding.enrollment_sha256 === enrollmentHash,
+    'mesh_relay_original_enrollment_mismatch');
+}
+export function newRelayRecord(v: RelayClientConfig): RelayRecord {
+  return { resource_url: v.resource_url, binding: v.binding, challenge_state: 'not_requested',
+    result_state: 'not_submitted', challenge_json: '', status_json: '', result_sha256: '' };
+}
+export function coldResumeRelays(records: RelayRecord[]): void {
+  requireValue(Array.isArray(records) && records.length <= 64, 'mesh_relay_journal_invalid');
+  for (let i: number = 0; i < records.length; i++) {
+    const row: RelayRecord = records[i];
+    shape(row, ['resource_url', 'binding', 'challenge_state', 'result_state', 'challenge_json', 'status_json', 'result_sha256']);
+    validateRelayUrl(row.resource_url); validateRelayBinding(row.binding);
+    requireValue(['not_requested', 'attempted', 'granted', 'observed', 'consumed', 'unknown'].includes(row.challenge_state) &&
+      ['not_submitted', 'attempted', 'acknowledged', 'remote_reported', 'unknown'].includes(row.result_state),
+      'mesh_relay_journal_invalid');
+    requireValue(typeof row.challenge_json === 'string' && row.challenge_json.length <= 131072 &&
+      typeof row.status_json === 'string' && row.status_json.length <= 32768, 'mesh_relay_journal_invalid');
+    if (row.result_sha256 !== '') { hash(row.result_sha256); }
+    for (let j: number = 0; j < i; j++) {
+      requireValue(records[j].binding.operation_id !== row.binding.operation_id, 'mesh_relay_original_operation_changed');
+    }
+    if (row.challenge_state === 'attempted' || row.challenge_state === 'granted') { row.challenge_state = 'unknown'; }
+    if (row.result_state === 'attempted') { row.result_state = 'unknown'; }
+  }
+}
+export function beginRelayChallenge(row: RelayRecord): void {
+  requireValue(row.challenge_state === 'not_requested', 'mesh_relay_challenge_observe_only');
+  row.challenge_state = 'attempted'; // Caller MUST durably flush before HTTP.
+}
+export function validateRelayResponse(v: RelayResponse, binding: RelayBinding, action: string): void {
+  const fields: string[] = ['format', 'binding', 'action', 'status', 'may_execute_original_challenge',
+    'automatic_retry', 'automatic_replay', 'relay_performed_verification', 'relay_performed_registration',
+    'managed_use_authorized', 'native_execution_attested', 'native_features_restricted'];
+  if (action === 'challenge') { fields.push('challenge'); }
+  if (action === 'result') {
+    if (v.identical_existing_result === true) { fields.push('identical_existing_result'); }
+    else { requireValue(v.original_result_retained === true, 'mesh_relay_result_not_confirmed'); fields.push('original_result_retained'); }
+  }
+  shape(v, fields);
+  requireValue(v.format === 'mesh-enrollment-relay-response/1' && v.action === action &&
+    canonicalRelayBinding(v.binding) === canonicalRelayBinding(binding), 'mesh_relay_original_response_mismatch');
+  requireValue(typeof v.may_execute_original_challenge === 'boolean' && v.automatic_retry === false &&
+    v.automatic_replay === false && v.relay_performed_verification === false && v.relay_performed_registration === false &&
+    v.managed_use_authorized === false && v.native_execution_attested === false && v.native_features_restricted === false,
+    'mesh_relay_response_authority_invalid');
+  requireValue(action === 'challenge' || v.may_execute_original_challenge === false, 'mesh_relay_response_authority_invalid');
+  const status: RelayStatus = v.status;
+  requireValue(status !== null && typeof status === 'object' && status.format === 'mesh-enrollment-status/1' &&
+    status.mesh_id === binding.mesh_id && status.node_id === binding.node_id && status.runtime_kind === 'interactive' &&
+    status.operation_id === binding.operation_id && status.request_sha256 === binding.request_sha256 &&
+    status.expires_at === binding.expires_at && status.managed_use_authorized === false &&
+    status.native_execution_attested === false && status.automatic_replay === false &&
+    ['intent', 'attempted', 'unknown', 'result_reported', 'verified'].includes(status.state), 'mesh_relay_original_status_mismatch');
+  if (status.result_sha256 !== null) { hash(status.result_sha256); }
+  requireValue(!v.may_execute_original_challenge || status.state === 'attempted', 'mesh_relay_response_authority_invalid');
+}
+export function acceptRelayChallenge(row: RelayRecord, v: RelayResponse, enrollment: Enrollment,
+    enrollmentHash: string, requestHash: string, now: number): void {
+  requireValue(row.challenge_state === 'attempted', 'mesh_relay_challenge_observe_only');
+  validateRelayResponse(v, row.binding, 'challenge');
+  const value: Challenge = v.challenge as Challenge;
+  validateChallenge(value, enrollment, enrollmentHash, v.may_execute_original_challenge === true ? now : value.created_at);
+  requireValue(value.operation_id === row.binding.operation_id && value.nonce === row.binding.nonce &&
+    value.expires_at === row.binding.expires_at && requestHash === row.binding.request_sha256,
+    'mesh_relay_original_challenge_mismatch');
+  row.challenge_json = canonicalChallenge(value);
+  row.status_json = JSON.stringify(v.status);
+  row.challenge_state = v.may_execute_original_challenge === true ? 'granted' : 'observed';
+}
+export function requireManualChallengeUnclaimed(records: RelayRecord[], operationId: string): void {
+  for (let i: number = 0; i < records.length; i++) {
+    requireValue(records[i].binding.operation_id !== operationId, 'mesh_relay_original_operation_observe_only');
+  }
+}
+export function validateResultEnvelope(v: ResultEnvelope, binding: RelayBinding, enrollment: Enrollment): void {
+  shape(v, ['format', 'operation_id', 'request_sha256', 'nonce', 'result', 'continuation', 'proxy']);
+  requireValue(v.format === 'mesh-enrollment-result/1' && v.operation_id === binding.operation_id &&
+    v.request_sha256 === binding.request_sha256 && v.nonce === binding.nonce && v.proxy === null,
+    'mesh_relay_original_result_mismatch');
+  continuation(v.continuation);
+  requireValue(canonicalContinuation(v.continuation) === canonicalContinuation(enrollment.continuation), 'mesh_relay_original_result_mismatch');
+  shape(v.result, ['bytes', 'sha256', 'base64']); integer(v.result.bytes); hash(v.result.sha256);
+  requireValue(v.result.bytes <= MAX_BYTES && typeof v.result.base64 === 'string' && v.result.base64.length <= 87384,
+    'mesh_relay_original_result_mismatch');
+}
+export function canonicalResult(v: ResultEnvelope): string {
+  return '{"continuation":' + canonicalContinuation(v.continuation) + ',"format":' + quote(v.format) +
+    ',"nonce":' + quote(v.nonce) + ',"operation_id":' + quote(v.operation_id) + ',"proxy":null,"request_sha256":' +
+    quote(v.request_sha256) + ',"result":{"base64":' + quote(v.result.base64) + ',"bytes":' + String(v.result.bytes) +
+    ',"sha256":' + quote(v.result.sha256) + '}}';
+}
+export function beginRelayResult(row: RelayRecord, resultHash: string): void {
+  hash(resultHash);
+  requireValue(row.result_state === 'not_submitted', 'mesh_relay_original_result_observe_only');
+  row.result_sha256 = resultHash; row.result_state = 'attempted'; // Flush BEFORE POST, never re-POST unknown.
+}
+export function observeRelayStatus(row: RelayRecord, v: RelayResponse, action: string): void {
+  validateRelayResponse(v, row.binding, action);
+  row.status_json = JSON.stringify(v.status);
+  if (v.status.result_sha256 !== null) {
+    if (row.result_sha256 === '') { row.result_state = 'remote_reported'; }
+    else if (row.result_sha256 === v.status.result_sha256) { row.result_state = 'acknowledged'; }
+    else { row.result_state = 'unknown'; throw new Error('mesh_relay_original_result_conflict'); }
+  }
 }

@@ -30,7 +30,7 @@ class HarmonyNodeTests(unittest.TestCase):
         source = (APP / 'entry/src/main/ets/platform/NativeServices.ets').read_text()
         self.assertIn('maxRedirects: 0', source)
         self.assertIn('deviceInfo.sdkApiVersion >= 23', source)
-        self.assertIn('exactByteView(utf8.buffer, utf8.byteOffset, utf8.byteLength)', source)
+        self.assertIn('exactByteView(utf8.buffer, utf8.byteOffset, utf8.length)', source)
         snapshot = source.split('export class NodeSnapshot {', 1)[1].split('\n}', 1)[0]
         self.assertNotIn('token', snapshot.lower())
         self.assertNotIn('uri', snapshot.lower())
@@ -54,7 +54,8 @@ class HarmonyNodeTests(unittest.TestCase):
         return node
 
     def test_same_protocol_typescript_behavior_tests_run_without_harmony_sdk(self):
-        run = subprocess.run([self.node(), '--test', str(APP / 'test/protocol.test.mjs')],
+        run = subprocess.run([self.node(), '--test', str(APP / 'test/protocol.test.mjs'),
+                              str(APP / 'test/relay.test.mjs')],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
         self.assertEqual(0, run.returncode, run.stderr.decode(errors='replace'))
 

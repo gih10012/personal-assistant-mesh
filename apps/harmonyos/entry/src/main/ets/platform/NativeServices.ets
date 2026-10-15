@@ -7,14 +7,19 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
 import {
   AdaptationReport, Blob, Challenge, DeviceState, Enrollment, Hello, JournalRecord, MAX_BYTES,
-  ResultEnvelope, beginOperation, canonicalChallenge, canonicalEnrollment, coldResume,
-  deviceState, exactByteView, report, requireValue, validateChallenge, validateEnrollment, validateHello, validateJoinUrl
+  RelayClientConfig, RelayRecord, RelayResponse, ResultEnvelope, acceptRelayChallenge,
+  beginOperation, beginRelayChallenge, beginRelayResult, canonicalChallenge, canonicalEnrollment,
+  canonicalRelayBinding, canonicalResult, coldResume, coldResumeRelays, deviceState, exactByteView,
+  newRelayRecord, observeRelayStatus, report, requireManualChallengeUnclaimed, requireValue,
+  validateChallenge, validateEnrollment, validateHello, validateJoinUrl, validateRelayClientConfig,
+  validateRelayResponse, validateRelayUrl, validateResultEnvelope
 } from '../core/Protocol';
 
 export class NodeSnapshot {
   node_id: string = '';
   enrollment_json: string = '';
   records: JournalRecord[] = [];
+  relays: RelayRecord[] = []; // Original operation transport checkpoints, never credentials.
 }
 
 export class NativeServices {
@@ -38,6 +43,8 @@ export class NativeServices {
       this.snapshot = JSON.parse(saved) as NodeSnapshot;
       requireValue(typeof this.snapshot.node_id === 'string' && Array.isArray(this.snapshot.records), 'mesh_private_state_invalid');
       coldResume(this.snapshot.records);
+      if (this.snapshot.relays === undefined) { this.snapshot.relays = []; }
+      coldResumeRelays(this.snapshot.relays);
     } else {
       // App-scoped random node identity, not IMEI/serial/MAC or hardware identity attestation.
       this.snapshot.node_id = 'harmony-' + util.generateRandomUUID();
@@ -47,7 +54,13 @@ export class NativeServices {
       validateEnrollment(value, this.snapshot.node_id);
       this.enrollment = value;
       this.enrollmentHash = await this.digestText(canonicalEnrollment(value));
+      for (let i: number = 0; i < this.snapshot.relays.length; i++) {
+        const row: RelayRecord = this.snapshot.relays[i];
+        validateRelayClientConfig({ format: 'mesh-enrollment-relay-client/1', resource_url: row.resource_url,
+          binding: row.binding }, value, this.enrollmentHash);
+      }
     }
+    requireValue(this.enrollment !== null || this.snapshot.relays.length === 0, 'mesh_relay_original_enrollment_required');
     await this.persist();
   }
   private async persist(): Promise<void> {
@@ -146,17 +159,30 @@ export class NativeServices {
   }
   private async digestText(text: string): Promise<string> {
     const utf8: buffer.Buffer = buffer.from(text, 'utf-8');
-    return this.digest(exactByteView(utf8.buffer, utf8.byteOffset, utf8.byteLength));
+    return this.digest(exactByteView(utf8.buffer, utf8.byteOffset, utf8.length));
   }
   async executeApprovedChallenge(raw: string): Promise<string> {
     requireValue(this.enrollment !== null && this.sharingEnabled && this.foreground && !this.busy,
       'mesh_local_owner_consent_required');
     requireValue(raw.length <= 131072, 'mesh_challenge_too_large');
     this.busy = true;
+    try { return await this.executeChallenge(raw, null); }
+    finally { this.busy = false; }
+  }
+  private async executeChallenge(raw: string, relay: RelayRecord | null): Promise<string> {
+    requireValue(this.enrollment !== null && this.sharingEnabled && this.foreground,
+      'mesh_local_owner_consent_required');
     let record: JournalRecord | null = null;
     try {
       const challenge: Challenge = JSON.parse(raw) as Challenge;
       validateChallenge(challenge, this.enrollment as Enrollment, this.enrollmentHash, Math.floor(Date.now() / 1000));
+      const requestHash: string = await this.digestText(canonicalChallenge(challenge));
+      if (relay === null) { requireManualChallengeUnclaimed(this.snapshot.relays, challenge.operation_id); }
+      else {
+        requireValue(relay.challenge_state === 'granted' && relay.binding.operation_id === challenge.operation_id &&
+          relay.binding.nonce === challenge.nonce && relay.binding.request_sha256 === requestHash,
+          'mesh_relay_original_operation_observe_only');
+      }
       const instance: string = this.snapshot.node_id +
         (challenge.action === 'file.read.selected' ? ':selected-file-v1' : ':bytes-v1');
       requireValue(challenge.capability_id === instance, 'mesh_capability_instance_mismatch');
@@ -164,8 +190,9 @@ export class NativeServices {
       const input: Uint8Array = codec.decodeSync(challenge.input.base64);
       requireValue(input.length === challenge.input.bytes && codec.encodeToStringSync(input) === challenge.input.base64 &&
         await this.digest(input) === challenge.input.sha256, 'mesh_challenge_input_changed');
-      record = beginOperation(this.snapshot.records, challenge, await this.digestText(canonicalChallenge(challenge)),
+      record = beginOperation(this.snapshot.records, challenge, requestHash,
         Math.floor(Date.now() / 1000));
+      if (relay !== null) { relay.challenge_state = 'consumed'; }
       await this.persist(); // Original ID/nonce/request committed BEFORE file access/execution.
       requireValue(this.foreground && this.sharingEnabled, 'mesh_local_permission_revoked');
       let output: Uint8Array = new Uint8Array(0);
@@ -192,6 +219,151 @@ export class NativeServices {
         await this.persist();
       }
       throw new Error('mesh_challenge_unavailable_original_identity_preserved');
+    }
+  }
+  async bindRelay(raw: string): Promise<string> {
+    requireValue(this.enrollment !== null && this.foreground && !this.busy && raw.length <= 65536,
+      'mesh_relay_owner_config_required');
+    this.busy = true;
+    try {
+      const value: RelayClientConfig = JSON.parse(raw) as RelayClientConfig;
+      validateRelayClientConfig(value, this.enrollment as Enrollment, this.enrollmentHash);
+      for (let i: number = 0; i < this.snapshot.relays.length; i++) {
+        const old: RelayRecord = this.snapshot.relays[i];
+        if (old.binding.operation_id === value.binding.operation_id) {
+          requireValue(old.resource_url === value.resource_url &&
+            canonicalRelayBinding(old.binding) === canonicalRelayBinding(value.binding), 'mesh_relay_original_operation_changed');
+          return old.binding.operation_id; // Reimport never resets unknown/attempt.
+        }
+      }
+      for (let i: number = 0; i < this.snapshot.records.length; i++) {
+        const old: JournalRecord = this.snapshot.records[i];
+        if (old.operation_id === value.binding.operation_id) {
+          requireValue(old.request_sha256 === value.binding.request_sha256 && old.nonce === value.binding.nonce,
+            'mesh_relay_original_operation_changed');
+        }
+      }
+      requireValue(this.snapshot.relays.length < 64, 'mesh_relay_journal_capacity_reached');
+      this.snapshot.relays.push(newRelayRecord(value));
+      await this.persist();
+      return value.binding.operation_id;
+    } finally { this.busy = false; }
+  }
+  private relayRecord(operationId: string): RelayRecord {
+    for (let i: number = 0; i < this.snapshot.relays.length; i++) {
+      if (this.snapshot.relays[i].binding.operation_id === operationId) { return this.snapshot.relays[i]; }
+    }
+    throw new Error('mesh_relay_original_operation_not_found');
+  }
+  private relayReady(row: RelayRecord, scopedToken: string): void {
+    requireValue(this.enrollment !== null && this.foreground, 'mesh_foreground_required');
+    validateRelayUrl(row.resource_url);
+    requireValue(deviceInfo.sdkApiVersion >= 23, 'mesh_no_redirect_transport_requires_api23');
+    requireValue(/^[\x21-\x7e]{32,4096}$/.test(scopedToken), 'mesh_scoped_credential_required');
+  }
+  private async relayRequest(row: RelayRecord, scopedToken: string, action: string, argumentsJson: string): Promise<RelayResponse> {
+    this.relayReady(row, scopedToken);
+    requireValue(action === 'challenge' || action === 'result' || action === 'status', 'mesh_relay_action_invalid');
+    const raw: string = '{"format":"mesh-enrollment-relay-request/1","binding":' + canonicalRelayBinding(row.binding) +
+      ',"action":' + JSON.stringify(action) + ',"arguments":' + argumentsJson + '}';
+    requireValue(raw.length <= 262144, 'mesh_relay_request_too_large');
+    const transport: http.HttpRequest = http.createHttp();
+    try {
+      const response: http.HttpResponse = await transport.request(row.resource_url, {
+        method: http.RequestMethod.POST,
+        header: { 'Authorization': 'Bearer ' + scopedToken, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        extraData: raw, expectDataType: http.HttpDataType.STRING, connectTimeout: 8000, readTimeout: 15000,
+        usingCache: false, maxLimit: 262144, maxRedirects: 0
+      });
+      requireValue(response.responseCode === 200 && typeof response.result === 'string', 'mesh_relay_response_unconfirmed');
+      const result: string = response.result as string;
+      requireValue(result.length <= 262144, 'mesh_relay_response_too_large');
+      const value: RelayResponse = JSON.parse(result) as RelayResponse;
+      validateRelayResponse(value, row.binding, action);
+      return value;
+    } finally { transport.destroy(); } // Token lives only in this call's memory.
+  }
+  private async relayStatus(row: RelayRecord, scopedToken: string): Promise<string> {
+    const value: RelayResponse = await this.relayRequest(row, scopedToken, 'status', '{}');
+    observeRelayStatus(row, value, 'status');
+    await this.persist();
+    return JSON.stringify(value);
+  }
+  async queryRelayStatus(operationId: string, scopedToken: string): Promise<string> {
+    requireValue(!this.busy, 'mesh_operation_busy');
+    const row: RelayRecord = this.relayRecord(operationId);
+    this.relayReady(row, scopedToken);
+    this.busy = true;
+    try { return await this.relayStatus(row, scopedToken); }
+    finally { this.busy = false; }
+  }
+  private async relayResult(row: RelayRecord, scopedToken: string): Promise<string> {
+    // An attempted/unknown POST is NEVER sent again, not even with the same ID
+    // or bytes. Only query the original status/full-result hash thereafter.
+    if (row.result_state !== 'not_submitted') { return this.relayStatus(row, scopedToken); }
+    requireValue(this.sharingEnabled && this.foreground, 'mesh_local_owner_consent_required');
+    let raw: string = '';
+    for (let i: number = 0; i < this.snapshot.records.length; i++) {
+      const local: JournalRecord = this.snapshot.records[i];
+      if (local.operation_id === row.binding.operation_id) {
+        requireValue(local.request_sha256 === row.binding.request_sha256 && local.nonce === row.binding.nonce,
+          'mesh_relay_original_result_mismatch');
+        raw = local.result_json;
+      }
+    }
+    requireValue(raw.length > 0 && raw.length <= 131072, 'mesh_original_complete_result_required');
+    const result: ResultEnvelope = JSON.parse(raw) as ResultEnvelope;
+    validateResultEnvelope(result, row.binding, this.enrollment as Enrollment);
+    const codec: util.Base64Helper = new util.Base64Helper();
+    const bytes: Uint8Array = codec.decodeSync(result.result.base64);
+    requireValue(bytes.length === result.result.bytes && codec.encodeToStringSync(bytes) === result.result.base64 &&
+      await this.digest(bytes) === result.result.sha256, 'mesh_relay_original_result_bytes_changed');
+    const canonical: string = canonicalResult(result);
+    beginRelayResult(row, await this.digestText(canonical));
+    await this.persist(); // Durable submission intent before the only result POST.
+    try {
+      const value: RelayResponse = await this.relayRequest(row, scopedToken, 'result', canonical);
+      observeRelayStatus(row, value, 'result');
+      requireValue(row.result_state === 'acknowledged', 'mesh_relay_original_result_not_confirmed');
+      await this.persist();
+      return JSON.stringify(value);
+    } catch (error) {
+      if (row.result_state === 'attempted') { row.result_state = 'unknown'; }
+      await this.persist();
+      throw new Error('mesh_relay_result_unconfirmed_observe_original_status_only');
+    }
+  }
+  async submitRelayOriginalResult(operationId: string, scopedToken: string): Promise<string> {
+    requireValue(!this.busy, 'mesh_operation_busy');
+    const row: RelayRecord = this.relayRecord(operationId);
+    this.relayReady(row, scopedToken);
+    this.busy = true;
+    try { return await this.relayResult(row, scopedToken); }
+    finally { this.busy = false; }
+  }
+  async runRelay(operationId: string, scopedToken: string): Promise<string> {
+    requireValue(!this.busy, 'mesh_operation_busy');
+    const row: RelayRecord = this.relayRecord(operationId);
+    this.relayReady(row, scopedToken);
+    if (row.challenge_state !== 'not_requested') { return this.queryRelayStatus(operationId, scopedToken); }
+    requireValue(this.sharingEnabled, 'mesh_local_owner_consent_required');
+    this.busy = true;
+    try {
+      beginRelayChallenge(row);
+      await this.persist(); // Before HTTP admission, not merely before local execution.
+      const value: RelayResponse = await this.relayRequest(row, scopedToken, 'challenge', '{}');
+      const challenge: Challenge = value.challenge as Challenge;
+      const requestHash: string = await this.digestText(canonicalChallenge(challenge));
+      acceptRelayChallenge(row, value, this.enrollment as Enrollment, this.enrollmentHash,
+        requestHash, Math.floor(Date.now() / 1000));
+      await this.persist();
+      if (value.may_execute_original_challenge !== true) { return JSON.stringify(value); }
+      await this.executeChallenge(row.challenge_json, row);
+      return await this.relayResult(row, scopedToken); // Complete result, one original POST.
+    } catch (error) {
+      if (row.challenge_state === 'attempted' || row.challenge_state === 'granted') { row.challenge_state = 'unknown'; }
+      await this.persist();
+      throw new Error('mesh_relay_unconfirmed_original_identity_and_result_preserved');
     } finally { this.busy = false; }
   }
   originalResult(operationId: string): string {
