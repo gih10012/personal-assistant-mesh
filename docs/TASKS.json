@@ -8,6 +8,18 @@
   "latest_owner_status": "docs/STATUS-2026-10-15.md",
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
   "latest_continuation_at": "2026-10-15",
+  "owner_github_mesh_oauth_20261015": {
+    "explicit_owner_approval": true,
+    "personal_github_only": true,
+    "purpose": "Mesh identity login for ordinary Chat native MCP",
+    "new_dedicated_client_id_secret_allowed": true,
+    "basic_public_identity_only": true,
+    "repository_permissions_authorized": false,
+    "new_model_api_keys_paid_fallback_or_organization_identity_authorized": false,
+    "existing_mcp_ingress_and_hosting_preserved": true,
+    "actual_oauth_app_created_or_login_verified": false,
+    "independent_source_branch": "work/chat-github-oauth-20261015"
+  },
   "latest_actual_delivery_20261015": {
     "goal_status": "active",
     "owner_authorized_personal_vps_free_public_ip_tls_and_renewal": true,

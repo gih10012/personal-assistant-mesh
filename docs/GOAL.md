@@ -12,6 +12,13 @@
 
 ## 本轮批准的第一里程碑
 
+本人已进一步明确允许在个人GitHub创建仅用于Mesh登录的免费OAuth
+应用，生成专用client ID/secret；只取基本本人身份，不申请仓库权限。
+该授权不是新的模型API key、组织账号或付费许可。普通Chat继续复用
+已实现MCP/Ingress与个人VPS托管，不因插件创建工具可用就另换宿主。
+GitHub上游token不直接当Mesh bearer，账号stable ID/原source/subject/
+scope与原request ID仍须逐层验证。凭据只入私有部署状态，不入插件包。
+
 2026-10-15最新实际进展：本人授权个人VPS免费IP公信证书及自动续期，
 已完成正式签发/加载、外部TLS/IP校验和七项窄路由边界，原管理API
 不公开。12h续期检查已启用、实际staging模拟续期通过；不是后续真实
