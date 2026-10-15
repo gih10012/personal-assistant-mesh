@@ -16,9 +16,11 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sqlite3
 import stat
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -145,6 +147,25 @@ def read_checked(path, private=False, root_ok=False, limit=MAX_FILE):
         require(len(raw) <= limit, 'file_size_bound')
     require(file_metadata(path, private, root_ok) == before, 'file_generation_changed')
     return raw, dict(before, sha256=sha(raw))
+
+
+def digest_checked_backup(path):
+    """Complete private backup hash in bounded memory; other file caps stay."""
+    before = file_metadata(path, private=True)
+    checksum, size = hashlib.sha256(), 0
+    descriptor = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as source:
+        opened = os.fstat(source.fileno())
+        require((opened.st_dev, opened.st_ino, opened.st_uid, stat.S_IMODE(opened.st_mode),
+                 opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) ==
+                tuple(before[k] for k in ('dev', 'ino', 'uid', 'mode', 'size', 'mtime_ns', 'ctime_ns')),
+                'backup_generation_changed')
+        for block in iter(lambda: source.read(65536), b''):
+            checksum.update(block)
+            size += len(block)
+    require(size == before['size'] and file_metadata(path, private=True) == before,
+            'backup_generation_changed')
+    return dict(before, sha256=checksum.hexdigest())
 
 
 def private_directory(path):
@@ -829,7 +850,7 @@ def selected_state(db, auth, spec):
     return selected
 
 
-def inspect(spec_path):
+def inspect(spec_path, prepared_case_id=None):
     spec, spec_file = load_spec(spec_path)
     authority = quota.authority(spec['worker_config'], spec['server_config'])
     _, worker_file = read_checked(spec['worker_config'], private=True, limit=MAX_SPEC)
@@ -838,7 +859,11 @@ def inspect(spec_path):
     root = private_directory(spec['review_root'])
     case_id = digest([NAMESPACE, spec['expected']['task_id'], spec['expected']['epoch'],
                       spec['expected']['rollout_file']['sha256']])
-    require(not (root / case_id).exists(), 'original_review_intent_requires_readback')
+    require(not (root / case_id).exists() or prepared_case_id == case_id,
+            'original_review_intent_requires_readback')
+    if prepared_case_id is not None:
+        require(prepared_case_id == case_id and (root / case_id).exists(),
+                'original_prepared_case_required')
     with contextlib.closing(quota.readonly(authority['database'])) as db:
         selected = selected_state(db, authority, spec)
     native = inspect_rollout(spec, selected)
@@ -884,6 +909,9 @@ def repeat_controls(context, spec_path):
             and read_checked(spec['worker_config'], private=True, limit=MAX_SPEC)[1] == context['worker_file']
             and read_checked(spec['server_config'], private=True, limit=MAX_SPEC)[1] == context['server_file'],
             'review_control_generation_changed')
+    if 'original_spec_file' in context:
+        require(read_checked(context['original_spec_path'], private=True, limit=MAX_SPEC)[1] ==
+                context['original_spec_file'], 'original_prepared_spec_changed')
     previous = context['database_file']
     current = file_metadata(context['authority']['database'], private=True)
     require(all(previous[k] == current[k] for k in ('dev', 'ino', 'uid', 'mode')), 'database_identity_changed')
@@ -962,7 +990,7 @@ def stage_before(context, spec_path):
                     sql_size += len(raw)
             target.flush()
             os.fsync(target.fileno())
-        backup_file = read_checked(backup_path, private=True)[1]
+        backup_file = digest_checked_backup(backup_path)
         check, size = hashlib.sha256(), 0
         with gzip.open(str(backup_path), 'rb') as source:
             for block in iter(lambda: source.read(65536), b''):
@@ -979,6 +1007,198 @@ def stage_before(context, spec_path):
     ready_file = write_json(directory / '05-backup-complete.json', ready)
     return {'directory': directory, 'ready': ready, 'ready_file': ready_file,
             'archive_path': archive_path, 'backup_path': backup_path}
+
+
+def prepared_directory(spec, version, auth, case_id):
+    directory = private_directory(private_directory(spec['review_root']) / case_id)
+    names = {entry.name for entry in directory.iterdir()}
+    required = {'00-intent.json', '01-before.json', '02-original-artifact.gz',
+                '03-full-rollout.gz', '04-consistent-ledger.sql.gz'}
+    require(not names & {'06-cas-intent.json', '07-receipt.json'},
+            'prepared_cas_intent_requires_status')
+    require(required <= names and all(name in required | {'05-backup-complete.json'} or
+            re.fullmatch(r'04-resume-review-[0-9a-f]{64}\.json', name) for name in names),
+            'prepared_phase_files_changed')
+    with contextlib.closing(quota.readonly(auth['database'])) as db:
+        require(not db.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?',
+                               ('table', 'native_effect_reviews')).fetchone(),
+                'prepared_ledger_review_requires_status')
+    raw, intent_file = read_checked(directory / '00-intent.json', private=True, limit=MAX_SPEC)
+    intent = parse(raw.decode('utf8'))
+    require(isinstance(intent, dict) and intent.get('protocol') == PROTOCOL
+            and intent.get('case') == CASE and intent.get('id') == case_id
+            and intent.get('state') == 'prepared' and intent.get('spec_sha256') == version['sha256']
+            and intent.get('task_id') == spec['expected']['task_id']
+            and type(intent.get('source_epoch')) is int
+            and intent.get('source_epoch') == spec['expected']['epoch']
+            and intent.get('rollout_sha256') == spec['expected']['rollout_file']['sha256']
+            and intent.get('effects_zero') is False and intent.get('original_input_requeue') is False,
+            'original_prepared_intent_conflict')
+    return directory, intent, intent_file
+
+
+def verify_prepared_backup(context, path):
+    """Read every saved gzip/SQL byte; restore only a private disposable DB."""
+    metadata = digest_checked_backup(path)
+    root = private_directory(context['spec']['review_root'])
+    # Keep >=1 GiB free even with two ledger sizes reserved for restoration and
+    # its journal/temp work. Never prune, replace the backup or grow host disk.
+    restoration_bound = 2 * file_metadata(context['authority']['database'], private=True)['size']
+    needed = restoration_bound + 1024 ** 3
+    require(shutil.disk_usage(str(root)).free >= needed, 'prepared_backup_verification_space_required')
+    with contextlib.closing(quota.readonly(context['authority']['database'])) as live_db:
+        schema = [tuple(row) for row in live_db.execute(
+            'SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name')]
+    checksum, size, statements = hashlib.sha256(), 0, 0
+    with tempfile.TemporaryDirectory(prefix='.native-effect-backup-check.', dir=str(root)) as temporary:
+        target = Path(temporary) / 'verification.sqlite'
+        descriptor = os.open(str(target), os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        os.close(descriptor)
+        with contextlib.closing(sqlite3.connect(str(target), isolation_level=None)) as db:
+            db.row_factory = sqlite3.Row
+            page_size = db.execute('PRAGMA page_size').fetchone()[0]
+            db.execute('PRAGMA max_page_count=' + str(max(1, restoration_bound // page_size)))
+            def authorize(action, first, second, unused_db, unused_trigger):
+                denied = {sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_CREATE_VTABLE,
+                          sqlite3.SQLITE_DROP_VTABLE, sqlite3.SQLITE_PRAGMA}
+                if action in denied or action == sqlite3.SQLITE_FUNCTION and second == 'load_extension':
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+            db.set_authorizer(authorize)
+            pending, pending_size, committed = '', 0, False
+            import codecs
+            decoder = codecs.getincrementaldecoder('utf8')()
+            with contextlib.ExitStack() as inputs:
+                compressed = inputs.enter_context(os.fdopen(os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW), 'rb'))
+                saved = inputs.enter_context(gzip.GzipFile(fileobj=compressed, mode='rb'))
+                for block in iter(lambda: saved.readline(65536), b''):
+                    checksum.update(block)
+                    size += len(block)
+                    pending += decoder.decode(block)
+                    pending_size += len(block)
+                    require(pending_size <= MAX_FILE, 'backup_sql_statement_size_bound')
+                    if not sqlite3.complete_statement(pending):
+                        continue
+                    statement = pending.strip()
+                    require(not committed and (statements or statement == 'BEGIN TRANSACTION;'),
+                            'backup_sql_transaction_incomplete')
+                    db.execute(pending)
+                    require(shutil.disk_usage(str(root)).free >= 1024 ** 3,
+                            'prepared_backup_verification_space_required')
+                    statements += 1
+                    committed = statement == 'COMMIT;'
+                    pending, pending_size = '', 0
+                pending += decoder.decode(b'', final=True)
+            require(committed and not pending.strip() and statements >= 2 and not db.in_transaction,
+                    'backup_sql_transaction_incomplete')
+            db.set_authorizer(None)
+            require(db.execute('PRAGMA quick_check').fetchone()[0] == 'ok',
+                    'prepared_backup_database_not_integral')
+            require([tuple(row) for row in db.execute(
+                'SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name')] == schema,
+                'prepared_backup_full_schema_changed')
+            require(selected_state(db, context['authority'], context['spec']) == context['selected'],
+                    'prepared_backup_before_state_changed')
+    require(digest_checked_backup(path) == metadata, 'backup_generation_changed')
+    return metadata, {'sha256': checksum.hexdigest(), 'size': size}
+
+
+def inspect_prepared(original_path, fresh_path=None):
+    original, version = load_spec(original_path, allow_expired=True)
+    active_path = fresh_path or original_path
+    active, unused_version = load_spec(active_path)
+    require(closed_case_bindings(active) == closed_case_bindings(original),
+            'fresh_prepared_review_bindings_changed')
+    auth = quota.authority(original['worker_config'], original['server_config'])
+    case_id = digest([NAMESPACE, original['expected']['task_id'], original['expected']['epoch'],
+                      original['expected']['rollout_file']['sha256']])
+    directory, intent, intent_file = prepared_directory(original, version, auth, case_id)
+    context = inspect(active_path, prepared_case_id=case_id)
+    context.update(original_spec_path=original_path, original_spec_file=version)
+    raw, before_file = read_checked(directory / '01-before.json', private=True, limit=MAX_SPEC)
+    before = parse(raw.decode('utf8'))
+    selected = context['selected']
+    require(isinstance(before, dict) and before.get('protocol') == PROTOCOL
+            and before.get('task') == selected['task'] and before.get('session') == selected['session']
+            and before.get('checkpoint') == selected['checkpoint'] and before.get('intent') == intent
+            and before.get('old_artifact') == active['expected']['old_artifact']
+            and before.get('native') == context['native']
+            and before.get('owner_spec_sha256') == version['sha256'], 'original_prepared_before_changed')
+    old_file = read_checked(directory / '02-original-artifact.gz', private=True)[1]
+    require(old_file['sha256'] == active['expected']['old_artifact']['compressed_sha256'],
+            'before_artifact_copy_mismatch')
+    archive = directory / '03-full-rollout.gz'
+    archive_file = read_checked(archive, private=True)[1]
+    checksum, size = hashlib.sha256(), 0
+    with gzip.open(str(archive), 'rb') as saved:
+        for block in iter(lambda: saved.read(65536), b''):
+            checksum.update(block)
+            size += len(block)
+            require(size <= MAX_FILE, 'full_history_copy_changed')
+    require(size == active['expected']['rollout_file']['size']
+            and checksum.hexdigest() == active['expected']['rollout_file']['sha256'],
+            'full_history_archive_readback_failed')
+    backup = directory / '04-consistent-ledger.sql.gz'
+    backup_file, uncompressed = verify_prepared_backup(context, backup)
+    prepared_directory(original, version, auth, case_id)
+    live = repeat_controls(context, active_path)
+    ready = {'protocol': PROTOCOL, 'id': case_id, 'state': 'before_snapshot_complete',
+             'intent_file': intent_file, 'before_file': before_file, 'old_artifact_file': old_file,
+             'full_history_file': archive_file, 'backup_file': backup_file,
+             'backup_uncompressed_sha256': uncompressed['sha256'],
+             'backup_uncompressed_size': uncompressed['size'], 'source_quick_check': 'ok',
+             'live_reviewer_evidence': live, 'created': time.time()}
+    return context, {'directory': directory, 'ready': ready, 'archive_path': archive, 'backup_path': backup}
+
+
+def resume_prepared_review(original_path, approved_sha256, fresh_path=None, approved_fresh_sha256=None,
+                           approved_backup_sha256=None):
+    original, version = load_spec(original_path, allow_expired=True)
+    require(approved_sha256 == version['sha256'], 'explicit_original_prepared_approval_required')
+    require(isinstance(approved_backup_sha256, str)
+            and re.fullmatch(r'[0-9a-f]{64}', approved_backup_sha256),
+            'explicit_complete_backup_digest_approval_required')
+    require((fresh_path is None) == (approved_fresh_sha256 is None), 'fresh_prepared_approval_required')
+    if fresh_path is not None:
+        require(load_spec(fresh_path)[1]['sha256'] == approved_fresh_sha256,
+                'fresh_prepared_approval_required')
+    context, staged = inspect_prepared(original_path, fresh_path)
+    require(approved_backup_sha256 == staged['ready']['backup_file']['sha256'],
+            'explicit_complete_backup_digest_approval_required')
+    directory = staged['directory']
+    record = {'protocol': PROTOCOL, 'id': context['case_id'], 'state': 'prepared_completion_review',
+              'original_approved_spec_sha256': approved_sha256,
+              'fresh_approved_spec_sha256': context['spec_file']['sha256'],
+              'closed_bindings_sha256': digest(closed_case_bindings(context['spec'])),
+              'original_intent_file': staged['ready']['intent_file'],
+              'original_before_file': staged['ready']['before_file'],
+              'complete_backup_file': staged['ready']['backup_file'],
+              'approved_complete_backup_sha256': approved_backup_sha256,
+              'backup_uncompressed_sha256': staged['ready']['backup_uncompressed_sha256'],
+              'backup_uncompressed_size': staged['ready']['backup_uncompressed_size'],
+              'live_reviewer_evidence': staged['ready']['live_reviewer_evidence'], 'created': time.time()}
+    record_path = directory / ('04-resume-review-' + context['spec_file']['sha256'] + '.json')
+    if record_path.exists():
+        raw, record_file = read_checked(record_path, private=True, limit=MAX_SPEC)
+        previous = parse(raw.decode('utf8'))
+        require(all(previous.get(key) == value for key, value in record.items()
+                    if key not in ('created', 'live_reviewer_evidence')), 'prepared_resume_review_conflict')
+    else:
+        record_file = write_json(record_path, record)
+    staged['resume_review_file'] = record_file
+    staged['resume_review_path'] = record_path
+    ready_path = directory / '05-backup-complete.json'
+    if ready_path.exists():
+        raw, ready_file = read_checked(ready_path, private=True, limit=MAX_SPEC)
+        previous = parse(raw.decode('utf8'))
+        require(all(previous.get(key) == value for key, value in staged['ready'].items()
+                    if key not in ('created', 'live_reviewer_evidence')), 'prepared_complete_manifest_conflict')
+        staged['ready'] = previous
+    else:
+        ready_file = write_json(ready_path, staged['ready'])
+    staged['ready_file'] = ready_file
+    prepared_directory(original, version, context['authority'], context['case_id'])
+    return commit_review(context, fresh_path or original_path, staged, approved_sha256)
 
 
 def review_table(db):
@@ -1000,15 +1220,39 @@ def review_table(db):
 def apply_review(spec_path, approved_sha256, before_transaction=None):
     context = inspect(spec_path)
     require(approved_sha256 == context['spec_file']['sha256'], 'explicit_owner_spec_digest_approval_required')
-    spec, auth, selected = context['spec'], context['authority'], context['selected']
     staged = stage_before(context, spec_path)
     if before_transaction:
         before_transaction()  # Test-only injection, never a CLI or model hook.
+    return commit_review(context, spec_path, staged, approved_sha256)
+
+
+def check_staged_files(staged):
+    for name, key in (('00-intent.json', 'intent_file'), ('01-before.json', 'before_file'),
+                      ('02-original-artifact.gz', 'old_artifact_file'),
+                      ('03-full-rollout.gz', 'full_history_file')):
+        require(read_checked(staged['directory'] / name, private=True)[1] == staged['ready'][key],
+                'staged_history_generation_changed')
+    require(read_checked(staged['directory'] / '05-backup-complete.json', private=True)[1] ==
+            staged['ready_file'], 'staged_before_manifest_changed')
+    require(digest_checked_backup(staged['backup_path']) == staged['ready']['backup_file'],
+            'staged_backup_generation_changed')
+    if 'resume_review_file' in staged:
+        require(read_checked(staged['resume_review_path'], private=True)[1] == staged['resume_review_file'],
+                'staged_resume_review_changed')
+
+
+def commit_review(context, spec_path, staged, approved_sha256):
+    spec, auth, selected = context['spec'], context['authority'], context['selected']
     live = repeat_controls(context, spec_path)
-    intent = write_json(staged['directory'] / '06-cas-intent.json', {
+    check_staged_files(staged)
+    intent_body = {
         'protocol': PROTOCOL, 'id': context['case_id'], 'state': 'cas_intent',
         'before_manifest_sha256': staged['ready_file']['sha256'],
-        'approved_spec_sha256': approved_sha256, 'created': time.time()})
+        'approved_spec_sha256': approved_sha256, 'created': time.time()}
+    if 'resume_review_file' in staged:
+        intent_body.update(prepared_completion_review_file=staged['resume_review_file'],
+                           fresh_approved_spec_sha256=context['spec_file']['sha256'])
+    intent = write_json(staged['directory'] / '06-cas-intent.json', intent_body)
     artifact = digest([NAMESPACE, 'full-history', context['case_id'],
                        spec['expected']['rollout_file']['sha256']])
     receipt = {'protocol': PROTOCOL, 'id': context['case_id'], 'task_id': selected['task']['id'],
@@ -1029,10 +1273,7 @@ def apply_review(spec_path, approved_sha256, before_transaction=None):
             current = selected_state(db, auth, spec)
             require(current == selected, 'task_or_session_cas_changed')
             repeat_controls(context, spec_path)
-            require(read_checked(staged['archive_path'], private=True)[1] ==
-                    staged['ready']['full_history_file'], 'staged_history_generation_changed')
-            require(read_checked(staged['backup_path'], private=True)[1] ==
-                    staged['ready']['backup_file'], 'staged_backup_generation_changed')
+            check_staged_files(staged)
             require(not db.execute('SELECT 1 FROM session_chunks WHERE id=? LIMIT 1', (artifact,)).fetchone(),
                     'complete_history_namespace_conflict')
             review_table(db)
@@ -1056,6 +1297,9 @@ def apply_review(spec_path, approved_sha256, before_transaction=None):
             require(changed == 1, 'native_session_artifact_cas_failed')
             proof = {'spec_sha256': approved_sha256, 'native': context['native'], 'live': live,
                      'before_manifest': staged['ready'], 'cas_intent_file': intent}
+            if 'resume_review_file' in staged:
+                proof.update(prepared_completion_review_file=staged['resume_review_file'],
+                             fresh_approved_spec_sha256=context['spec_file']['sha256'])
             db.execute('INSERT INTO native_effect_reviews VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (context['case_id'], selected['task']['id'], selected['task']['epoch'],
                  selected['task']['epoch'] + 1, json.dumps(selected['task']),
@@ -1191,16 +1435,45 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--apply', action='store_true')
     mode.add_argument('--status', action='store_true', help='Read SAME original review after a lost ACK; never reapply.')
-    parser.add_argument('--approve-spec-sha256', help='Reviewer-approved exact PRIVATE spec digest; apply only.')
+    mode.add_argument('--audit-prepared', action='store_true', help='Read same pre-CAS files; verify backup in a disposable DB only.')
+    mode.add_argument('--resume-prepared', action='store_true', help='Explicit owner completion of SAME prepared phase; never retry CAS.')
+    parser.add_argument('--approve-spec-sha256', help='Reviewer-approved exact PRIVATE original spec digest; apply/resume only.')
+    parser.add_argument('--fresh-spec-file', help='Separately reviewed same-bindings fresh spec; never replaces the original.')
+    parser.add_argument('--approve-fresh-spec-sha256', help='Explicit fresh review digest for prepared completion only.')
+    parser.add_argument('--approve-prepared-backup-sha256', help='Owner-audited COMPLETE saved backup digest; prepared resume only.')
     args = parser.parse_args(argv)
     try:
+        require(args.resume_prepared or args.audit_prepared or args.fresh_spec_file is None,
+                'fresh_spec_is_prepared_only')
+        require(args.resume_prepared or args.approve_fresh_spec_sha256 is None,
+                'fresh_approval_is_prepared_resume_only')
+        require(args.resume_prepared or args.approve_prepared_backup_sha256 is None,
+                'backup_approval_is_prepared_resume_only')
         if args.status:
             result = review_status(args.spec_file)
-        elif args.apply:
+        elif args.apply or args.resume_prepared:
             require(isinstance(args.approve_spec_sha256, str)
                     and re.fullmatch(r'[0-9a-f]{64}', args.approve_spec_sha256),
                     'explicit_owner_spec_digest_approval_required')
-            result = apply_review(args.spec_file, args.approve_spec_sha256)
+            if args.resume_prepared:
+                result = resume_prepared_review(args.spec_file, args.approve_spec_sha256,
+                                               args.fresh_spec_file, args.approve_fresh_spec_sha256,
+                                               args.approve_prepared_backup_sha256)
+            else:
+                result = apply_review(args.spec_file, args.approve_spec_sha256)
+        elif args.audit_prepared:
+            require(args.approve_spec_sha256 is None, 'approval_is_apply_only')
+            context, staged = inspect_prepared(args.spec_file, args.fresh_spec_file)
+            result = {'protocol': PROTOCOL, 'id': context['case_id'], 'applied': False,
+                      'eligible': True, 'read_only': True, 'private_temporary_sqlite_only': True,
+                      'complete_saved_backup_verified': True,
+                      'backup_compressed_size': staged['ready']['backup_file']['size'],
+                      'backup_compressed_sha256': staged['ready']['backup_file']['sha256'],
+                      'backup_uncompressed_size': staged['ready']['backup_uncompressed_size'],
+                      'backup_uncompressed_sha256': staged['ready']['backup_uncompressed_sha256'],
+                      'original_spec_sha256': context['original_spec_file']['sha256'],
+                      'fresh_spec_sha256': context['spec_file']['sha256'],
+                      'explicit_owner_resume_required': True, 'retry_authorized': False}
         else:
             require(args.approve_spec_sha256 is None, 'approval_is_apply_only')
             context = inspect(args.spec_file)
@@ -1212,7 +1485,7 @@ def main(argv=None):
     except (ReviewDenied, quota.AuditDenied) as error:
         print(json.dumps({'applied': False, 'eligible': False, 'code': str(error)}))
         return 2
-    except (OSError, ValueError, TypeError, KeyError, UnicodeError, sqlite3.Error, subprocess.TimeoutExpired):
+    except (OSError, EOFError, ValueError, TypeError, KeyError, UnicodeError, sqlite3.Error, subprocess.TimeoutExpired):
         print(json.dumps({'applied': False, 'eligible': False, 'code': 'review_input_or_observation_invalid'}))
         return 2
     print(json.dumps(result, sort_keys=True))
