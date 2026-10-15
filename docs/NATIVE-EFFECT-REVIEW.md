@@ -114,7 +114,7 @@ and every earlier failure.
 
 ## Validation scope
 
-Twenty-two synthetic risk tests exercise the actual parser, original stdout
+Twenty-three synthetic risk tests exercise the actual parser, original stdout
 binding, O_EXCL rejection, authenticated post-check, source/process generations,
 dependencies, strict history prefix, CAS race, lost ACK and append-only journal.
 They also demonstrate that status-only `failed` still blocks, and that reviewed
@@ -136,6 +136,37 @@ That review did not execute recorded code, read auth or call a model/account RPC
 The old SSH quote-splice delimiter and `input_text` native output encoding were
 verified from actual records, not invented by the fixture. The private case's
 expired time window was not extended by this specialist.
+
+### Exact metadata handoff correction
+
+A subsequent independently inspected Python read-only capture was eligible in
+the full parser and both challenge-bound observers, but failed the code-owned
+bindings digest. Excluding the two explicitly different review-time-window
+fields, the only differences were 13 integer `*_ns` metadata values. Every
+inode/device/size/owner/mode/hash, command, original task/session and Worker
+binding was unchanged. Complete V8 `JSON.parse`/`JSON.stringify` of the fresh
+non-window spec reproduced the old non-window spec exactly; the original final
+proof's rollout/auth/source metadata likewise matched that complete V8
+roundtrip. The values exceeded JavaScript's exact integer range (`2**53`), and
+the old decimal values ended in `00`, with differences from the exact Python
+integers of -55 through +80 ns.
+
+Only the code-owned bindings digest was corrected to the independently checked
+Python integer metadata. The case/source/command/poll/history/task pins and all
+live generation comparisons remain exact. No float normalization, nanosecond
+tolerance, automatic spec rewrite or future-case repinning is supported. The
+regression executes a real V8 roundtrip on a complete synthetic spec, shows why
+`int(float(value))` does not reproduce `JSON.stringify`'s decimal output, and
+rejects both the rounded spec and a genuine one-nanosecond metadata change even
+when their floating-point values are equal. It explicitly skips on systems
+without Node; Node is a test reference, not an owner-tool runtime dependency.
+
+The old private spec and its expired window remain unchanged and denied. The
+new capture is historical read-only review evidence, not permission to apply:
+Root must freshly recapture/review the exact Python spec, observe the original
+ledger/config/identity and independently approve that spec digest. Do not pass
+the spec/proof through a lossy JavaScript-number transport; retain private raw
+bytes or encode an opaque transport without reparsing its integers.
 
 No production `--apply`, new model/RPC, service operation or auth write was
 performed by the implementation specialist. Deployment, explicit review

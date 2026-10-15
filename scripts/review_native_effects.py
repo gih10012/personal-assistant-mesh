@@ -53,7 +53,9 @@ SUPPORTED_RECORDS = {
 # this code-owned manifest requires another independent source/case review.
 CLOSED_CASE = {
     'bundle_sha256': '5bb21514b1ef7bbd16d29d2bcd1a5f4ce08e8b513f0408f8831c0be6f3540dfb',
-    'bindings_sha256': 'dd009784a39bb2078d685dbcc78607b8a3c19a92f1c2c2db08f5d9462c814766',
+    # Original Python metadata ints: the prior handoff's JS JSON roundtrip
+    # rounded 13 *_ns fields above 2**53. Comparisons remain exact, never float.
+    'bindings_sha256': '11e436a8eba63d1112b2221ad08a74b52905863646717541705c19524b619e33',
     'commands': {
         'metadata_read': 'ba6bcf5999c7e43be7faec8dc4a4c06dcce8f37676fac4b0e4a9f651142b9393',
         'local_account_query': '4896d0ab18f7a7ae06721326f05744986e8a5939b014d800d357510da251c631',
