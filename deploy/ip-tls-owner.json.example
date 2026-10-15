@@ -1,0 +1,6 @@
+{
+  "public_ip": "REPLACE_AUTHORIZED_PUBLIC_IPV4",
+  "runtime_root": "/opt/personal-assistant-mesh-tls",
+  "mcp_port": null,
+  "cloud_port": null
+}
