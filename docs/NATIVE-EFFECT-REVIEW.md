@@ -194,7 +194,7 @@ original failure and original input are not replayed.
 
 ## Validation scope
 
-Twenty-nine synthetic risk tests exercise the actual parser, original stdout
+Thirty synthetic risk tests exercise the actual parser, original stdout
 binding, O_EXCL rejection, authenticated post-check, source/process generations,
 dependencies, strict history prefix, CAS race, lost ACK and append-only journal.
 They also demonstrate that status-only `failed` still blocks, and that reviewed
@@ -213,6 +213,16 @@ SQL, changed before-state, low space and existing CAS/review. A local interrupti
 before creating `06` can complete the same retained `05`; an existing `06`
 cannot resume. No large production backup or production prepared phase was
 restored, completed or mutated by the implementation specialist.
+
+The actual Python 3.6 deployment lacked the Python names for three authorizer
+actions, causing its callback to fail closed before restoration. The callback
+now uses SQLite's documented fixed C API values only when those names are
+absent: `CREATE_VTABLE=29`, `DROP_VTABLE=30`, `FUNCTION=31`. Attach/detach,
+virtual-table/pragma operations and extension loading remain denied; function
+names are compared case-insensitively as SQLite specifies. The missing-symbol
+regression exercises both these denials and a full synthetic prepared audit.
+`set_authorizer(None)` is unchanged.
+[SQLite authorizer action codes](https://www.sqlite.org/c3ref/c_alter_table.html).
 
 The original production turn passed the author's prior complete read-only
 parser and both live observers under Python 3.6; those private receipts remain

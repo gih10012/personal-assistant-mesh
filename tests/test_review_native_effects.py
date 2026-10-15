@@ -754,6 +754,27 @@ class NativeEffectReviewTests(unittest.TestCase):
                 audit['backup_compressed_sha256']]))
         self.assertTrue(json.loads(output.getvalue())['applied'])
 
+    def test_prepared_authorizer_keeps_fixed_opcodes_when_python_symbols_are_missing(self):
+        approval, directory = self.prepared_after_old_size_failure()
+        symbols = ('SQLITE_CREATE_VTABLE', 'SQLITE_DROP_VTABLE', 'SQLITE_FUNCTION')
+        previous = {name: getattr(sqlite3, name) for name in symbols if hasattr(sqlite3, name)}
+        try:
+            for name in previous:
+                delattr(sqlite3, name)
+            for action in (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_PRAGMA, 29, 30):
+                self.assertEqual(sqlite3.SQLITE_DENY, review.backup_authorizer(action, None, None, None, None))
+            for function in ('load_extension', 'LOAD_EXTENSION'):
+                self.assertEqual(sqlite3.SQLITE_DENY, review.backup_authorizer(31, None, function, None, None))
+            self.assertEqual(sqlite3.SQLITE_OK, review.backup_authorizer(31, None, 'length', None, None))
+            with self.observed():
+                context, staged = review.inspect_prepared(str(self.spec_path))
+            self.assertEqual(self.task, context['selected']['task']['id'])
+            self.assertGreater(staged['ready']['backup_uncompressed_size'], 0)
+            self.assertFalse((directory / '05-backup-complete.json').exists())
+        finally:
+            for name, value in previous.items():
+                setattr(sqlite3, name, value)
+
     def test_raw_authenticated_false_even_repinned_cannot_settle(self):
         wrong = json.dumps({'account': {'authenticated': False, 'type': 'chatgpt', 'plan': 'plus'}, 'limits': {}})
         last = self.spec['commands'][-1]
