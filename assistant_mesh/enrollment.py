@@ -487,6 +487,32 @@ class EnrollmentJournal:
         return request
 
     @_guard
+    def admit_external(self, operation_id, expected_request_sha256):
+        """One durable admission for an owner-authenticated external executor.
+
+        No callback runs here. Commit BEFORE handing out the original challenge;
+        a lost response cannot cause another executable admission. Repeated calls
+        return the original challenge for non-executable observation only. The
+        caller must check trusted task/credential authority, never a node boolean.
+        This uses the same operation row/state as execute(), not a new database.
+        """
+        self._writable()
+        _hash(expected_request_sha256)
+        with self._transaction() as db:
+            row = self._row(db, operation_id)
+            _require(row['request_sha256'] == expected_request_sha256,
+                     'enrollment_original_request_binding_mismatch')
+            request = json.loads(row['request'])
+            fresh = row['state'] == 'intent'
+            if fresh:
+                self._live(request)
+                db.execute("UPDATE enrollment_operations SET state='attempted' WHERE id=? AND state='intent'",
+                           (operation_id,))
+            return {'fresh': fresh, 'challenge': request,
+                    'status': self._view(self._row(db, operation_id)),
+                    'automatic_replay': False, 'managed_use_authorized': False}
+
+    @_guard
     def execute(self, operation_id, executor):
         """One owned callback attempt; crash/ACK loss is unknown, never retried."""
         self._writable()
@@ -508,8 +534,9 @@ class EnrollmentJournal:
             return self.inspect(operation_id)
 
     @_guard
-    def record_result(self, operation_id, envelope):
+    def record_result(self, operation_id, envelope, *, require_live=False):
         self._writable()
+        _require(type(require_live) is bool, 'enrollment_live_requirement_invalid')
         envelope = _detached(envelope, _MAX_JSON_BYTES)
         _object(envelope, ('format', 'operation_id', 'request_sha256', 'nonce', 'result', 'continuation', 'proxy'))
         _unblob(envelope['result'])
@@ -527,6 +554,11 @@ class EnrollmentJournal:
             if row['result'] is not None:
                 _require(row['result'] == raw, 'enrollment_original_result_conflict')
             else:
+                # External managed transports may require a still-live original
+                # authorization for first receipt. Native late observation keeps
+                # its existing default; identical saved bytes never renew a grant.
+                if require_live:
+                    self._live(request)
                 db.execute("UPDATE enrollment_operations SET state='result_reported',result=?,result_sha256=? WHERE id=?",
                            (raw, document_sha256(envelope), operation_id))
             return self._view(self._row(db, operation_id))
