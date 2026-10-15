@@ -329,6 +329,23 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(0o777, shared.stat().st_mode & 0o777)
         self.assertTrue(str(config['adapter']['argv'][0]).startswith(str(private)))
 
+    def test_large_native_runtime_is_fully_hashed_with_a_finite_streaming_bound(self):
+        path = self.directory / 'large-native-runtime'
+        with path.open('wb') as output:
+            output.truncate(96 * 1024 * 1024)
+        path.chmod(0o700)
+        checksum = hashlib.sha256()
+        with path.open('rb') as source:
+            for block in iter(lambda: source.read(65536), b''):
+                checksum.update(block)
+        _adapter_bytes({'path': str(path), 'sha256': checksum.hexdigest()})
+        with self.assertRaisesRegex(BootstrapError, 'adapter_changed'):
+            _adapter_bytes({'path': str(path), 'sha256': 'f' * 64})
+        with path.open('wb') as output:
+            output.truncate(256 * 1024 * 1024 + 1)
+        with self.assertRaisesRegex(BootstrapError, 'adapter_path_unsafe'):
+            _adapter_bytes({'path': str(path), 'sha256': checksum.hexdigest()})
+
     def test_private_scope_metadata_and_bad_cli_flags_are_fixed_errors(self):
         self.config['inventory']['candidates'][0]['scope']['access_token'] = 'PRIVATE-FIXTURE-SECRET'
         self.save()

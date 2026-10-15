@@ -31,6 +31,7 @@ from .provider_runtime import _owner_bytes, _unique_object
 
 _FORMAT = 'mesh-bootstrap/1'
 _MAX_REPLY = 16 * 1024 * 1024
+_MAX_ADAPTER_FILE_BYTES = 256 * 1024 * 1024
 _COMMAND = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.+-]{0,79}\Z')
 _HASH = re.compile(r'[0-9a-f]{64}\Z')
 
@@ -220,13 +221,21 @@ def _adapter_bytes(pin):
         with os.fdopen(fd, 'rb') as source:
             before = os.fstat(source.fileno())
             _require(stat.S_ISREG(before.st_mode) and before.st_uid in (0, os.getuid())
-                     and not before.st_mode & 0o022 and before.st_size <= 64 * 1024 * 1024,
+                     and not before.st_mode & 0o022 and before.st_size <= _MAX_ADAPTER_FILE_BYTES,
                      'bootstrap_adapter_path_unsafe')
-            raw = source.read(64 * 1024 * 1024 + 1)
+            # Current native runtimes can exceed 64 MiB. Stream the complete
+            # owner-pinned file rather than rejecting it as an unsafe path or
+            # allocating its entire image; retain an explicit resource bound.
+            checksum, length = hashlib.sha256(), 0
+            for block in iter(lambda: source.read(65536), b''):
+                length += len(block)
+                _require(length <= _MAX_ADAPTER_FILE_BYTES, 'bootstrap_adapter_path_unsafe')
+                checksum.update(block)
             after = os.fstat(source.fileno())
         fields = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
         _require(all(getattr(before, key) == getattr(after, key) == getattr(path.lstat(), key)
-                     for key in fields) and hashlib.sha256(raw).hexdigest() == pin['sha256'],
+                     for key in fields) and length == before.st_size
+                 and checksum.hexdigest() == pin['sha256'],
                  'bootstrap_adapter_changed')
     except BootstrapError:
         raise
