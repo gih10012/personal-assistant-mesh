@@ -22,15 +22,25 @@ class HarmonyNodeTests(unittest.TestCase):
         self.assertEqual('org.personalassistant.mesh', app['bundleName'])
         self.assertEqual(['ohos.permission.INTERNET'], [item['name'] for item in module['requestPermissions']])
         self.assertEqual([], profile['app']['signingConfigs'])
+        product = profile['app']['products'][0]
+        self.assertEqual('26.0.0', product['compileSdkVersion'])
+        self.assertEqual('26.0.0', product['targetSdkVersion'])
+        self.assertEqual('5.0.0(12)', product['compatibleSdkVersion'])
+        for name in ['oh-package.json5', 'hvigor/hvigor-config.json5']:
+            self.assertEqual('26.0.0', json.loads((APP / name).read_text())['modelVersion'])
         self.assertNotIn('extensionAbilities', module)
         self.assertEqual('singleton', module['abilities'][0]['launchType'])
+        self.assertEqual('$media:app_icon', module['abilities'][0]['startWindowIcon'])
+        self.assertEqual('$color:start_window_background', module['abilities'][0]['startWindowBackground'])
+        colors = json.loads((APP / 'entry/src/main/resources/base/element/color.json').read_text())['color']
+        self.assertEqual('start_window_background', colors[0]['name'])
         self.assertTrue((APP / 'entry/src/main/ets/entryability/EntryAbility.ets').is_file())
 
     def test_platform_adapter_has_no_retry_or_persisted_credentials_or_uri(self):
         source = (APP / 'entry/src/main/ets/platform/NativeServices.ets').read_text()
         self.assertIn('maxRedirects: 0', source)
         self.assertIn('deviceInfo.sdkApiVersion >= 23', source)
-        self.assertIn('exactByteView(utf8.buffer, utf8.byteOffset, utf8.byteLength)', source)
+        self.assertIn('exactByteView(utf8.buffer, utf8.byteOffset, utf8.length)', source)
         snapshot = source.split('export class NodeSnapshot {', 1)[1].split('\n}', 1)[0]
         self.assertNotIn('token', snapshot.lower())
         self.assertNotIn('uri', snapshot.lower())

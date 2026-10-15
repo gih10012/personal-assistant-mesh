@@ -3,9 +3,9 @@
     "signingConfigs": [],
     "products": [{
       "name": "default",
-      "compileSdkVersion": "7.0.0(26)",
+      "compileSdkVersion": "26.0.0",
       "compatibleSdkVersion": "5.0.0(12)",
-      "targetSdkVersion": "7.0.0(26)",
+      "targetSdkVersion": "26.0.0",
       "runtimeOS": "HarmonyOS"
     }],
     "buildModeSet": [{ "name": "debug" }, { "name": "release" }]
