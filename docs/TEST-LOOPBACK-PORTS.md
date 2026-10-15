@@ -46,3 +46,30 @@ Alice自有server线程已停。这证明真实失败路径存在，不是重跑
 断网/同scope重连、原ephemeral/private worker配置。最终相关Node/networking/
 remote组121项全部通过（17.519s，0跳过），保留独立原日志。原子组有
 包含关系，不相加拼成全网自治/HA证明；未重跑完整仓库或CI到变绿。
+
+## 完整 discovery 与 federation 共享夹具的跟进
+
+后续CI `38752432927`（head `eb26326`，Python3.8）出现3项federation
+失败，以及本片新增spy观察到空列表。本地保留修改前的独立失败日志，
+先分别重现，再作7行测试修正；没有以“可能frozen污染”作为已证结论。
+
+1. CI实际命令是 `python -m unittest discover -s tests -v`，会把当前测试
+   文件作为 `test_node` 加载；qualified子组用 `tests.test_node`。
+   硬编码patch `tests.test_node.serve` 在前者会导入/修改另一个模块副本，
+   真实当前模块仍运行原serve，所以spy为空。改为按当前 `__name__`
+   定位serve，不改变原真实HTTP路径或断言。原discovery子组60项中
+   确定性1fail，修正后同60项17.286s通过、0跳过。
+2. `test_federation_node`另有pair，不调用NodeTests.pair。它原先先读Bob
+   worker文件并冻结Alice的peer Client，再启动Bob。共享fixture默认
+   bind0后，这把 `http://127.0.0.1:0` 留在Client里，即使实际Bob已经
+   正常监听另一个非零端口。修改前直接核到该失配，federation4项中
+   确定性3fail（9.597s），对应projection等待、A2A不可达、慢catalogue
+   未进入。仅将start_external移到读取真实worker/构造Client之前；
+   同4项2.774s通过、0跳过。授权撤销/非阻塞/保留本地任务断言均未改。
+
+另外在同一进程按CI的真实discover加载方式先运行communication与
+exact-frozen相关夹具，再运行federation和Node，检查私有alias/线程清理
+与共享夹具兼容。113项31.056s全部通过，0跳过；包含communication client/
+faultdomain、legacy fenced receiver、workspace legacy projection与上述
+两组。该受限组合与原CI失败不是互相替代的证据；不改生产
+Node/Server/A2A接口，不增加timeout或skip，后续仍由Root核精确新head CI。

@@ -24,18 +24,20 @@ class FederationNodeTests(unittest.TestCase):
     def pair(self, client_factory=Client):
         first = self.fixture.config('alice', other='bob')
         second = self.fixture.config('bob', central=True, other='alice')
-        worker = json.loads(Path(second['local_worker_config']).read_text())
         for config in (first, second):
             server = json.loads(Path(config['local_server_config']).read_text())
             server['federation'] = {'export_enabled': True, 'projection_enabled': True}
             server['peers'][-1]['capabilities'].append('capability.catalog')
             Path(config['local_server_config']).write_text(json.dumps(server))
+        # Resolve the actual retained listener before freezing a peer Client.
+        # The shared node fixture binds port 0, not a released sampled port.
+        self.fixture.start_external(second)
+        worker = json.loads(Path(second['local_worker_config']).read_text())
         first['peers'] = [{'node': 'bob', 'authority': 'bob', 'sync_capabilities': True,
             'client_config': self.fixture.private('a-to-b.json', {'control_url': worker['control_url'],
                 'token_file': self.fixture.secret('bob-from-alice')})}]
         first['federation_sync'] = {'interval_seconds': 1}
         alice = self.fixture.node(first, client_factory=client_factory)
-        self.fixture.start_external(second)
         return alice, second
 
     def test_default_has_no_catalogue_runtime(self):

@@ -389,7 +389,9 @@ class NodeTests(unittest.TestCase):
             configured_ports.append(config['port'])
             return actual_serve(config, ready)
 
-        with patch('tests.test_node.serve', observed_serve):
+        # Discovery loads test_node; package-mode runners use tests.test_node.
+        # Observe this actual module, never import/patch a second fixture copy.
+        with patch(__name__ + '.serve', observed_serve):
             alice, bob = self.pair()
         self.assertEqual([0, 0], configured_ports)
         alice_port = alice.server.server_address[1]
