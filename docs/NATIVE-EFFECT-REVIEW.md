@@ -112,9 +112,89 @@ that live session to remain at this historical artifact. The append-only
 journal and retained private before snapshots preserve original uncertainty
 and every earlier failure.
 
+## Explicit completion of the same prepared phase
+
+One real owner invocation failed with `file_size_bound` after writing and
+fsyncing `04-consistent-ledger.sql.gz`: its 286,909,413 compressed bytes exceeded
+the generic 256 MiB `read_checked` cap. The failure was before `05`, any
+`06-cas-intent`, or any ledger review. Original same-case status reported only
+`prepared`, no ledger review, and no retry authorization. This is a local
+preparation failure, **not permission to run `--apply` again**. Those observed
+phase facts do not establish the current phase of a later owner invocation.
+
+The backup alone now uses an owned/no-follow, complete 64 KiB streaming hash
+with exact generation checks, including at CAS. The global file cap and native
+history bounds remain unchanged; the tool does not read the large gzip into
+memory, truncate it, omit tables or make a second backup. Normal new-case
+preparation still verifies the complete uncompressed SQL hash and size against
+the streaming dump producer.
+
+For this already-prepared case, the operations owner can first run the new
+**read-only prepared audit** from the reviewed frozen source root:
+
+```sh
+python3 -m scripts.review_native_effects --spec-file /PRIVATE/original-review.json \
+  --audit-prepared --fresh-spec-file /PRIVATE/separate-fresh-review.json
+```
+
+The original spec can be expired. A supplied fresh spec must be separately
+captured and reviewed in Python, currently in its short window, and have
+**exactly the same non-window bindings**; it never replaces the original spec
+or `00-intent`. If the original is still fresh, omit `--fresh-spec-file`.
+Audit refuses any `06`, `07`, existing ledger review namespace, missing original
+phase file, conflicting before-state, or unrecognized phase file. It reparses
+the entire original native turn and obtains new challenge-bound live controls.
+
+Audit reads every byte of the preserved gzip through CRC/EOF, restoring every
+SQL statement into a private **temporary** SQLite database, never the live
+ledger. It requires the complete `BEGIN TRANSACTION` through final `COMMIT`,
+denies external-database/extension/pragma operations, runs `quick_check`, checks
+the complete schema against the authority and the original selected
+task/session/checkpoint/old chunks against both the pinned case and
+`01-before.json`. It rechecks the backup's full hash/generation and all fresh
+controls. This validates the actual retained owner-produced SQL snapshot; it
+does not assert that unrelated live rows have remained frozen since that
+snapshot. The temporary database is removed; original `00`–`04` bytes remain.
+
+Before restoring, free disk must cover **two live-ledger sizes plus 1 GiB**.
+The temporary database has a two-ledger-size page limit and the 1 GiB free-space
+floor is checked as statements are restored. No disk expansion, prune, deletion
+of recovery state, or second compressed backup is attempted. Low space fails
+closed before case mutation; Root may instead arrange an independently reviewed
+private verification route, not substitute a model-supplied `verified` boolean.
+Large SQLite statements retain a 256 MiB bound; Node is not needed here.
+
+Only after independently reviewing that audit, explicitly complete the **same**
+prepared phase, approving the original spec, the separately reviewed fresh
+spec (when supplied), and the complete saved-backup hash returned by audit:
+
+```sh
+python3 -m scripts.review_native_effects --spec-file /PRIVATE/original-review.json \
+  --resume-prepared --approve-spec-sha256 ORIGINAL_DIGEST \
+  --fresh-spec-file /PRIVATE/separate-fresh-review.json \
+  --approve-fresh-spec-sha256 FRESH_DIGEST \
+  --approve-prepared-backup-sha256 AUDITED_COMPLETE_GZIP_DIGEST
+```
+
+If no separate fresh spec is needed, omit both fresh-spec options. This performs
+the full audit again, appends a `04-resume-review-<fresh-digest>.json` linking both
+approvals and verified backup, completes `05`, then uses the original one-shot
+`06`/SQLite CAS. An already-written valid `05` can be verified and retained after
+a known failure before `06`; it is never overwritten. The original spec and
+all existing phase files are retained, not renamed or regenerated. No timer or
+automatic retry calls this command. CAS intent creation is exclusive; any
+existing `06` or ledger review is **status-only**, even after apparent rollback.
+
+The journal's original approval binding and `--status` remain anchored to the
+**original** spec digest. The fresh review is an additional explicit record,
+not a silent replacement grant. A lost ACK still requires that original spec's
+`--status`; neither a renewed window nor a new spec ID authorizes another CAS.
+Task status remains `failed` at the new epoch, never `pending`; native history,
+original failure and original input are not replayed.
+
 ## Validation scope
 
-Twenty-three synthetic risk tests exercise the actual parser, original stdout
+Twenty-nine synthetic risk tests exercise the actual parser, original stdout
 binding, O_EXCL rejection, authenticated post-check, source/process generations,
 dependencies, strict history prefix, CAS race, lost ACK and append-only journal.
 They also demonstrate that status-only `failed` still blocks, and that reviewed
@@ -124,6 +204,15 @@ expired same-spec readback, changed checkpoint, missing old/new history and
 subsequent live-session progress are covered. Tests explicitly replace the
 code-owned manifest with synthetic fixture pins in process; the installed tool
 has no such override.
+
+Prepared-phase tests reproduce the size failure after a complete saved gzip,
+guard against any whole-backup read or replacement, verify read-only CLI audit,
+same-case completion, unchanged `00`–`04`, expired-original dual approval and
+lost ACK. They reject corrupt/truncated/incomplete/reduced/externally attaching
+SQL, changed before-state, low space and existing CAS/review. A local interruption
+before creating `06` can complete the same retained `05`; an existing `06`
+cannot resume. No large production backup or production prepared phase was
+restored, completed or mutated by the implementation specialist.
 
 The original production turn passed the author's prior complete read-only
 parser and both live observers under Python 3.6; those private receipts remain

@@ -248,6 +248,21 @@ class NativeEffectReviewTests(unittest.TestCase):
         # their synthetic bytes as TEST code, not accepting private repinning.
         review.CLOSED_CASE.update(self.closed_manifest())
 
+    def prepared_after_old_size_failure(self):
+        approval = review.read_checked(self.spec_path, True)[1]['sha256']
+        # Reproduce the actual failure AFTER the complete gzip has been closed
+        # and fsynced, but BEFORE 05/06/any ledger mutation. No huge fixture.
+        with self.observed(), patch.object(review, 'digest_checked_backup',
+                side_effect=review.ReviewDenied('file_size_bound')):
+            with self.assertRaisesRegex(review.ReviewDenied, 'file_size_bound'):
+                review.apply_review(str(self.spec_path), approval)
+        context_case = review.digest([review.NAMESPACE, self.task, 1,
+                                     self.spec['expected']['rollout_file']['sha256']])
+        directory = self.review_root / context_case
+        self.assertEqual({'00-intent.json', '01-before.json', '02-original-artifact.gz',
+            '03-full-rollout.gz', '04-consistent-ledger.sql.gz'}, {p.name for p in directory.iterdir()})
+        return approval, directory
+
     def test_default_audit_real_six_command_parser_has_no_mutation_or_secret_output(self):
         before = {t: self.rows(t) for t in ('tasks', 'native_sessions', 'session_chunks')}
         with self.observed():
@@ -574,6 +589,170 @@ class NativeEffectReviewTests(unittest.TestCase):
         self.assertFalse(readback['retry_authorized'])
         self.assertEqual(result['complete_artifact'], readback['complete_artifact'])
         self.assertEqual('d' * 64, self.rows('native_sessions')[0]['artifact'])
+
+    def test_prepared_readonly_audit_and_explicit_completion_keep_all_original_files(self):
+        approval, directory = self.prepared_after_old_size_failure()
+        before = {p.name: p.read_bytes() for p in directory.iterdir()}
+        tasks, sessions, chunks = self.rows('tasks'), self.rows('native_sessions'), self.rows('session_chunks')
+        backup = directory / '04-consistent-ledger.sql.gz'
+        with self.assertRaisesRegex(review.ReviewDenied, 'file_size_bound'):
+            review.read_checked(backup, private=True, limit=backup.stat().st_size - 1)
+        original_read = review.read_checked
+        def no_whole_backup_read(path, *args, **kwargs):
+            self.assertNotEqual('04-consistent-ledger.sql.gz', Path(path).name)
+            return original_read(path, *args, **kwargs)
+        with self.observed(), patch.object(review, 'read_checked', no_whole_backup_read):
+            context, staged = review.inspect_prepared(str(self.spec_path))
+        self.assertEqual(tasks, self.rows('tasks'))
+        self.assertEqual(sessions, self.rows('native_sessions'))
+        self.assertEqual(chunks, self.rows('session_chunks'))
+        self.assertEqual(before, {p.name: p.read_bytes() for p in directory.iterdir()})
+        self.assertEqual([], list(self.review_root.glob('.native-effect-backup-check.*')))
+        digest = staged['ready']['backup_file']['sha256']
+        with self.observed(), patch.object(review, 'read_checked', no_whole_backup_read):
+            with self.assertRaisesRegex(review.ReviewDenied, 'complete_backup_digest_approval'):
+                review.resume_prepared_review(str(self.spec_path), approval)
+            result = review.resume_prepared_review(str(self.spec_path), approval,
+                                                   approved_backup_sha256=digest)
+        self.assertTrue(result['applied'])
+        self.assertEqual(before, {name: (directory / name).read_bytes() for name in before})
+        original = next(row for row in self.rows('tasks') if row['id'] == self.task)
+        self.assertEqual(('failed', 2, 'PRIVATE_ORIGINAL_INPUT'),
+                         (original['status'], original['epoch'], original['input']))
+        self.assertTrue(review.review_status(str(self.spec_path))['applied'])
+        with self.observed(), self.assertRaisesRegex(review.ReviewDenied, 'requires_status'):
+            review.resume_prepared_review(str(self.spec_path), approval, approved_backup_sha256=digest)
+
+    def test_prepared_expired_original_requires_separate_fresh_digest_and_lost_ack_uses_original(self):
+        approval, directory = self.prepared_after_old_size_failure()
+        original_bytes = self.spec_path.read_bytes()
+        fresh = json.loads(json.dumps(self.spec))
+        future = self.spec['expires_at'] + 1
+        fresh.update(issued_at=future - 1, expires_at=future + 600)
+        fresh_path = self.root / 'separate-fresh-review.json'
+        self.private(fresh_path, fresh)
+        fresh_approval = review.read_checked(fresh_path, True)[1]['sha256']
+        backup_approval = review.digest_checked_backup(directory / '04-consistent-ledger.sql.gz')['sha256']
+        with self.observed(), patch.object(review.time, 'time', return_value=future):
+            with self.assertRaisesRegex(review.ReviewDenied, 'expired_or_future'):
+                review.inspect_prepared(str(self.spec_path))
+            with self.assertRaisesRegex(review.ReviewDenied, 'fresh_prepared_approval_required'):
+                review.resume_prepared_review(str(self.spec_path), approval, str(fresh_path), 'f' * 64,
+                                              backup_approval)
+            context, staged = review.inspect_prepared(str(self.spec_path), str(fresh_path))
+            digest = staged['ready']['backup_file']['sha256']
+            original_write = review.write_json
+            def lost(path, body):
+                if path.name == '07-receipt.json':
+                    raise OSError('simulated original receipt loss')
+                return original_write(path, body)
+            with patch.object(review, 'write_json', lost):
+                result = review.resume_prepared_review(str(self.spec_path), approval, str(fresh_path),
+                                                       fresh_approval, digest)
+            self.assertTrue(result['outcome_unknown'])
+            self.assertTrue(review.review_status(str(self.spec_path))['applied'])
+            with self.assertRaisesRegex(review.ReviewDenied, 'review_record_spec_or_before_conflict'):
+                review.review_status(str(fresh_path))
+        self.assertEqual(original_bytes, self.spec_path.read_bytes())
+        intent = json.loads((directory / '00-intent.json').read_text())
+        self.assertEqual(approval, intent['spec_sha256'])
+        journal = self.rows('native_effect_reviews')[0]
+        proof = json.loads(journal['proof'])
+        self.assertEqual(approval, proof['spec_sha256'])
+        self.assertEqual(fresh_approval, proof['fresh_approved_spec_sha256'])
+        reviews = list(directory.glob('04-resume-review-*.json'))
+        self.assertEqual(1, len(reviews))
+        self.assertEqual(fresh_approval, json.loads(reviews[0].read_text())['fresh_approved_spec_sha256'])
+
+    def test_prepared_before_cas_local_interruption_can_only_complete_same_files(self):
+        approval, directory = self.prepared_after_old_size_failure()
+        digest = review.digest_checked_backup(directory / '04-consistent-ledger.sql.gz')['sha256']
+        original_write = review.write_json
+        def stop_before_cas(path, body):
+            if path.name == '06-cas-intent.json':
+                raise OSError('known failure before creating any CAS file')
+            return original_write(path, body)
+        with self.observed(), patch.object(review, 'write_json', stop_before_cas):
+            with self.assertRaises(OSError):
+                review.resume_prepared_review(str(self.spec_path), approval, approved_backup_sha256=digest)
+        self.assertTrue((directory / '05-backup-complete.json').exists())
+        self.assertFalse((directory / '06-cas-intent.json').exists())
+        ready = (directory / '05-backup-complete.json').read_bytes()
+        with self.observed():
+            result = review.resume_prepared_review(str(self.spec_path), approval, approved_backup_sha256=digest)
+        self.assertTrue(result['applied'])
+        self.assertEqual(ready, (directory / '05-backup-complete.json').read_bytes())
+
+    def test_prepared_corrupt_incomplete_or_reduced_backup_never_creates_cas(self):
+        approval, directory = self.prepared_after_old_size_failure()
+        backup = directory / '04-consistent-ledger.sql.gz'
+        original = backup.read_bytes()
+        sql = gzip.decompress(original).decode('utf8')
+        with contextlib.closing(sqlite3.connect(':memory:')) as db:
+            db.executescript(sql)
+            db.execute('DROP TABLE nodes')  # Not used by selected task checks.
+            reduced = '\n'.join(db.iterdump()).encode()
+        cases = (('gzip_truncated', original[:-4]),
+                 ('sql_without_commit', gzip.compress(sql.replace('COMMIT;', '').encode())),
+                 ('missing_unrelated_table', gzip.compress(reduced)),
+                 ('external_database', gzip.compress(sql.replace('COMMIT;',
+                    "ATTACH DATABASE '" + str(self.root / 'not-created.sqlite') + "' AS extra;\nCOMMIT;").encode())))
+        for name, changed in cases:
+            backup.write_bytes(changed)
+            with self.subTest(kind=name), self.observed(), self.assertRaises(
+                    (review.ReviewDenied, EOFError, OSError, sqlite3.Error)):
+                review.resume_prepared_review(str(self.spec_path), approval,
+                                              approved_backup_sha256=review.sha(changed))
+            self.assertFalse((directory / '05-backup-complete.json').exists())
+            self.assertFalse((directory / '06-cas-intent.json').exists())
+            self.assertFalse((self.root / 'not-created.sqlite').exists())
+        self.assertTrue(json.loads(self.rows('tasks')[0]['checkpoint'])['side_effect_started'])
+
+    def test_prepared_low_space_changed_before_or_existing_review_cannot_resume(self):
+        approval, directory = self.prepared_after_old_size_failure()
+        with self.observed(), patch.object(review.shutil, 'disk_usage', return_value=type('Space', (), {'free': 0})()):
+            with self.assertRaisesRegex(review.ReviewDenied, 'verification_space_required'):
+                review.inspect_prepared(str(self.spec_path))
+        before_path = directory / '01-before.json'
+        previous = before_path.read_bytes()
+        changed = json.loads(previous)
+        changed['task']['input'] += ' changed'
+        self.private(before_path, changed)
+        with self.observed(), self.assertRaisesRegex(review.ReviewDenied, 'original_prepared_before_changed'):
+            review.inspect_prepared(str(self.spec_path))
+        before_path.write_bytes(previous)
+        with self.store.transaction() as db:
+            db.execute('CREATE TABLE native_effect_reviews(id TEXT)')
+        with self.observed(), self.assertRaisesRegex(review.ReviewDenied, 'ledger_review_requires_status'):
+            review.inspect_prepared(str(self.spec_path))
+        self.assertFalse((directory / '06-cas-intent.json').exists())
+
+    def test_prepared_cli_audit_is_readonly_and_resume_requires_original_and_backup_approval(self):
+        approval, directory = self.prepared_after_old_size_failure()
+        before = {p.name: p.read_bytes() for p in directory.iterdir()}
+        output = io.StringIO()
+        with self.observed(), patch('sys.stdout', output):
+            self.assertEqual(0, review.main(['--spec-file', str(self.spec_path), '--audit-prepared']))
+        audit = json.loads(output.getvalue())
+        self.assertTrue(audit['read_only'])
+        self.assertTrue(audit['complete_saved_backup_verified'])
+        self.assertFalse(audit['retry_authorized'])
+        self.assertEqual(approval, audit['original_spec_sha256'])
+        self.assertEqual(before, {p.name: p.read_bytes() for p in directory.iterdir()})
+        for secret in ('SYNTHETIC_PRIVATE_ACCESS', 'PRIVATE_ORIGINAL_INPUT', 'owner@example.invalid'):
+            self.assertNotIn(secret, output.getvalue())
+        output = io.StringIO()
+        with self.observed(), patch('sys.stdout', output):
+            self.assertEqual(2, review.main(['--spec-file', str(self.spec_path), '--resume-prepared',
+                '--approve-spec-sha256', approval]))
+        self.assertEqual('explicit_complete_backup_digest_approval_required', json.loads(output.getvalue())['code'])
+        self.assertEqual(before, {p.name: p.read_bytes() for p in directory.iterdir()})
+        output = io.StringIO()
+        with self.observed(), patch('sys.stdout', output):
+            self.assertEqual(0, review.main(['--spec-file', str(self.spec_path), '--resume-prepared',
+                '--approve-spec-sha256', approval, '--approve-prepared-backup-sha256',
+                audit['backup_compressed_sha256']]))
+        self.assertTrue(json.loads(output.getvalue())['applied'])
 
     def test_raw_authenticated_false_even_repinned_cannot_settle(self):
         wrong = json.dumps({'account': {'authenticated': False, 'type': 'chatgpt', 'plan': 'plus'}, 'limits': {}})
