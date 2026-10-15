@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -486,6 +487,36 @@ class NativeEffectReviewTests(unittest.TestCase):
                 self.spec[key] += '-another-root'
             self.private(self.spec_path, self.spec)
             with self.subTest(binding=key), self.assertRaisesRegex(review.ReviewDenied, 'closed_case_bindings_mismatch'):
+                review.load_spec(str(self.spec_path))
+
+    @unittest.skipUnless(shutil.which('node'), 'V8 JSON precision regression requires Node, not a runtime requirement')
+    def test_js_roundtrip_large_ns_never_substitutes_for_exact_python_generation(self):
+        exact = 1792039464123456789  # Synthetic metadata, greater than 2**53.
+        self.spec['expected']['auth_file']['mtime_ns'] = exact
+        review.CLOSED_CASE.update(self.closed_manifest())  # Synthetic code pins only.
+        self.private(self.spec_path, self.spec)
+        self.assertEqual(exact, review.load_spec(str(self.spec_path))[0]['expected']['auth_file']['mtime_ns'])
+        # Exercise real V8 on the COMPLETE spec; int(float(...)) produces a
+        # different decimal from JSON.stringify's shortest roundtrip string.
+        source = ("process.stdin.setEncoding('utf8');let raw='';"
+                  "for await(const part of process.stdin)raw+=part;"
+                  "process.stdout.write(JSON.stringify(JSON.parse(raw)));")
+        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', source],
+            input=json.dumps(self.spec).encode(), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10)
+        self.assertEqual(0, result.returncode)
+        lossy = json.loads(result.stdout)
+        rounded = lossy['expected']['auth_file']['mtime_ns']
+        self.assertEqual(1792039464123456800, rounded)
+        self.assertNotEqual(exact, rounded)
+        self.assertNotEqual(int(float(exact)), rounded)
+        self.assertEqual(float(exact), float(rounded))
+        one_ns_changed = json.loads(json.dumps(self.spec))
+        one_ns_changed['expected']['auth_file']['mtime_ns'] += 1
+        self.assertEqual(float(exact), float(exact + 1))
+        for label, changed in (('v8_roundtrip', lossy), ('real_one_ns_generation_change', one_ns_changed)):
+            self.private(self.spec_path, changed)
+            with self.subTest(kind=label), self.assertRaisesRegex(review.ReviewDenied, 'closed_case_bindings_mismatch'):
                 review.load_spec(str(self.spec_path))
 
     def test_readback_requires_exact_approved_spec_and_actual_settlement_artifact(self):
