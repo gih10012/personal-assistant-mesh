@@ -20,11 +20,20 @@ PRODUCTION = 'https://acme-v02.api.letsencrypt.org/directory'
 STAGING = 'https://acme-staging-v02.api.letsencrypt.org/directory'
 CONTAINER = 'personal-assistant-mesh-ip-tls'
 CERT_NAME = 'mesh-ip'
+OAUTH_PATHS = ('/.well-known/oauth-authorization-server', '/authorize', '/token',
+               '/register', '/auth/callback', '/consent')
+OAUTH_QUERIES = {
+    '/authorize': ('response_type', 'client_id', 'redirect_uri', 'scope', 'state',
+                   'code_challenge', 'code_challenge_method', 'resource'),
+    '/auth/callback': ('code', 'state', 'error', 'error_description', 'error_uri'),
+    '/consent': ('txn_id',)}
+OAUTH_FRONT_CHANNEL = ('/authorize', '/auth/callback', '/consent')
 
 
 def validate(config):
-    if (not isinstance(config, dict) or set(config) !=
-            {'public_ip', 'runtime_root', 'mcp_port', 'cloud_port'}):
+    required = {'public_ip', 'runtime_root', 'mcp_port', 'cloud_port'}
+    if (not isinstance(config, dict) or not required <= set(config)
+            or set(config) - required - {'oauth_port'}):
         raise ValueError('ip_tls_owner_config_invalid')
     address = ipaddress.ip_address(config['public_ip'])
     if address.version != 4 or not address.is_global or str(address) != config['public_ip']:
@@ -33,13 +42,15 @@ def validate(config):
     if (not isinstance(root, str) or not re.fullmatch(r'/opt/[a-zA-Z0-9_-]+', root)
             or len(root) > 120):
         raise ValueError('ip_tls_dedicated_opt_root_required')
-    for name in ('mcp_port', 'cloud_port'):
-        port = config[name]
+    for name in ('mcp_port', 'cloud_port', 'oauth_port'):
+        port = config.get(name)
         if port is not None and (type(port) is not int or not 1024 <= port <= 65535
                                  or port in (2053, 2096, 17680, 17681)):
             raise ValueError('ip_tls_dedicated_sidecar_port_required')
     if config['mcp_port'] is not None and config['mcp_port'] == config['cloud_port']:
         raise ValueError('ip_tls_separate_sidecars_required')
+    if config.get('oauth_port') is not None and config['oauth_port'] != config['mcp_port']:
+        raise ValueError('ip_tls_oauth_requires_same_owned_mcp_sidecar')
     return dict(config)
 
 
@@ -104,6 +115,86 @@ def route(config, path, port, methods, body_limit, metadata=False):
     return '\n'.join(directives)
 
 
+def oauth_query_pattern(path, keys):
+    """Raw encoded values/known unique keys, not an OAuth semantic parser."""
+    checks = []
+    for key in keys:
+        # Each segment has a literal known key. This stops at its first
+        # occurrence instead of a nested .* backtracking duplicate detector.
+        other = r'(?:(?!' + re.escape(key) + r'=)[^&]+&)*'
+        checks.append(r'(?!' + other + re.escape(key) + r'=[^&]*&' + other + re.escape(key) + r'=)')
+    names = '(?:' + '|'.join(re.escape(key) for key in keys) + ')'
+    value = r'(?:[A-Za-z0-9._~+-]|%[0-9A-Fa-f]{2})*'
+    item = names + '=' + value
+    return (r'^' + re.escape(path) + r'\?(?=.{1,8192}$)' + ''.join(checks)
+            + item + r'(?:&' + item + '){0,' + str(len(keys) - 1) + '}$')
+
+
+def oauth_cookie_pattern():
+    # Actual OAuthProxy4.1 require-consent cookies, never remember-client or
+    # legacy unscoped state cookies. Signed standard base64 may be quoted.
+    name = r'__Host-MCP_CONSENT_(?:BINDING|STATE_[0-9a-f]{32})'
+    value = r'(?:"[A-Za-z0-9+/=.]*"|[A-Za-z0-9+/=.]*)'
+    item = name + '=' + value
+    return r'^1:(?=.{1,16384}$) *' + item + r'(?:; *' + item + ')*$'
+
+
+def oauth_maps():
+    targets = ['/mcp', '/cloud/node', '/.well-known/oauth-protected-resource/mcp'] + list(OAUTH_PATHS)
+    lines = ['    map $request_uri $mesh_tls_target {', '        default 0;']
+    lines += ['        ' + json.dumps(path) + ' 1;' for path in targets]
+    lines += ['        ' + json.dumps('~' + oauth_query_pattern(path, keys)) + ' 1;'
+              for path, keys in sorted(OAUTH_QUERIES.items())]
+    lines += ['    }', '    map $uri $mesh_oauth_front {', '        default 0;']
+    lines += ['        ' + json.dumps(path) + ' 1;' for path in OAUTH_FRONT_CHANNEL]
+    lines += ['    }', '    map "$mesh_oauth_front:$http_cookie" $mesh_tls_cookie {',
+              '        default 0;', '        "~^[01]:$" 1;',
+              '        ' + json.dumps('~' + oauth_cookie_pattern()) + ' 1;', '    }',
+              '    map "$request_method:$is_args" $mesh_oauth_post_query {',
+              '        default 0;', '        "POST:?" 1;', '    }',
+              '    map "$request_method:$http_content_length" $mesh_oauth_body {',
+              '        default 0;', '        "~^POST:" 1;',
+              '        "~^(GET|HEAD|OPTIONS):(0)?$" 1;', '    }']
+    for kind, mime in (('form', 'application/x-www-form-urlencoded'), ('json', 'application/json')):
+        pattern = '~*^POST:' + mime + r'(?:; *charset=utf-8)?$'
+        lines += ['    map "$request_method:$http_content_type" $mesh_oauth_' + kind + ' {',
+                  '        default 0;', '        "~^(GET|HEAD|OPTIONS):" 1;',
+                  '        ' + json.dumps(pattern) + ' 1;', '    }']
+    return '\n'.join(lines) + '\n'
+
+
+def oauth_route(config, path, methods, form=False, registration=False):
+    lines = ['    location = ' + path + ' {',
+             '        if ($request_method !~ "^(' + '|'.join(methods) + ')$") { return 405; }',
+             '        client_max_body_size ' + str(65536 if form or registration else 1024) + ';',
+             '        if ($mesh_oauth_post_query = 1) { return 404; }',
+             '        if ($mesh_oauth_body = 0) { return 413; }']
+    if form or registration:
+        lines += ['        if ($mesh_oauth_' + ('json' if registration else 'form') + ' = 0) { return 415; }']
+    headers = forwarding(config['public_ip']).replace(
+        'proxy_set_header Authorization $http_authorization;', 'proxy_set_header Authorization "";')
+    for key, variable in (('MCP-Protocol-Version', 'mcp_protocol_version'),
+                          ('MCP-Session-Id', 'mcp_session_id'), ('Last-Event-ID', 'last_event_id')):
+        headers = headers.replace('        proxy_set_header ' + key + ' $http_' + variable + ';\n', '')
+    lines += [headers, '        proxy_set_header Referer $http_referer;',
+              '        proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;',
+              '        proxy_set_header Sec-Fetch-Mode $http_sec_fetch_mode;',
+              '        proxy_set_header Sec-Fetch-Dest $http_sec_fetch_dest;',
+              '        proxy_set_header Sec-Fetch-User $http_sec_fetch_user;',
+              '        proxy_set_header Access-Control-Request-Method $http_access_control_request_method;',
+              '        proxy_set_header Access-Control-Request-Headers $http_access_control_request_headers;']
+    if path in OAUTH_FRONT_CHANNEL:
+        lines += ['        proxy_set_header Cookie $http_cookie;']
+    else:
+        lines += ['        proxy_set_header Cookie "";', '        proxy_hide_header Set-Cookie;']
+    lines += ['        proxy_redirect off;', '        proxy_ignore_headers X-Accel-Redirect;',
+              '        proxy_hide_header Cache-Control;', '        proxy_hide_header Expires;',
+              '        add_header Cache-Control "no-store" always;',
+              '        add_header Pragma "no-cache" always;',
+              '        proxy_pass http://127.0.0.1:' + str(config['oauth_port']) + path + ';', '    }']
+    return '\n'.join(lines)
+
+
 def nginx(config, tls=False):
     ip = config['public_ip']
     maps = '''    map $http_host $mesh_host80 {
@@ -127,6 +218,9 @@ def nginx(config, tls=False):
         "~^(GET|DELETE):" 1;
     }
 '''.replace('__IP__', ip)
+    oauth_enabled = config.get('oauth_port') is not None
+    if oauth_enabled:
+        maps += oauth_maps()
     http_server = '''    server {
         listen 80 default_server;
         server_name __IP__;
@@ -148,6 +242,14 @@ def nginx(config, tls=False):
             route(config, '/cloud/node', config['cloud_port'], ('POST',), 8 * 1024 * 1024),
             route(config, '/.well-known/oauth-protected-resource/mcp', config['mcp_port'],
                   ('GET',), 1024, metadata=True)]
+        if oauth_enabled:
+            locations += [
+                oauth_route(config, OAUTH_PATHS[0], ('GET', 'HEAD', 'OPTIONS')),
+                oauth_route(config, '/authorize', ('GET', 'HEAD', 'POST'), form=True),
+                oauth_route(config, '/token', ('POST', 'OPTIONS'), form=True),
+                oauth_route(config, '/register', ('POST', 'OPTIONS'), registration=True),
+                oauth_route(config, '/auth/callback', ('GET', 'HEAD')),
+                oauth_route(config, '/consent', ('GET', 'HEAD', 'POST'), form=True)]
         tls_server = '''    server {
         listen 443 ssl default_server;
         server_name __IP__;
@@ -166,6 +268,11 @@ __LOCATIONS__
         location / { return 404; }
     }
 '''.replace('__IP__', ip).replace('__LOCATIONS__', '\n'.join(locations))
+        if oauth_enabled:
+            tls_server = tls_server.replace('if ($request_uri != $uri) { return 404; }',
+                                            'if ($mesh_tls_target = 0) { return 404; }')
+            tls_server = tls_server.replace('if ($http_cookie != "") { return 400; }',
+                                            'if ($mesh_tls_cookie = 0) { return 400; }')
     return '''user nginx;
 worker_processes 1;
 pid /var/run/nginx.pid;
@@ -342,6 +449,10 @@ WantedBy=multi-user.target
             'dry_run_production_renewal': certbot_command(config, 'production', renew=True, dry_run=True)},
         'management_api_publicly_routed': False, 'host_proxy_modified': False,
         'issuance_or_account_created': False, 'renewal_interval_hours': 12}
+    if config.get('oauth_port') is not None:
+        plan['oauth_authorization_server'] = {'same_owned_mcp_sidecar': True,
+            'paths': list(OAUTH_PATHS), 'requires_real_oauth_verification_and_owner_consent': True,
+            'proxy_does_not_authenticate_clients': True}
     return {'nginx-http.conf': nginx(config), 'nginx-tls.conf': nginx(config, tls=True),
             'nginx-current.conf': nginx(config), 'deploy-hook.sh': hook, 'renew.sh': renew,
             'personal-assistant-mesh-ip-tls.service': gateway,
