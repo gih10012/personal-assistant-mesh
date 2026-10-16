@@ -162,12 +162,13 @@ try:
         st = path.lstat()
         if not stat.S_ISREG(st.st_mode) or st.st_uid not in (0, os.getuid()) or st.st_mode & 0o022:
             raise ValueError()
-        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != expected:
             raise ValueError()
         spec = importlib.util.spec_from_file_location(name, str(path))
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
-        spec.loader.exec_module(module)
+        exec(compile(raw, str(path), 'exec'), module.__dict__)
         modules.append(module)
     import importlib.metadata
     if importlib.metadata.version('wechatbot-sdk') != '0.3.0':
@@ -262,7 +263,7 @@ class EntranceMedia:
                 continue
             kind = KINDS.get(item_type, 'unrecognized') if type(item_type) is int else 'unrecognized'
             content = item.get(kind + '_item')
-            supported = isinstance(content, dict) and isinstance(content.get('media'), dict)
+            supported = kind in KINDS.values() and isinstance(content, dict) and isinstance(content.get('media'), dict)
             record = {'protocol': PROTOCOL, 'message': metadata, 'item_index': index,
                       'kind': kind, 'item': item, 'supported': supported}
             data = _json(record)
