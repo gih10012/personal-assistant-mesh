@@ -1,0 +1,20 @@
+{
+  "control_url": "http://127.0.0.1:17680",
+  "token_file": "/PRIVATE/existing-owner-installed-entrance-worker.token",
+  "node_id": "owner-claw-entrance",
+  "capabilities": ["mesh.entrance:owner-claw"],
+  "entrance": {
+    "owner_ref": "owner",
+    "conversation_id": "bound-owner-clawbot",
+    "agent_id": "owner-claw"
+  },
+  "codex": {
+    "auth_home": "/PRIVATE/explicit-authorized-163-profile",
+    "strict_auth_home": true,
+    "workspace": "/PRIVATE/independent-entrance-workspace",
+    "executable": "/PRIVATE/verified-existing-native-codex",
+    "model": "gpt-6-luna",
+    "native_memories": true,
+    "native_plan_tool": true
+  }
+}
