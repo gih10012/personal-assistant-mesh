@@ -1,6 +1,6 @@
 # 持续 owner goal
 
-更新时间：2026-10-15。整个 goal **active，未完成**。本文件是后续 owner
+更新时间：2026-10-16。整个 goal **active，未完成**。本文件是后续 owner
 指令的有效目标合同，与 [PLAN](PLAN.md)、[TASKS](TASKS.json) 一起续接。
 2026-10-12 本人共同重规划并批准实施，随后在产品中明确清空旧 Goal、
 要求直接新建；新原生 Goal 已实核 active，objective 为本轮完整计划。
@@ -11,6 +11,21 @@
 本轮批准范围，2026-10-11 的“先收尾再 replan”暂停已由本人实施指令解除。
 
 ## 本轮批准的第一里程碑
+
+2026-10-16最新续接：[当前交接](STATUS-2026-10-16.md)覆盖以下历史快照。
+原known-effect同一prepared case完整备份已实际校验并显式续接结案为
+failed/epoch2；没有重排原输入、改native state或覆盖旧history chunks。
+原排队Chat任务随后由原Leader同thread自然领取，但新turn在真实工具
+调用后遇额度限制、现needs_review；原浏览器请求仍queued/send_intent0，
+不按quota标签假定零效果，不换ID重发。普通Chat的GitHub OAuth薄适配
+与独立审查已合并；本人已在GitHub正常页面完成二次验证，专用App及
+secret已实际创建，密钥只存私有状态。HTTPS窄OAuth路由源码已合并，
+现代依赖已在VPS独立容器构建/隔离验证；正式入口身份、网关接线和
+Chat本人授权/工具任务闭环仍须实证，不把App创建称Chat入网。
+
+鸿蒙自动relay客户端也已真实完成第二份公开SDK unsigned HAP构建：
+222032B、33任务全执行/0cache；商业SDK、签名安装和本人手机入网仍
+未完成。完整Goal、四线加鸿蒙并行、原协调任务与依赖保持不变。
 
 本人已进一步明确允许在个人GitHub创建仅用于Mesh登录的免费OAuth
 应用，生成专用client ID/secret；只取基本本人身份，不申请仓库权限。

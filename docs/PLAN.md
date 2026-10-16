@@ -1,11 +1,35 @@
 # 持续执行计划
 
-更新时间：2026-10-15（本人批准共同重规划后的实施，原生 Goal 已 active）。以下是持续推进的优先级，
+更新时间：2026-10-16（本人批准共同重规划后的实施，原生 Goal 已 active）。以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
 [2026-10-11 报告](STATUS-2026-10-11.md)。历史失败/验证记录继续保留。
 
 ## 2026-10-12 批准实施：四线与实际验收
+
+2026-10-16当前执行顺序（覆盖下面保留快照）：
+
+1. Root续接本人已完成二次验证的GitHub专用OAuth App，复用已审薄适配、
+   私有固定身份和现有HTTPS；独立容器不改host Python/旧Worker。先备份
+   原配置和一致账本、验证旧carrier闭合与native保护，再仅增加受限
+   Chat ingress身份；由同一ASGI发布MCP和六条OAuth窄路由，不开放/v1。
+   实际Chat授权、原三工具及一个新明确任务/原ID状态/批准结果仍待验。
+2. 并行修专用Firefox协作在blocked preflight后无DOM变化续接的已证缺口，
+   原request保留queued/send_intent0。只读实核新quota turn全部工具效果，
+   不能套旧closed-case spec或零效果quota恢复。身份绑定已确认，不再
+   反复查邮箱；未来同原队列/项目续接，unknown绝不重发。
+3. 官方Codex Cloud真实published环境/job临时节点与通用入网/鸿蒙继续；
+   现有两份unsigned HAP不算签名安装或手机真机能力。实际Cloud回调、
+   主Chat入口和原Leader联合自维护/第二项目任务仍属本轮验收。
+4. 原known-effect旧case已实际failed/epoch2结案，不再重做。独立通信
+   state/客户端接线源码已审，Claw受控迁移/确认VPS停止后接管仍需
+   Root独占运维窗口；只有这些共享写操作串行，其他分支持续并行。
+
+精确4066028完整SDK工作树2435项/206.578s全部通过，精确CI38887360665
+成功；这不是后续head、正式Chat登录或整个Goal完成。旧Py3.6/3.8
+authorizer None语义失败已由显式只读验证器修复，实际原286909413B
+gzip/508510032B SQL核验与同case续接均通过，旧失败与备份保留。
+[当前交接](STATUS-2026-10-16.md)
 
 2026-10-15本片已实际上线免费IP HTTPS及12h检查/受控reload，窄后端
 未配置仍failclosed；public TLS不代替OAuth身份或正式Cloud回调。
