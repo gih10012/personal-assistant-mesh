@@ -2,12 +2,45 @@
   "schema": 1,
   "project": "personal-assistant-mesh",
   "goal_status": "active",
-  "updated_at": "2026-10-16",
+  "updated_at": "2026-10-17",
   "plan": "docs/PLAN.md",
   "effective_owner_goal": "docs/GOAL.md",
-  "latest_owner_status": "docs/STATUS-2026-10-16.md",
+  "latest_owner_status": "docs/STATUS-2026-10-17.md",
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
-  "latest_continuation_at": "2026-10-16",
+  "latest_continuation_at": "2026-10-17",
+  "latest_actual_delivery_20261017": {
+    "goal_status": "active",
+    "native_goal_queried_active_and_matches_latest_owner_priorities": true,
+    "native_goal_recreated_reset_or_completed_for_this_reminder": false,
+    "whole_goal_completed": false,
+    "original_43_ids_dependencies_and_long_term_scope_preserved": true,
+    "role_revision": "owner-entrance-20261016-duplex-v1",
+    "role_document_sha256": "931ea1ee0f51216092766604d6e91c4f5c3d648c6facab92f5572532bb890401",
+    "role_files_installed_and_readback_verified_workspace_count": 3,
+    "role_installation_targets": ["laptop-local-agent-workspace", "laptop-global-worker-workspace", "vps-runtime-agent-workspace"],
+    "development_specialists_read_role_contract": true,
+    "actual_original_leader_and_new_entrance_model_read_acknowledgements": "pending",
+    "integrated_source_before_coordination_commit": "8dc15bc",
+    "integrated_source_pushed_at_this_checkpoint": false,
+    "media_source_commits": ["2474450", "39f1c9"],
+    "media_hash_pinned_source_and_unknown_kind_fix_independently_reviewed": true,
+    "media_actual_cdn_download_and_model_understanding_verified": false,
+    "entrance_core_candidate_commit": "285021cafcab8bc6793d2896e3f0e9983e36c196",
+    "entrance_core_independent_deployment_risk_review": "passed; 19 focused/frozen-candidate checks, zero skip; no production changes",
+    "entrance_core_merged_deployed_or_owner_verified": false,
+    "remote_duplex_source_commit": "78c688618f0d5e62076a35579034c2928daa6833",
+    "remote_owner_bound_message_journal_and_portable_oauth_plugin_source_merged": true,
+    "remote_actual_mesh_publisher_and_reply_consumer_wiring_verified": false,
+    "remote_public_sidecar_and_dedicated_ingress_peer_installed": false,
+    "chatgpt_internal_mesh_plugin_installed_or_owner_oauth_connected": false,
+    "official_codex_cloud_environment_published_and_previously_selectable": true,
+    "official_codex_cloud_real_job_outbound_mesh_connection_verified": false,
+    "browser_chat_active_invocation_deferred_original_request_not_replayed": true,
+    "old_chat_leader_effect_case_independent_review": "in_progress; preserve complete native history and old operation identity; no production apply",
+    "new_receiver_worker_restart_or_second_ilink_poller_started": false,
+    "owner_live_validation_invitation": "pending actual delivery of 0/1/2",
+    "next_action": "Review and deploy sole continuous entrance with real role readback and media/handoff; wire public authenticated duplex MCP/OAuth and install internal Chat plugin; connect official Cloud from its own published environment; then invite owner through ClawBot"
+  },
   "owner_entrance_priority_and_duplex_20261016": {
     "native_goal_recreated_after_owner_cleared_previous": true,
     "goal_status": "active",
@@ -26,7 +59,7 @@
     "leader_direct_claw_access_preserved_normally_via_entrance": true,
     "minimal_targeted_checks_then_owner_wechat_validation": true,
     "local_coordination_and_role_docs_updated": true,
-    "actual_runtime_agents_role_delivery_and_read_acknowledgement": "pending",
+    "actual_runtime_agents_role_delivery_and_read_acknowledgement": "three workspace files installed and hash-verified; actual Leader/new entrance model acknowledgement pending",
     "claw_entrance_and_internal_plugin_actual_owner_acceptance": "pending",
     "original_43_ids_dependencies_and_full_long_term_goal_preserved": true
   },
@@ -1902,7 +1935,7 @@
       "state": "implementation_in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "Firefox手动桥与本机Codex MCP往返已实测；并行006d主账号Chat原生tools/OAuth和006e官方Codex Cloud环境/job/结果回收，不全部等待007；内部cloud是Alibaba VPS，不是官方Cloud，尚无官方Cloud job/node",
+      "next_action": "按本人0文档同步/1独立Claw连续入口/2Chat内部公网插件及官方Cloud回连执行；78c6886双向会话和远程OAuth包已合并，正式publisher/consumer、侧车及本人安装未完成。连接内双向而非只submit/status；不依赖本人电脑。浏览器主动协作延后，内部cloud仍Alibaba VPS，非官方Cloud",
       "evidence": {
         "research": "docs/ENTRYPOINTS-RESEARCH.md",
         "connector_installed": false,
@@ -2044,14 +2077,14 @@
         {
           "id": "PAM-006d", "title": "主账号Chat原生Mesh工具与推理能力",
           "state": "implementation_in_progress", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
-          "next_action": "SDK2.3.0窄HTTP/OAuth resource sidecar及既有三工具已source/真实loopback 16项、全量2208通过；正向当前账号菜单和按需专用tab队列已source/24controlled通过。@163已正常UI核主账号；下一实际稳定HTTPS/现有IdP OAuth subject-client绑定及本人正常Chat安装/模型原request往返，扩展实际DOM与正常签名另核，不给operator bearer，不把浏览器登录或本机SDK称Chat入网/无限API",
-          "acceptance": "实际Chat模型工具回执/原任务/成果一致，身份范围与使用限制实核；连好后另验定时检查"
+          "next_action": "免费公信HTTPS和个人GitHub身份App已实际准备，78c6886远程OAuth插件/受身份绑定的双向会话已合并，实际侧车、专属ingress、Mesh发布/回复消费及Chat内部安装/授权仍待。复用GIH ggiy已确认绑定，先实装进展/提问/回复/结果闭环，不依赖电脑、不重复查邮箱；主动唤起Chat/Firefox任务延后，旧case/queued0不重放",
+          "acceptance": "ChatGPT内部远程插件从自身客户端主动连接；实际身份/任务/成果及连接内双向提问回复一致，原ID/游标重连接续；不依赖本人电脑、不声称客户端关闭仍可唤醒或无限额度"
         },
         {
           "id": "PAM-006e", "title": "OpenAI官方Codex Cloud临时节点",
           "state": "implementation_in_progress", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
-          "next_action": "CloudJobs/UI intent与task-epoch-lease membership/完整失效后读回已source，真实HTTP合成实例非官方job。@163正常Cloud UI/GitHub精确个人仓库可达，仅一次Get started，14:10环境创建失败/Chat重连接；私有原操作保留，不将临时/local/client-new-thread作正式receipt，不重复创建/换ID。下一核同原setup正常恢复、publish及一个受限callback的真实job/工具产物；环境AI适配、无operator bearer/本机认证复制，内部cloud仍ali-vps",
-          "acceptance": "官方job身份、真实执行与成果回收、退出后持久状态分别核验；不给临时环境operator bearer或复制整个认证目录"
+          "next_action": "本人已发布官方Cloud环境并在正常picker可选，旧创建失败为历史，不另建环境。复用CloudJobs/临时membership/受限回调源码，先允许其已发布环境或本人任务自行从公网连Mesh及连接内双向通信；真实job/节点往返尚未通过。Mesh主动唤起Cloud延后，保留原intent/任务/lease，不依赖电脑、不复制认证目录，内部cloud仍ali-vps",
+          "acceptance": "官方Cloud环境/任务自身主动连接受认证公网Mesh，实际job/临时身份/双向消息/完整成果及退出后持久状态分别核验；不给operator bearer或复制整个认证目录，不用Alibaba VPS或合成job冒充"
         }
       ]
     },
@@ -2230,7 +2263,7 @@
       "id": "PAM-009", "title": "ClawBot沟通能力多节点承载与安全接管",
       "state": "source_channel_authority_integrated_production_handoff_and_partition_ha_pending", "owner": "root+mesh-leader",
       "depends_on": [],
-      "next_action": "独立3198 receiver overlay实际加载/owner IPC/仅停carrier完整callback/HTTP继续/受控恢复已通过，原Worker/账本/native全部行指纹保留。下一最小fenced事务backport、原状态witnessproof与真实一次carrier交接，随后communication authority/state/arbitration脱离VPS同故障域；与002/010并行，不以007阻塞，不复制token另开竞争poller",
+      "next_action": "当前先交本人要求的独立低成本连续Claw入口：媒体薄适配已合并，285021c核心已过独立小审、待集成/唯一receiver受控部署；模型选择性回复、准确原消息时间、完整历史附件、原ID转交及Leader常规经入口联系仍待真验。原3198 carrier停止/恢复证据保留；本轮不假冒独立故障域/HA完成，后续原009a-d继续，不另开竞争poller",
       "evidence": {
         "contract": "docs/COMMUNICATION-CARRIER-HA.md",
         "actual_current_vps_only_carrier_verified": true,
