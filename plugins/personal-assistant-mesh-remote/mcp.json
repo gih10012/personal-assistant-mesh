@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "personal-assistant-mesh-public": {
+      "type": "streamable-http",
+      "url": "https://47.84.73.177/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": { "mode": "cimd" },
+            "baseScopes": ["tasks:read"],
+            "defaultScopes": ["tasks:read", "tasks:submit"],
+            "oidcEnabled": false
+          }
+        }
+      }
+    }
+  }
+}
