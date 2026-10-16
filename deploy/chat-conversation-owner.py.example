@@ -1,0 +1,29 @@
+"""PRIVATE wiring fragment for the EXISTING GitHub OAuth factory.
+
+Not an automatic deploy or runnable example with replacement placeholders.
+Reuse the same backend instance and fixed ingress peer; do not expose this
+module, publisher or a /v1 route to HTTP. Root owns account/UI/service writes.
+"""
+from assistant_mesh.conversation import ConversationService, store_interaction_validator
+from assistant_mesh.chat_github_oauth import create_app
+
+
+def assemble(document, backend, private_directory, installed_store=None):
+    # `document` is the already owner-loaded private OAuth document. Its tokens,
+    # client ID/secret/issuer mapping are not taken from a tool or plugin JSON.
+    # Create the private 0700 directory separately; do not change owner policy
+    # to accept guessed OpenAI client IDs or make an operator credential ingress.
+    service = ConversationService(private_directory, document['policy']['owner_binding'], backend,
+        live_interaction_validator=store_interaction_validator(installed_store)
+            if installed_store is not None else None)
+    _, _, app = create_app(document, backend=backend, conversation_service=service)
+    return app, service
+
+
+def publish_selected(service, fixed_principal, original_message):
+    # PRIVATE owner-code helper for Leader/entrance. Reconstruct the service on
+    # another process with the SAME private directory/backend when needed.
+    # `fixed_principal` comes from independently installed owner/source/subject
+    # configuration, never a remote client-supplied role. Do not publish raw
+    # native results/history, credentials, unapproved artifacts or stale replies.
+    return service.publish(fixed_principal, original_message)

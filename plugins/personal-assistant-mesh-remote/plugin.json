@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "personal-assistant-mesh-remote",
+  "version": "0.1.0",
+  "description": "Authenticated public Mesh tasks and connected two-way conversation. No local computer bridge or embedded credentials.",
+  "author": { "name": "gih10012" },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Personal Mesh Remote",
+        "shortDescription": "Talk with your public Mesh",
+        "longDescription": "Connect directly to the owner's public HTTPS Mesh using OAuth. Submit retained-ID tasks and read status/approved results. When the owner enables conversation support, receive progress, questions and selected messages, reply in the original conversation, and resume its cursor after disconnect. Does not grant native approvals or wake a closed chat.",
+        "developerName": "gih10012",
+        "category": "Productivity",
+        "capabilities": ["Interactive"],
+        "defaultPrompt": "Connect to my Mesh, retain the original request and conversation IDs, receive its messages, and help me reply to its questions."
+      }
+    }
+  }
+}
