@@ -1,0 +1,42 @@
+{
+  "format": "mesh-chat-github-oauth/1",
+  "policy": {
+    "format": "mesh-mcp-http/1",
+    "resource_url": "https://mesh.example.invalid/mcp",
+    "issuer_url": "https://mesh.example.invalid/",
+    "issuer_metadata": {
+      "issuer": "https://mesh.example.invalid/",
+      "authorization_endpoint": "https://mesh.example.invalid/authorize",
+      "token_endpoint": "https://mesh.example.invalid/token",
+      "code_challenge_methods_supported": ["S256"],
+      "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+      "client_id_metadata_document_supported": true,
+      "authorization_response_iss_parameter_supported": true
+    },
+    "owner_binding": "REPLACE_EXISTING_VERIFIED_OWNER_BINDING",
+    "subjects": [
+      {
+        "issuer_subject": "REPLACE_STABLE_GITHUB_NUMERIC_ID",
+        "mesh_subject": "REPLACE_EXISTING_FIXED_CHAT_INGRESS_SUBJECT",
+        "client_ids": ["REPLACE_EXACT_APPROVED_CHAT_CLIENT_ID"],
+        "scopes": ["tasks:read", "tasks:submit"]
+      }
+    ],
+    "allowed_origins": [],
+    "max_request_bytes": 65536
+  },
+  "github": {
+    "client_id": "REPLACE_DEDICATED_GITHUB_OAUTH_APP_ID",
+    "client_secret_file": "/PRIVATE/chat-oauth/github-client-secret",
+    "owner_id": "REPLACE_STABLE_GITHUB_NUMERIC_ID"
+  },
+  "state": {
+    "directory": "/PRIVATE/chat-oauth/state",
+    "jwt_key_file": "/PRIVATE/chat-oauth/jwt-signing-key",
+    "encryption_key_file": "/PRIVATE/chat-oauth/storage-fernet-key"
+  },
+  "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
+  "ingress_clients": {
+    "REPLACE_EXISTING_FIXED_CHAT_INGRESS_SUBJECT": "/PRIVATE/EXISTING_DEDICATED_INGRESS_CLIENT.json"
+  }
+}

@@ -1,0 +1,32 @@
+"""Private owner-installed uvicorn factory; NOT an automatic deploy.
+
+Preserve the existing fixed role=ingress/source=chatgpt-chat/subject credential.
+Never configure an operator bearer here or forward GitHub/Mesh OAuth tokens as
+that internal credential. Keys, App consent and public routes are separate Root
+operations; every placeholder in the JSON example must be replaced privately.
+"""
+import json
+import os
+
+from assistant_mesh import native_messaging as native
+from assistant_mesh.chat_github_oauth import create_app as build_app, validate_config
+from assistant_mesh.mcp_http import RemoteIngressBackend
+from assistant_mesh.mcp_http_auth import NotConfigured
+
+
+def create_app():
+    path = os.environ.get('MESH_CHAT_OAUTH_CONFIG')
+    if not path:
+        raise NotConfigured('chat_oauth_config_required')
+    value = json.loads(native._private_bytes(path).decode('utf8'),
+                       object_pairs_hook=native._unique, parse_constant=native._nonfinite)
+    if not isinstance(value, dict) or 'ingress_clients' not in value:
+        raise NotConfigured('chat_oauth_fixed_ingress_required')
+    references = value.pop('ingress_clients')
+    policy = validate_config(value)['policy']
+    expected = {entry['mesh_subject'] for entry in policy['subjects']}
+    if not isinstance(references, dict) or set(references) != expected:
+        raise NotConfigured('chat_oauth_fixed_ingress_required')
+    clients = {subject: native.client_from_config(reference) for subject, reference in references.items()}
+    _, _, app = build_app(value, backend=RemoteIngressBackend(clients, policy['owner_binding']))
+    return app

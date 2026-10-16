@@ -5,17 +5,19 @@ Optional SDK tests must run in the separate pinned environment; a skip is not
 proof that ordinary Chat OAuth works. Pure policy tests remain core-compatible.
 """
 import base64
+import asyncio
 import copy
 import functools
 import hashlib
 import json
+import logging
 import secrets
 import tempfile
+import time
 import unittest
-from contextlib import AsyncExitStack
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 from unittest import mock
 
 from assistant_mesh.chat_github_oauth import create_app, validate_config
@@ -96,6 +98,7 @@ class PolicyTests(unittest.TestCase):
 
 
 try:
+    from contextlib import AsyncExitStack
     from importlib.metadata import version
     import httpx2
     from mcp.shared.auth import OAuthClientInformationFull
@@ -129,7 +132,7 @@ def component_lifespan(method):
 
 
 @unittest.skipUnless(AVAILABLE, 'optional pinned OAuth environment absent; not Chat acceptance')
-class ActualOAuthTests(unittest.IsolatedAsyncioTestCase):
+class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.TestCase)):
     async def asyncSetUp(self):
         self.stack = AsyncExitStack()
         self.temp = tempfile.TemporaryDirectory(prefix='mesh-chat-oauth-actual.')
@@ -137,8 +140,12 @@ class ActualOAuthTests(unittest.IsolatedAsyncioTestCase):
         self.config = fixture(self.directory, ORIGIN)
         self.config['redirect_uris'] = [CALLBACK]
         self.idp_requests = []
+        self.cimd_requests = []
         self.identity_id = 12345
         self.identity_scope = ''
+        self.idp_refresh = True
+        self.oauth_client_id = CLIENT
+        self.redirect_uri = CALLBACK
         self.store = Store(self.directory / 'fresh.sqlite')
         ingress = Ingress(self.store, 'synthetic-authority', {'owner_id': 'synthetic-owner'})
         results = IngressResults(self.store, 'synthetic-authority', {'owner_id': 'synthetic-owner'})
@@ -169,6 +176,13 @@ class ActualOAuthTests(unittest.IsolatedAsyncioTestCase):
 
     def idp(self, request):
         self.idp_requests.append((request.method, str(request.url)))
+        if request.headers.get('host') == 'chatgpt.com' and request.url.path == '/oauth/client.json':
+            self.cimd_requests.append((request.method, request.headers['host'], request.url.path))
+            return httpx2.Response(200, json={'client_id': 'https://chatgpt.com/oauth/client.json',
+                'client_name': 'Synthetic CIMD client, NOT a real Chat connection',
+                'redirect_uris': [self.redirect_uri], 'token_endpoint_auth_method': 'none',
+                'application_type': 'web', 'grant_types': ['authorization_code', 'refresh_token'],
+                'response_types': ['code']})
         if str(request.url) == 'https://api.github.com/user':
             return httpx2.Response(200, headers={'X-OAuth-Scopes': self.identity_scope}, json={
                 'id': self.identity_id, 'login': 'mutable-display-label-not-authority',
@@ -180,21 +194,27 @@ class ActualOAuthTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('repo', form.get('scope', [''])[0])
             self.assertNotIn('offline_access', form.get('scope', [''])[0])
             self.assertIn(form['grant_type'][0], ('authorization_code', 'refresh_token'))
-            return httpx2.Response(200, json={'access_token': UPSTREAM_TOKEN, 'token_type': 'Bearer',
-                'scope': '', 'expires_in': 3600, 'refresh_token': UPSTREAM_REFRESH, 'refresh_expires_in': 7200})
+            value = {'access_token': UPSTREAM_TOKEN, 'token_type': 'Bearer', 'scope': ''}
+            if self.idp_refresh:
+                value.update(expires_in=3600, refresh_token=UPSTREAM_REFRESH, refresh_expires_in=7200)
+            return httpx2.Response(200, json=value)
         raise AssertionError('unexpected synthetic IdP endpoint; no repo/email/network calls allowed')
 
-    async def authorization_code(self, scopes='tasks:read tasks:submit'):
+    async def consent_start(self, scopes='tasks:read tasks:submit'):
         verifier = 'SYNTHETIC_CLIENT_PKCE_' + 'x' * 48
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
-        started = await self.http.get('/authorize', params={'client_id': CLIENT,
-            'redirect_uri': CALLBACK, 'response_type': 'code', 'scope': scopes,
+        started = await self.http.get('/authorize', params={'client_id': self.oauth_client_id,
+            'redirect_uri': self.redirect_uri, 'response_type': 'code', 'scope': scopes,
             'code_challenge': challenge, 'code_challenge_method': 'S256', 'state': 'original-client-state',
             'resource': ORIGIN + '/mcp'})
         self.assertIn(started.status_code, (302, 303), started.text)
         consent = await self.http.get(started.headers['location'])
         self.assertEqual(200, consent.status_code)
         fields = Inputs(consent.text).values
+        return verifier, fields
+
+    async def authorization_code(self, scopes='tasks:read tasks:submit'):
+        verifier, fields = await self.consent_start(scopes)
         approved = await self.http.post('/consent', data={'txn_id': fields['txn_id'],
             'csrf_token': fields['csrf_token'], 'action': 'approve'}, headers={'Origin': ORIGIN})
         self.assertIn(approved.status_code, (302, 303), approved.text)
@@ -212,8 +232,8 @@ class ActualOAuthTests(unittest.IsolatedAsyncioTestCase):
 
     async def tokens(self, scopes='tasks:read tasks:submit'):
         code, verifier = await self.authorization_code(scopes)
-        response = await self.http.post('/token', data={'grant_type': 'authorization_code', 'client_id': CLIENT,
-            'code': code, 'code_verifier': verifier, 'redirect_uri': CALLBACK, 'resource': ORIGIN + '/mcp'})
+        response = await self.http.post('/token', data={'grant_type': 'authorization_code', 'client_id': self.oauth_client_id,
+            'code': code, 'code_verifier': verifier, 'redirect_uri': self.redirect_uri, 'resource': ORIGIN + '/mcp'})
         self.assertEqual(200, response.status_code, response.text)
         value = response.json()
         self.assertNotEqual(UPSTREAM_TOKEN, value['access_token'])
@@ -299,8 +319,10 @@ class ActualOAuthTests(unittest.IsolatedAsyncioTestCase):
         foreign_issuer = JWTIssuer('https://foreign.test', ORIGIN + '/mcp', key).issue_access_token(
             CLIENT, ['tasks:read'], claims['jti'])
         foreign_client = self.provider.jwt_issuer.issue_access_token('unapproved-client', ['tasks:read'], claims['jti'])
+        expired = self.provider.jwt_issuer.issue_access_token(CLIENT, ['tasks:read'], claims['jti'],
+            extra_claims={'exp': int(time.time()) - 60})
         for token in (original + 'broken', foreign_resource, foreign_issuer, foreign_client,
-                      tokens['refresh_token'], UPSTREAM_TOKEN):
+                      expired, tokens['refresh_token'], UPSTREAM_TOKEN):
             with self.subTest(case=token[:8]):
                 response = await self.rpc(token, 'tools/list')
                 self.assertEqual(401, response.status_code)
@@ -321,6 +343,104 @@ class ActualOAuthTests(unittest.IsolatedAsyncioTestCase):
         before = list(self.idp_requests)
         self.assertIsNone(await self.provider.get_client('https://attacker.test/client.json'))
         self.assertEqual(before, self.idp_requests)
+
+    @component_lifespan
+    async def test_real_consent_requires_same_browser_binding_not_just_form_csrf(self):
+        verifier, fields = await self.consent_start()
+        other = await self.stack.enter_async_context(self.real_client(
+            transport=httpx2.ASGITransport(app=self.app), base_url=ORIGIN))
+        denied = await other.post('/consent', data={'txn_id': fields['txn_id'],
+            'csrf_token': fields['csrf_token'], 'action': 'approve'}, headers={'Origin': ORIGIN})
+        self.assertEqual(403, denied.status_code)
+        self.assertEqual([], self.idp_requests)
+
+    @component_lifespan
+    async def test_original_authorization_code_cannot_be_exchanged_twice_concurrently(self):
+        code, verifier = await self.authorization_code()
+        async def exchange():
+            return await self.http.post('/token', data={'grant_type': 'authorization_code', 'client_id': CLIENT,
+                'code': code, 'code_verifier': verifier, 'redirect_uri': CALLBACK, 'resource': ORIGIN + '/mcp'})
+        replies = await asyncio.gather(exchange(), exchange())
+        self.assertEqual(1, sum(response.status_code == 200 for response in replies),
+                         [response.status_code for response in replies])
+
+    @component_lifespan
+    async def test_owner_secret_permissions_separate_keys_and_private_auth_logs(self):
+        logger = logging.getLogger('fastmcp.server.auth.oauth_proxy.proxy')
+        with self.assertLogs(logger, level='ERROR') as output:
+            logger.error('private code=%s token=%s', 'SYNTHETIC_PRIVATE_CODE', UPSTREAM_TOKEN)
+        self.assertNotIn('SYNTHETIC_PRIVATE_CODE', '\n'.join(output.output))
+        self.assertNotIn(UPSTREAM_TOKEN, '\n'.join(output.output))
+        changed = copy.deepcopy(self.config)
+        changed['state']['jwt_key_file'] = changed['github']['client_secret_file']
+        with self.assertRaisesRegex(NotConfigured, 'distinct_private_keys'):
+            create_app(changed, backend=self.backend, allow_loopback_for_tests=True)
+        (self.directory / 'github-secret').chmod(0o644)
+        with self.assertRaisesRegex(NotConfigured, 'secret_unavailable'):
+            self.make_app()
+
+    @component_lifespan
+    async def test_github_common_no_expiry_no_refresh_shape_requires_reauth_after_short_access_token(self):
+        self.idp_refresh = False
+        code, verifier = await self.authorization_code()
+        response = await self.http.post('/token', data={'grant_type': 'authorization_code', 'client_id': CLIENT,
+            'code': code, 'code_verifier': verifier, 'redirect_uri': CALLBACK, 'resource': ORIGIN + '/mcp'})
+        self.assertEqual(200, response.status_code, response.text)
+        tokens = response.json()
+        self.assertFalse(tokens.get('refresh_token'))
+        self.assertEqual(900, tokens['expires_in'])
+        signed = self.provider.jwt_issuer.verify_token(tokens['access_token'])
+        self.assertEqual(900, signed['exp'] - signed['iat'])
+        self.assertEqual(200, (await self.rpc(tokens['access_token'], 'tools/list')).status_code)
+
+    @component_lifespan
+    async def test_original_code_is_not_consumed_by_wrong_or_missing_token_resource(self):
+        code, verifier = await self.authorization_code()
+        form = {'grant_type': 'authorization_code', 'client_id': CLIENT, 'code': code,
+                'code_verifier': verifier, 'redirect_uri': CALLBACK}
+        for resource in (None, 'https://foreign.test/mcp'):
+            payload = dict(form)
+            if resource is not None:
+                payload['resource'] = resource
+            denied = await self.http.post('/token', data=payload)
+            self.assertEqual(400, denied.status_code)
+            self.assertEqual('invalid_target', denied.json()['error'])
+        duplicate = await self.http.post('/token', content=urlencode(list(form.items()) + [
+            ('resource', ORIGIN + '/mcp'), ('resource', 'https://foreign.test/mcp')]),
+            headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        self.assertEqual(400, duplicate.status_code)
+        oversized = await self.http.post('/token', content=b'x' * 65537,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        self.assertEqual(413, oversized.status_code)
+        preflight = await self.http.options('/token', headers={
+            'Origin': 'https://chatgpt.com', 'Access-Control-Request-Method': 'POST'})
+        self.assertEqual(200, preflight.status_code)
+        accepted = await self.http.post('/token', data=dict(form, resource=ORIGIN + '/mcp'))
+        self.assertEqual(200, accepted.status_code)
+        refresh = accepted.json()['refresh_token']
+        rejected = await self.http.post('/token', data={'grant_type': 'refresh_token', 'client_id': CLIENT,
+            'refresh_token': refresh, 'scope': 'tasks:read', 'resource': 'https://foreign.test/mcp'})
+        self.assertEqual(400, rejected.status_code)
+
+    @component_lifespan
+    async def test_pinned_cimd_document_uses_actual_component_flow_without_dcr_or_github_scope(self):
+        self.oauth_client_id = 'https://chatgpt.com/oauth/client.json'
+        self.redirect_uri = 'https://chatgpt.com/connector_platform_oauth_redirect'
+        self.config['policy']['subjects'][0]['client_ids'] = [self.oauth_client_id]
+        self.config['redirect_uris'] = [self.redirect_uri]
+        self.provider, self.server, app = self.make_app()
+        self.http = await self.stack.enter_async_context(self.real_client(
+            transport=httpx2.ASGITransport(app=app), base_url=ORIGIN, follow_redirects=False))
+        async with app.router.lifespan_context(app):
+            # Synthetic DNS + HTTP transport only; retain the actual component's
+            # URL/IP validation, Host/SNI pinning, document parse and protocol.
+            with mock.patch('fastmcp.server.auth.ssrf.resolve_hostname',
+                            new=mock.AsyncMock(return_value=['93.184.216.34'])):
+                tokens = await self.tokens()
+            claims = self.provider.jwt_issuer.verify_token(tokens['access_token'])
+            self.assertEqual(self.oauth_client_id, claims['client_id'])
+            self.assertEqual(200, (await self.rpc(tokens['access_token'], 'tools/list')).status_code)
+        self.assertIn(('GET', 'chatgpt.com', '/oauth/client.json'), self.cimd_requests)
 
 
 if __name__ == '__main__':

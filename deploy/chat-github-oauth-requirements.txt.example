@@ -1,0 +1,6 @@
+# Isolated optional Python >=3.10 sidecar ONLY, not the legacy core/runtime.
+-r mcp-http-requirements.txt.example
+fastmcp-slim[server]==4.1.0
+py-key-value-aio[filetree,memory]==0.4.6
+httpx2==2.13.1
+cryptography==50.0.2

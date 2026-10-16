@@ -6,10 +6,10 @@ permissions NEVER become Mesh grants. No import reads keys, initializes state,
 starts a listener, authenticates, or constructs Store. Production is opt-in.
 """
 import contextlib
+import asyncio
 import json
 import logging
 import re
-from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -122,15 +122,18 @@ def create_app(document, *, backend, allow_loopback_for_tests=False, http_client
     config = validate_config(document, allow_loopback_for_tests=allow_loopback_for_tests)
     policy = config['policy']
     try:
+        from contextvars import ContextVar
         from importlib.metadata import version
         _require(version('fastmcp-slim') == FASTMCP_PIN, 'chat_oauth_component_pin_missing')
         from cryptography.fernet import Fernet
         from fastmcp.server.auth import OAuthProxy, TokenVerifier
         from key_value.aio.stores.filetree import FileTreeStore
         from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-        from mcp.server.auth.provider import AccessToken, TokenError
+        from mcp.server.auth.provider import AccessToken, AuthorizeError, TokenError
         from starlette.applications import Starlette
-        from starlette.routing import Mount
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse
+        from starlette.routing import Mount, Route
         import httpx2
     except ImportError:
         raise NotConfigured('chat_oauth_component_not_installed') from None
@@ -197,6 +200,11 @@ def create_app(document, *, backend, allow_loopback_for_tests=False, http_client
                 return None
             return await super().get_client(client_id)
 
+        async def authorize(self, client, params):
+            if params.resource != policy['resource_url']:
+                raise AuthorizeError('invalid_request', 'Exact Mesh resource required')
+            return await super().authorize(client, params)
+
         def _translate_scopes_from_idp(self, scopes):
             requested = self.requested_mesh_scopes.get()
             if requested is None or (scopes and not set(scopes) <= set(requested)):
@@ -253,6 +261,53 @@ def create_app(document, *, backend, allow_loopback_for_tests=False, http_client
         jwt_signing_key=jwt_key, require_authorization_consent=True,
         fastmcp_access_token_expiry_seconds=900, enable_cimd=True)
     auth_routes = provider.get_routes(mcp_path='/mcp')
+    # FileTree's async get/delete is not an atomic authorization-code consume.
+    # Serialize the EXISTING component's full token handler, including its SDK
+    # load/PKCE/exchange/refresh sequence. This reference is ONE active process,
+    # ONE worker. It is not a distributed lock or a replacement OAuth engine.
+    token_gate = asyncio.Lock()
+    def serialized_token_route(route):
+        endpoint = route.app  # May be CORS ASGI middleware, not a Request callable.
+        class GuardedTokenEndpoint:
+            async def __call__(self, scope, receive, send):
+                if scope['method'] != 'POST':  # Preserve component CORS OPTIONS.
+                    return await endpoint(scope, receive, send)
+                messages, size = [], 0
+                while True:
+                    message = await receive()
+                    if message['type'] != 'http.request':
+                        return
+                    size += len(message.get('body', b''))
+                    if size > policy['max_request_bytes']:
+                        return await JSONResponse({'error': 'invalid_request'}, status_code=413)(scope, receive, send)
+                    messages.append(message)
+                    if not message.get('more_body', False):
+                        break
+                def replay():
+                    index = 0
+                    async def next_message():
+                        nonlocal index
+                        if index < len(messages):
+                            value = messages[index]
+                            index += 1
+                            return value
+                        return await receive()
+                    return next_message
+                try:
+                    form = await Request(scope, receive=replay()).form()
+                except Exception:
+                    return await JSONResponse({'error': 'invalid_request'}, status_code=400)(scope, receive, send)
+                # SDK 2.3 ignores token-request resource in code/refresh exchange.
+                # Reject before consuming code; replay exact bounded original
+                # messages into the UNCHANGED component's ASGI/CORS handler.
+                if form.getlist('resource') != [policy['resource_url']]:
+                    return await JSONResponse({'error': 'invalid_target'}, status_code=400)(scope, receive, send)
+                async with token_gate:
+                    return await endpoint(scope, replay(), send)
+        return Route(route.path, endpoint=GuardedTokenEndpoint(), methods=route.methods,
+                     name=route.name, include_in_schema=route.include_in_schema)
+    auth_routes = [serialized_token_route(route) if route.path == '/token' else route
+                   for route in auth_routes]
 
     class ProxyResourceVerifier:
         async def verify_token(self, token):
