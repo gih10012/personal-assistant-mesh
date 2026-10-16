@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import py_compile
 import stat
 import sys
 import tempfile
@@ -125,6 +126,14 @@ class EntranceMediaTests(unittest.TestCase):
             self.media.materialize(attachment_id)
         self.assertEqual(self.calls, [])
 
+    def test_unknown_kind_cannot_enable_a_lookalike_media_field(self):
+        message = {'message_id': 'unknown-kind', 'item_list': [
+            {'type': 97, 'unrecognized_item': {'media': {'aes_key': 'never-expose-aes'}}}]}
+        staged = self.stage(message)
+        self.assertEqual(staged['attachments'][0]['state'], 'not_supported')
+        self.assertEqual(self.media.materialize(staged['attachments'][0]['attachment_id'])['state'], 'not_supported')
+        self.assertEqual(self.calls, [])
+
     def test_no_downloader_or_unknown_item_preserves_reference_without_network(self):
         attachment_id = self.attachment()
         self.media.downloader = None
@@ -202,6 +211,17 @@ def transfer(value): return value
         launcher.chmod(0o700)
         downloader.python = str(launcher)
         self.media.downloader = downloader
+        # A valid timestamp/size .pyc for different source must not bypass the
+        # reviewed source pin. Match the exact original mtime and byte count.
+        source = helper / 'ilink_media.py'
+        original_time = source.stat().st_mtime_ns
+        malicious = b"raise RuntimeError('unreviewed cached bytecode')\n"
+        malicious += b'#' * (len(media) - len(malicious))
+        source.write_bytes(malicious)
+        os.utime(str(source), ns=(original_time, original_time))
+        py_compile.compile(str(source), doraise=True)
+        source.write_bytes(media)
+        os.utime(str(source), ns=(original_time, original_time))
         result = self.media.materialize(self.attachment())
         self.assertEqual(Path(result['path']).read_bytes(), b'complete synthetic download')
         (helper / 'ilink_media.py').write_bytes(media + b'\n')
