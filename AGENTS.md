@@ -5,6 +5,28 @@ the complete owner goal, task IDs, dependencies and next actions; update the
 coordination record when work or evidence changes. Runtime tasks and external
 results must be verified from their actual authority, not inferred from this file.
 
+Latest owner priority (2026-10-16), overriding older entrypoint scheduling:
+first publish/synchronize the role contract in `docs/ENTRANCE-AGENT-CONTRACT.md`,
+then implement the continuous-memory low-cost ClawBot entrance agent, then the
+ChatGPT-INTERNAL plugin and official Codex Cloud outbound connection to public
+Mesh. These cloud entrances must work without the owner's computer. Connection
+initiation is directional; communication inside that connection is bidirectional:
+Mesh/Leader progress, questions and results plus owner/client replies. Deferring
+Mesh-initiated activation of Chat/Cloud does NOT forbid those reverse messages.
+Firefox collaboration/active Chat invocation is deferred; retain its old queue
+and worktree without replay. Do not restrict the new contract to the old three
+tools when genuine bidirectional conversation needs authenticated extensions.
+
+The entrance agent communicates/manages the channel and hands work to Leader;
+it is not a new Leader. Reuse complete authorized ClawBot history/media tools,
+continuous native memory and actual message timestamps/reply/task links. Do not
+spam canned task receipts, internal retry counts or yesterday's stale answers.
+Leader keeps direct ClawBot access but normally communicates through this agent.
+Keep checks proportional and targeted; after the requested deliverables work,
+invite the owner through ClawBot for direct validation instead of expanding tests.
+Repository docs are not proof that a running remote agent read them: record
+actual delivery/acknowledgement separately before declaring synchronization done.
+
 Prioritize bottom/middle Mesh architecture: decentralized recovery, autonomous
 resource routing, real network/capability inventory and environment-adaptive
 enrollment. Live/voice/panel are later projects to delegate to Mesh. Dots is the
