@@ -156,6 +156,27 @@ controls. This validates the actual retained owner-produced SQL snapshot; it
 does not assert that unrelated live rows have remained frozen since that
 snapshot. The temporary database is removed; original `00`–`04` bytes remain.
 
+Restoration and verification use **two explicit authorizers**. The saved SQL
+still runs under the unchanged restore callback, which denies ATTACH/DETACH,
+PRAGMA, virtual-table creation/removal and `load_extension`. Only after the
+complete final COMMIT, with no further saved SQL execution, is that callback
+replaced by a default-deny verification callback. It permits the trusted,
+argument-free `quick_check`, `table_info` for the six fixed dependency tables,
+and reads of those tables, sqlite_master and the original tasks/native_sessions/
+session_chunks. Writes, other functions/PRAGMAs, other databases and trigger/view
+origins remain denied. This is a disposable-backup check, not new live authority.
+
+Do not disable the callback with `set_authorizer(None)`: [Python documents that
+support only from 3.11](https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.set_authorizer).
+The actual VPS Python3.6.8/SQLite3.26.0 probe accepted that setter call but then
+denied both SELECT and quick_check. Replacing it with the actual new callback
+allowed all fixed trusted checks and denied all tested other actions; this
+probe used only `:memory:` with synthetic tables, no auth/production/backup
+files. Local tests also exercise the old no-disable behavior on real SQLite,
+missing Python opcode symbols, and unchanged original prepared phase bytes.
+The 32-test related module passed locally. This compatibility evidence is not
+production prepared-audit/apply success or permission to relax observer timing.
+
 Before restoring, free disk must cover **two live-ledger sizes plus 1 GiB**.
 The temporary database has a two-ledger-size page limit and the 1 GiB free-space
 floor is checked as statements are restored. No disk expansion, prune, deletion

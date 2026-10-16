@@ -756,7 +756,8 @@ class NativeEffectReviewTests(unittest.TestCase):
 
     def test_prepared_authorizer_keeps_fixed_opcodes_when_python_symbols_are_missing(self):
         approval, directory = self.prepared_after_old_size_failure()
-        symbols = ('SQLITE_CREATE_VTABLE', 'SQLITE_DROP_VTABLE', 'SQLITE_FUNCTION')
+        symbols = ('SQLITE_CREATE_VTABLE', 'SQLITE_DROP_VTABLE', 'SQLITE_FUNCTION',
+                   'SQLITE_READ', 'SQLITE_SELECT')
         previous = {name: getattr(sqlite3, name) for name in symbols if hasattr(sqlite3, name)}
         try:
             for name in previous:
@@ -766,6 +767,9 @@ class NativeEffectReviewTests(unittest.TestCase):
             for function in ('load_extension', 'LOAD_EXTENSION'):
                 self.assertEqual(sqlite3.SQLITE_DENY, review.backup_authorizer(31, None, function, None, None))
             self.assertEqual(sqlite3.SQLITE_OK, review.backup_authorizer(31, None, 'length', None, None))
+            self.assertEqual(sqlite3.SQLITE_OK, review.backup_verification_authorizer(21, None, None, None, None))
+            self.assertEqual(sqlite3.SQLITE_OK, review.backup_verification_authorizer(20, 'tasks', 'id', 'main', None))
+            self.assertEqual(sqlite3.SQLITE_DENY, review.backup_verification_authorizer(31, None, 'length', None, None))
             with self.observed():
                 context, staged = review.inspect_prepared(str(self.spec_path))
             self.assertEqual(self.task, context['selected']['task']['id'])
@@ -774,6 +778,59 @@ class NativeEffectReviewTests(unittest.TestCase):
         finally:
             for name, value in previous.items():
                 setattr(sqlite3, name, value)
+
+    def test_backup_verification_authorizer_allows_only_fixed_checks_and_reads(self):
+        tables = review.DEPENDENCY_TABLES | {'tasks', 'native_sessions', 'session_chunks'}
+        with contextlib.closing(sqlite3.connect(':memory:', isolation_level=None, cached_statements=0)) as db:
+            for name in sorted(tables | {'unrelated'}):
+                db.execute('CREATE TABLE ' + name + '(id TEXT)')
+            db.set_authorizer(review.backup_verification_authorizer)
+            self.assertEqual('ok', db.execute('PRAGMA quick_check').fetchone()[0])
+            self.assertTrue(list(db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name')))
+            for name in sorted(tables):
+                self.assertEqual([], list(db.execute('SELECT * FROM ' + name)))
+            for name in sorted(review.DEPENDENCY_TABLES):
+                self.assertEqual('id', db.execute('PRAGMA table_info(' + name + ')').fetchone()[1])
+            for statement in ("ATTACH DATABASE ':memory:' AS another", 'PRAGMA table_info(tasks)',
+                              'PRAGMA quick_check=1', 'PRAGMA writable_schema=ON',
+                              'SELECT * FROM unrelated', "SELECT length('x')",
+                              "INSERT INTO tasks VALUES ('denied')", 'DELETE FROM tasks',
+                              'CREATE TABLE denied(id TEXT)', 'DROP TABLE tasks'):
+                with self.subTest(statement=statement), self.assertRaises(sqlite3.DatabaseError):
+                    db.execute(statement).fetchall()
+        for action in (24, 25, 29, 30, 31):
+            self.assertEqual(sqlite3.SQLITE_DENY,
+                             review.backup_verification_authorizer(action, None, 'load_extension', None, None))
+        self.assertEqual(sqlite3.SQLITE_DENY,
+                         review.backup_verification_authorizer(20, 'tasks', 'id', 'temp', None))
+        self.assertEqual(sqlite3.SQLITE_DENY,
+                         review.backup_verification_authorizer(20, 'tasks', 'id', 'main', 'untrusted_view'))
+
+    def test_prepared_verification_replaces_callback_when_none_returns_but_does_not_disable(self):
+        unused_approval, directory = self.prepared_after_old_size_failure()
+        original = {p.name: p.read_bytes() for p in directory.iterdir()}
+        connect, callbacks = sqlite3.connect, []
+
+        class LegacyConnection(sqlite3.Connection):
+            def set_authorizer(connection, callback):
+                callbacks.append(callback)
+                # Older sqlite3 accepted None yet kept a deny-producing bridge.
+                # The replacement is real SQLite; no fake backup/query success.
+                if callback is None:
+                    callback = lambda *args: sqlite3.SQLITE_DENY
+                return super(LegacyConnection, connection).set_authorizer(callback)
+
+        def legacy_connect(*args, **kwargs):
+            kwargs['factory'] = LegacyConnection
+            return connect(*args, **kwargs)
+
+        with self.observed(), patch.object(sqlite3, 'connect', legacy_connect):
+            context, staged = review.inspect_prepared(str(self.spec_path))
+        self.assertEqual([review.backup_authorizer, review.backup_verification_authorizer], callbacks)
+        self.assertEqual(self.task, context['selected']['task']['id'])
+        self.assertGreater(staged['ready']['backup_uncompressed_size'], 0)
+        self.assertEqual(original, {p.name: p.read_bytes() for p in directory.iterdir()})
+        self.assertFalse((directory / '05-backup-complete.json').exists())
 
     def test_raw_authenticated_false_even_repinned_cannot_settle(self):
         wrong = json.dumps({'account': {'authenticated': False, 'type': 'chatgpt', 'plan': 'plus'}, 'limits': {}})

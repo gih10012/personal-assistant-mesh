@@ -1049,6 +1049,26 @@ def backup_authorizer(action, first, second, unused_db, unused_trigger):
     return sqlite3.SQLITE_OK
 
 
+def backup_verification_authorizer(action, first, second, database, trigger):
+    """Trusted checks only; replacing a callback works on pre-3.11 sqlite3.
+
+    No SQL from the saved dump runs after this transition. Do not use
+    set_authorizer(None): older Python accepts it without disabling callbacks.
+    """
+    if trigger is not None or database not in (None, 'main'):
+        return sqlite3.SQLITE_DENY
+    if action == getattr(sqlite3, 'SQLITE_PRAGMA', 19):
+        allowed = ((first == 'quick_check' and second is None)
+                   or (first == 'table_info' and second in DEPENDENCY_TABLES))
+    elif action == getattr(sqlite3, 'SQLITE_SELECT', 21):
+        allowed = first is None and second is None
+    elif action == getattr(sqlite3, 'SQLITE_READ', 20):
+        allowed = first in DEPENDENCY_TABLES | {'sqlite_master', 'tasks', 'native_sessions', 'session_chunks'}
+    else:
+        allowed = False
+    return sqlite3.SQLITE_OK if allowed else sqlite3.SQLITE_DENY
+
+
 def verify_prepared_backup(context, path):
     """Read every saved gzip/SQL byte; restore only a private disposable DB."""
     metadata = digest_checked_backup(path)
@@ -1097,7 +1117,7 @@ def verify_prepared_backup(context, path):
                 pending += decoder.decode(b'', final=True)
             require(committed and not pending.strip() and statements >= 2 and not db.in_transaction,
                     'backup_sql_transaction_incomplete')
-            db.set_authorizer(None)
+            db.set_authorizer(backup_verification_authorizer)
             require(db.execute('PRAGMA quick_check').fetchone()[0] == 'ok',
                     'prepared_backup_database_not_integral')
             require([tuple(row) for row in db.execute(
