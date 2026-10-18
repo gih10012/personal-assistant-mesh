@@ -1,6 +1,6 @@
 # 持续 owner goal
 
-更新时间：2026-10-17。整个 goal **active，未完成**。本文件是后续 owner
+更新时间：2026-10-19。整个 goal **active，未完成**。本文件是后续 owner
 指令的有效目标合同，与 [PLAN](PLAN.md)、[TASKS](TASKS.json) 一起续接。
 2026-10-12 本人共同重规划并批准实施，随后在产品中明确清空旧 Goal、
 要求直接新建；新原生 Goal 已实核 active，objective 为本轮完整计划。
@@ -28,7 +28,37 @@ agent联系本人。只做最小必要检查；0/1/2做好后微信邀请本人�
 本节已进入重新创建且实核active的原生Goal；原43个任务/依赖、长期
 Mesh目标与所有历史不重建。不把本地文档更新冒充远端agent已核读。
 
-## 2026-10-17 当前执行检查点
+## 2026-10-19 当前执行检查点
+
+本人恢复active后沿原Goal/分支/操作续接，未重置统计、原43任务或长期
+目标。10月18日已实际切换唯一receiver，独立Claw入口及公网OAuth/MCP
+已上线；10月19日复核相关服务active且无新增restart。原Leader Worker
+没有重启，原任务/历史没有restore或重排。
+
+入口已用实际`gpt-6-luna`完成首个原生会话：从完整保存的221021B native
+history中，独立关联实际工具调用/输出，核到完整角色合同及Claw CLI
+history/status/context。模型正确辨认内部同步、选择silent，原outbox
+保持170条，没有模板通知。它不是本人新微信、图片/文件或真实Leader
+转交验收；原Leader角色核读和旧needs_review结案仍待。
+
+公网同一OAuth/MCP实例及窄路由已部署，外部公信HTTPS实测metadata200、
+无token MCP401且带正确认证challenge、管理`/v1/status`404。私有USER
+插件已实际保存，主账号GIH ggiy可见；还须完成ChatGPT原生“添加自定义
+MCP服务器”注册/正常OAuth，并将真实App绑定到原插件。两JSON包保存
+不等于普通Chat已连接，不能用桌面打开或Codex安装顶替。
+
+官方Cloud的owner-initiated adopted-job薄候选`22bba5c`已完成独立审查，
+21项针对性检查通过；现代SDK隔离检查、部署及本人实际环境验证仍待。
+不要让旧“Root先prepare/submit Cloud job”成为
+本人的自发Cloud入网前提；owner授权/未证实来源与官方provider核验分级，
+不凭自报URL造官方证明、不重放旧launch unknown。主动唤起仍延后。
+
+下一：完成普通Chat注册/授权与原插件绑定；沿已审原case核完整历史/
+真实host锁后结案旧延期任务，补原Leader核读/真实转交；部署Cloud薄
+入网与同身份双向桥。关键交付后微信邀请本人试用，不堆无关全量检查。
+见[当前实际交接](STATUS-2026-10-19.md)。
+
+## 2026-10-17 检查点（以下保留历史）
 
 本人再次提醒更新Goal；原生Goal已实际查询为active，objective已含本轮
 0/1/2、Chat/Cloud客户端发起且连接内双向通信、零新增支出和完整长期

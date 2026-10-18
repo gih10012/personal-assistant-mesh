@@ -1,9 +1,9 @@
 # 持续执行计划
 
-更新时间：2026-10-17（本人批准共同重规划后的实施，原生 Goal 已 active）。以下是持续推进的优先级，
+更新时间：2026-10-19（本人批准共同重规划后的实施，原生 Goal 已 active）。以下是持续推进的优先级，
 不是为了宣布完成而缩小目标。有效 owner 目标见 [GOAL](GOAL.md)，
 任务状态与续接点见 [TASKS.json](TASKS.json)，实测交接见
-[2026-10-17 交接](STATUS-2026-10-17.md)。历史失败/验证记录继续保留。
+[2026-10-19 交接](STATUS-2026-10-19.md)。历史失败/验证记录继续保留。
 
 ## 2026-10-12 批准实施：四线与实际验收
 
@@ -29,7 +29,36 @@
 真实接线为主，不重跑无关完整测试。0/1/2可用后通过ClawBot微信叫本人
 验证；有真实问题也走此通道。本人验收前保持对应交付未验证。
 
-## 2026-10-17 续接：将已完成源码变成实际入口
+## 2026-10-19 当前实际续接
+
+原Goal继续active；10月18日已实际单receiver切换/入口Worker启动及Luna
+角色核读，公网OAuth/MCP同ASGI/窄nginx路由已上线。备份、12表全行/
+原schema/inode、旧Worker不重启均已独立核；不是只存在源码。原生Shell/
+网络自由、全部旧unknown和长期43任务保持。
+
+1. **Root／普通Chat实际连接**：主账号已有原私有plugin，不重建。
+   在ChatGPT Plugins→添加自定义MCP服务器注册现有HTTPS，正常OAuth/
+   CIMD，不把GitHub上游secret填成MCP client secret。拿到真实App ID后
+   原plugin加`.app.json`并更新同ID/版本，保留原hosting/auth/USER/private。
+   普通Chat应可用，不能拿Desktop-only/本机stdio或Work替代。
+2. **Root／原Leader真实续接**：旧延期Chat已知效果候选及跨CAS持真实
+   host锁修复已集成；先fresh原case审计/完整备份核验，只结案failed/
+   deferred，不重排旧输入/改native state或覆盖旧chunks。随后补原连续
+   Leader角色核读及实际入口handoff，不绕旧guard新开Leader。
+3. **Cloud独审分支＋Root**：`22bba5c`独审21项通过、无阻断发现；下一
+   现代SDK隔离检查及私有接线，复用已有443窄`/cloud/node`、
+   CloudHTTPClient/enrollment和双向会话桥。本人Cloud任务自行入网，
+   不强迫Root先submit；未验证provider来源明确unattested，不能自报
+   成官方证明。安装/环境/凭据注入和真实Cloud消息/成果分别验，不新增
+   模型key/费用，不主动发Cloud job，不复制本机auth目录。
+4. **本人验证**：入口首轮内部silent不等于本人新消息、媒体、连续后续
+   与Leader转交成功；公网metadata/插件保存也不等于Chat授权。0/1/2
+   真正可试用后ClawBot微信通知本人直接试，实际问题同通道联系。
+
+独立审查/实现继续分支并行，只有实际生产与GUI由Root串行。现源集成
+点`69cde80`，新进展与private运行回执见[当前交接](STATUS-2026-10-19.md)。
+
+## 2026-10-17 续接（保留历史，当前以上节为准）
 
 原生Goal已再次查询active，目标与上述排程一致；本次仅更新进度，不
 reset统计、原连续会话或43个协调任务/依赖。媒体与远程双向会话
