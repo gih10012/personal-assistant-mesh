@@ -46,17 +46,33 @@
     "private_user_plugin_actually_saved_and_seen_in_confirmed_main_account": true,
     "chatgpt_native_custom_mcp_registration_and_normal_oauth_completed": false,
     "verified_registered_app_bound_to_original_private_plugin": false,
+    "chatgpt_native_discovery_request_http": 404,
+    "chatgpt_native_discovery_error": "MCP server does not implement OAuth",
+    "chatgpt_native_connection_form_submitted": false,
+    "discovery_diagnostic_expected_paths_observed_client_http": false,
+    "discovery_diagnostic_scope": "short-lived path-only logging on /.well-known/* and /mcp*; no query, headers, tokens, cookies or client IPs; no conclusion on IP rejection/cache/TLS cause",
+    "temporary_tls_diagnostic_config_restored_sha256": "fdbf97a8197fec146653f39f32536088f98d04eda34fef2f1ea3c3ed74833512",
+    "tls_service_restarted_for_diagnostic": false,
     "standalone_portable_mcp_package_not_treated_as_chat_connection": true,
     "old_deferred_chat_known_effect_review_and_held_lock_source_commits": ["4d1b26e", "69cde80"],
     "old_deferred_chat_case_production_applied_or_requeued": false,
     "cloud_owner_initiated_adoption_candidate_commit": "22bba5cd6cf0c5203d54726b8818f10ba43ebb32",
     "cloud_independent_review_targeted_tests_passed": 21,
     "cloud_independent_review_skips": 0,
-    "cloud_modern_sdk_isolated_check": "pending; not replaced by SDK-free checks",
-    "cloud_candidate_merged_deployed_or_actual_provider_verified": false,
+    "cloud_adoption_integrated_commit": "e0738ef",
+    "cloud_modern_sdk_isolated_check": "3 passed in 0.737s, zero skip; exact 22bba5c source, original pinned runtime venv, no external network/auth/model",
+    "cloud_sdk_initial_launch_diagnostics_retained": "first command inherited uvicorn entrypoint and exited 2; second used system Python and skipped 3; corrected original /opt/venv/bin/python ran all 3; no test source or skip guards changed",
+    "cloud_owner_runtime_candidate_commit": "2f9ed2412f30a8b940c61762150fdf0b95b0e9d0",
+    "cloud_owner_runtime_integrated_commit": "b348010",
+    "cloud_owner_runtime_independent_review": "passed; no new P1; grammar check is not host 3.6.8 execution",
+    "cloud_owner_runtime_author_targeted_tests_passed": 13,
+    "cloud_candidate_merged": true,
+    "cloud_owner_runtime_host_368_verified": false,
+    "cloud_owner_runtime_deployed": false,
+    "actual_official_cloud_enrollment_and_provider_verified": false,
     "mesh_initiated_chat_cloud_activation_still_deferred": true,
     "owner_live_validation_invitation": "pending requested 0/1/2 readiness",
-    "next_action": "Finish native Chat MCP/OAuth and same-plugin verified app binding; close original deferred effects without replay and obtain original Leader role/handoff evidence; review and deploy owner-initiated Cloud enrollment/duplex; invite owner through ClawBot"
+    "next_action": "Diagnose actual native Chat discovery error without weakening auth or duplicating the unsubmitted connection; close original deferred effects without replay and obtain original Leader role/handoff evidence; verify/deploy reviewed Cloud runtime with a real claim and private grant; owner-started Cloud enrollment/duplex; invite owner through ClawBot"
   },
   "latest_actual_delivery_20261017": {
     "goal_status": "active",
@@ -2134,7 +2150,7 @@
         {
           "id": "PAM-006e", "title": "OpenAI官方Codex Cloud临时节点",
           "state": "implementation_in_progress", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
-          "next_action": "本人已published环境，不重建或要求Root先submit。22bba5c owner-initiated adoption与Cloud固定source双向桥候选已完成、待独审/部署443/cloud/node和私有scoped bootstrap；owner授权未证来源与正常官方UI provider证明分级，不自报成attested、不改旧launch unknown。本人已运行Cloud任务可自行主动接入；真实VM/官方回执/成果待验，主动调取延后、不复制auth目录",
+          "next_action": "本人已published环境，不重建或要求Root先submit。22bba5c adoption/Cloud专属双向桥已独审合入e0738ef、原隔离venv3项SDK回归通过零skip；owner runtime2f9ed24经独审合入b348010、作者13项通过。下一宿主3.6.8/冻结闭包、真实claim/private grant及443/cloud/node接线；当前未部署或实际官方入网，不自报成attested、不改旧launch unknown，不复制auth目录/主动submit",
           "acceptance": "官方Cloud环境/任务自身主动连接受认证公网Mesh，实际job/临时身份/双向消息/完整成果及退出后持久状态分别核验；不给operator bearer或复制整个认证目录，不用Alibaba VPS或合成job冒充"
         }
       ]

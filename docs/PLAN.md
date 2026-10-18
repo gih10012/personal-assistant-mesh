@@ -41,12 +41,18 @@
    CIMD，不把GitHub上游secret填成MCP client secret。拿到真实App ID后
    原plugin加`.app.json`并更新同ID/版本，保留原hosting/auth/USER/private。
    普通Chat应可用，不能拿Desktop-only/本机stdio或Work替代。
+   当前原表单发现请求已实际返回404“不实现OAuth”；公网发现端点正常，
+   预期路径临时日志未见新客户端请求，根因未证。诊断配置已按原hash
+   恢复；不凭此改schema、放宽认证或假定IP禁令，不重复Create。
 2. **Root／原Leader真实续接**：旧延期Chat已知效果候选及跨CAS持真实
    host锁修复已集成；先fresh原case审计/完整备份核验，只结案failed/
    deferred，不重排旧输入/改native state或覆盖旧chunks。随后补原连续
    Leader角色核读及实际入口handoff，不绕旧guard新开Leader。
-3. **Cloud独审分支＋Root**：`22bba5c`独审21项通过、无阻断发现；下一
-   现代SDK隔离检查及私有接线，复用已有443窄`/cloud/node`、
+3. **Cloud独审分支＋Root**：`22bba5c`已独审合入`e0738ef`；原隔离venv
+   的3项SDK回归通过/零skip。最小owner runtime `2f9ed24`也经独审后
+   合入`b348010`，13项作者检查通过。下一宿主3.6.8/冻结闭包验证、
+   真实有效claim及私有接线；不造任务/keeper或拿grammar当宿主实跑。
+   复用已有443窄`/cloud/node`、
    CloudHTTPClient/enrollment和双向会话桥。本人Cloud任务自行入网，
    不强迫Root先submit；未验证provider来源明确unattested，不能自报
    成官方证明。安装/环境/凭据注入和真实Cloud消息/成果分别验，不新增
@@ -56,7 +62,8 @@
    真正可试用后ClawBot微信通知本人直接试，实际问题同通道联系。
 
 独立审查/实现继续分支并行，只有实际生产与GUI由Root串行。现源集成
-点`69cde80`，新进展与private运行回执见[当前交接](STATUS-2026-10-19.md)。
+点`b348010`（生产公网仍冻结`69cde80`），新进展与private运行回执见
+[当前交接](STATUS-2026-10-19.md)。
 
 ## 2026-10-17 续接（保留历史，当前以上节为准）
 

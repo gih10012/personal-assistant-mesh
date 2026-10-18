@@ -47,13 +47,20 @@ history/status/context。模型正确辨认内部同步、选择silent，原outb
 MCP服务器”注册/正常OAuth，并将真实App绑定到原插件。两JSON包保存
 不等于普通Chat已连接，不能用桌面打开或Codex安装顶替。
 
-官方Cloud的owner-initiated adopted-job薄候选`22bba5c`已完成独立审查，
-21项针对性检查通过；现代SDK隔离检查、部署及本人实际环境验证仍待。
+本次已在原表单取得实际发现错误：ChatGPT后台返回404，称目标不实现
+OAuth；而公网metadata仍200、challenge正确。短时无凭据路径日志只见
+本机校验，预期发现路径未见新的客户端HTTP；这不证明禁IP、缓存或TLS
+根因。临时配置已恢复原hash，TLS未restart；表单未提交，不重复建App。
+
+官方Cloud的owner-initiated adopted-job`22bba5c`已独审并合入`e0738ef`；
+现成隔离venv的3项现代SDK回归通过、零skip。真实Store租约绑定及可
+关闭的薄runtime候选`2f9ed24`亦独审后合入`b348010`，作者13项针对性
+检查通过；它还没有在宿主3.6.8验证/部署，亦未有官方Cloud实际入网。
 不要让旧“Root先prepare/submit Cloud job”成为
 本人的自发Cloud入网前提；owner授权/未证实来源与官方provider核验分级，
 不凭自报URL造官方证明、不重放旧launch unknown。主动唤起仍延后。
 
-下一：完成普通Chat注册/授权与原插件绑定；沿已审原case核完整历史/
+下一：沿实际错误定位普通Chat发现/授权与原插件绑定；沿已审原case核完整历史/
 真实host锁后结案旧延期任务，补原Leader核读/真实转交；部署Cloud薄
 入网与同身份双向桥。关键交付后微信邀请本人试用，不堆无关全量检查。
 见[当前实际交接](STATUS-2026-10-19.md)。
