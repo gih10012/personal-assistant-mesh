@@ -97,7 +97,19 @@ PYTHONPATH=/PRIVATE/NEW_CLOUD_CANDIDATE PYTHONDONTWRITEBYTECODE=1 \
 本机已跑3项 builder检查（1.518s、0skip）；其中子进程在历史冻结40模块
 加已审 entrance 的候选上，实际完成上述8项runtime检查、0skip，并验证
 导入无SQLite连接/无SDK载入、入口/Claw保留、原核心字节不变。解释器为
-本机Python3.14.7；这不是宿主3.6.8或实际50模块副本的核验。
+本机Python3.14.7；这些最初检查不是宿主3.6.8或实际50模块副本的证据。
+
+随后 Root 提供了实际50模块只读源码副本。`runtime-manifest.json` 文件
+SHA256为 `830bdbf65d7a679aea66289386c243c92577226cd12b8a696c5acf3d7102f781`，
+其50个模块哈希与副本逐一匹配。原 `4a8dd1c` builder无修复直接构建成功：
+base源码manifest `aff7d6e64d3092208a7683cd4db1ffa6259b555890732245701780e6360132df`；
+候选源码manifest `1505d2cf105899d5e50afa4015967ee3268e7c3b952df20ecb2e864c77f2ae8a`；
+候选JSON清单文件SHA256 `3aed7c4f4df9bfccb604fb31f71f7acc1ecd6910a1fe19e2142d348e2afd8b37`。
+候选共60模块：原48个字节不变，只更新 `cloud_jobs.py` 和
+`conversation_authority.py`，新增10个。闭包外45个原模块与六个核心均独立
+逐字节核对相等。该实际候选在本机3.14.7的 `-S -B` 子进程再次完成无
+SQLite连接/无SDK导入与原8项runtime检查、0skip。未读其他私有配置/DB，
+未执行生产或远端操作；宿主3.6.8两步检查仍待 Root 实跑。
 
 Root 实际源码副本与宿主两步检查完成后，仍须独占审查/切换唯一receiver，
 保留原 ready hook、owner IPC、入口/Claw功能与 native pins；只新增 Cloud
