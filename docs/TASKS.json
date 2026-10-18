@@ -72,6 +72,7 @@
     "actual_official_cloud_enrollment_and_provider_verified": false,
     "mesh_initiated_chat_cloud_activation_still_deferred": true,
     "owner_live_validation_invitation": "pending requested 0/1/2 readiness",
+    "owner_goal_checkpoint_clawbot_notice": "accepted after same-request lookup; outcome_unknown=false, automatic_retry=false, delivery_verified=false; no owner acceptance inferred",
     "next_action": "Diagnose actual native Chat discovery error without weakening auth or duplicating the unsubmitted connection; close original deferred effects without replay and obtain original Leader role/handoff evidence; verify/deploy reviewed Cloud runtime with a real claim and private grant; owner-started Cloud enrollment/duplex; invite owner through ClawBot"
   },
   "latest_actual_delivery_20261017": {
@@ -2002,7 +2003,7 @@
       "state": "implementation_in_progress",
       "owner": "root",
       "depends_on": [],
-      "next_action": "实际VPS OAuth/MCP及原Mesh question/steering桥已部署、external metadata200/MCP401/v1 404。主账号原private USER plugin已保存；下一Chat原生custom-MCP注册/OAuth和真实App绑定原plugin，不以Desktop-only或包保存冒充Chat入网；Cloud22bba5c自发adoption/source隔离候选独审部署并行，不主动submit或依赖电脑",
+      "next_action": "实际VPS OAuth/MCP及原Mesh双向桥已部署、metadata200/MCP401/v1 404；原private USER plugin已保存。原生Chat发现请求404，须沿真实错误排查再注册/OAuth和绑定原plugin，不重复Create或以Desktop-only顶替。Cloud22bba5c及2f9ed24经独审合入e0738ef/b348010，SDK3项通过零skip；宿主/真实claim/private grant/部署待办，不主动submit或依赖电脑",
       "evidence": {
         "research": "docs/ENTRYPOINTS-RESEARCH.md",
         "connector_installed": false,
