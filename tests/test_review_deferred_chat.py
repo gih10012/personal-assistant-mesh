@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -19,6 +20,7 @@ loader = importlib.util.spec_from_file_location('review_deferred_chat',
     str(Path(__file__).resolve().parents[1] / 'scripts' / 'review_deferred_chat.py'))
 review = importlib.util.module_from_spec(loader)
 loader.loader.exec_module(review)
+RealHeldClosure = review.HeldClosure
 
 
 class DeferredChatReviewTests(unittest.TestCase):
@@ -62,6 +64,66 @@ class DeferredChatReviewTests(unittest.TestCase):
         self.pins = patch.object(review, 'CLOSED', pins); self.pins.start(); self.addCleanup(self.pins.stop)
         self.closure = patch.object(review, 'closure', return_value={'synthetic_observer': True})
         self.closure.start(); self.addCleanup(self.closure.stop)
+        class SyntheticGuard:
+            nonce = 'synthetic-only-nonce'
+            latest = {'synthetic_observer': True, 'nonce': nonce, 'pid': 12345, 'sequence': 0}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def check(self): return self.latest
+            def commit_authorizer(self, *args): return sqlite3.SQLITE_OK
+            def release(self): return {'phase': 'released', 'nonce': self.nonce, 'pid': 12345, 'sequence': 1}
+        self.held = patch.object(review, 'HeldClosure', side_effect=lambda spec: SyntheticGuard())
+        self.held.start(); self.addCleanup(self.held.stop)
+
+    @contextlib.contextmanager
+    def actual_peer_guard(self, mutate_guard=None):
+        """Real original host lock and observer process, zero SSH/Chat/model IO."""
+        from assistant_mesh import chat_bridge_queue as original
+        config = {'schema': 1, 'enabled': True, 'owner_id': 'synthetic-owner',
+            'state_dir': str(self.root), 'expected_account': 'synthetic@163.com',
+            'projects': {'project': 'https://chatgpt.com/c/01000000-0000-7000-8000-000000000001'},
+            'dom': {'completion_selector': '.done', 'account_selector': '.account',
+                    'account_attribute': 'textContent'}}
+        cached = original.ChatBridgeQueue(config)
+        cached.enqueue({'request_id': 'original', 'task_id': 'original-bridge-task',
+                        'project_id': 'project', 'input': 'public synthetic fixture'})
+        owner = self.root / 'old-host-owner.json'
+        owner.write_text(json.dumps(dict(config, enabled=False))); owner.chmod(0o600)
+        payload = self.root / 'original-chat-payload.json'
+        payload.write_text('{}'); payload.chmod(0o600)
+        (self.root / 'host.lock').touch(mode=0o600)
+        targets = {'owner_config_path': str(owner), 'queue_path': str(cached.database),
+                   'payload_path': str(payload), 'request_id': 'original'}
+        with contextlib.closing(sqlite3.connect(str(cached.database))) as db:
+            db.row_factory = sqlite3.Row
+            row = dict(db.execute('SELECT * FROM chat_requests').fetchone())
+        self.spec['local_observer']['targets'] = targets
+        self.fixture.private('owner-deferred.json', self.spec)
+        pins = dict(review.CLOSED, closure_targets=review.digest(targets),
+            disabled_config=review.util.sha(owner.read_bytes()), queue_row=review.digest(row),
+            payload=review.util.sha(payload.read_bytes()))
+        guards = []
+        def factory(spec):
+            guard = RealHeldClosure(spec)
+            guards.append(guard)
+            if mutate_guard:
+                mutate_guard(guard, cached)
+            return guard
+        with patch.object(review, 'CLOSED', pins), \
+                patch.object(review, 'observer_command', side_effect=lambda spec, code: [sys.executable, '-c', code]), \
+                patch.object(review, 'HeldClosure', side_effect=factory):
+            try:
+                yield guards, cached
+            finally:
+                # Synthetic child cleanup AFTER the test knows its own DB
+                # outcome. Production never auto-kills/releases an unknown hold.
+                for guard in guards:
+                    if guard.process is not None:
+                        if guard.process.poll() is None:
+                            os.kill(guard.process.pid, signal.SIGKILL)
+                            guard.process.wait(timeout=5)
+                        for stream in (guard.process.stdin, guard.process.stdout):
+                            stream.close()
 
     def approved(self):
         return review.load(self.spec_path)[1]['sha256']
@@ -172,6 +234,73 @@ class DeferredChatReviewTests(unittest.TestCase):
             db.execute('UPDATE chat_requests SET send_intent=1')
             db.commit()
         self.assertEqual(observe().returncode, 2)
+
+    def test_real_owned_lock_covers_cas_commit_and_status_before_explicit_release(self):
+        from assistant_mesh import chat_bridge_queue as original
+        import io
+        release_checks = []
+        def mutate(guard, cached):
+            real_release = guard.release
+            def release():
+                # Actual same-case readback has committed, and an old host
+                # caching enabled=True still cannot acquire its original lock.
+                release_checks.append(review.status(self.spec_path)['applied'])
+                with self.assertRaisesRegex(Exception, 'chat_host_already_owned'):
+                    original.native_host(cached, io.BytesIO(), io.BytesIO())
+                self.assertTrue(cached.config['enabled'])
+                self.assertFalse(cached.status('original')['send_intent'])
+                return real_release()
+            guard.release = release
+        with self.actual_peer_guard(mutate) as (guards, cached):
+            result = review.apply(self.spec_path, self.approved())
+            self.assertTrue(result['applied'])
+            self.assertTrue(result['peer_lock_release_verified'])
+            self.assertEqual([True], release_checks)
+            self.assertTrue(guards[0].released)
+            self.assertEqual(0, guards[0].process.returncode)
+            self.assertFalse(cached.status('original')['send_intent'])
+            self.assertTrue(review.status(self.spec_path)['peer_lock_release_verified'])
+
+    def test_actual_observer_death_at_commit_admission_rolls_back_original_guard(self):
+        def mutate(guard, unused):
+            authorizer = guard.commit_authorizer
+            def die_at_commit(*args):
+                if args[0] == getattr(sqlite3, 'SQLITE_TRANSACTION', 22) and args[1] == 'COMMIT':
+                    os.kill(guard.process.pid, signal.SIGKILL)
+                    guard.process.wait(timeout=5)
+                return authorizer(*args)
+            guard.commit_authorizer = die_at_commit
+        with self.actual_peer_guard(mutate) as (guards, cached):
+            result = review.apply(self.spec_path, self.approved())
+            self.assertTrue(result['outcome_unknown'])
+            self.assertFalse(guards[0].released)
+            with contextlib.closing(review.util.quota.readonly(self.fixture.database)) as db:
+                task = dict(db.execute('SELECT * FROM tasks WHERE id=?', (self.fixture.task_id,)).fetchone())
+            self.assertEqual(self.task, task)
+            self.assertFalse(cached.status('original')['send_intent'])
+
+    def test_transport_eof_keeps_real_peer_lock_and_cannot_admit_commit(self):
+        with self.actual_peer_guard() as (guards, cached):
+            guard = review.HeldClosure(self.spec).__enter__()
+            guard.process.stdin.close()  # a lost transport is not release
+            with contextlib.closing(sqlite3.connect(':memory:', isolation_level=None)) as db:
+                db.execute('CREATE TABLE marker(value INTEGER)')
+                db.execute('INSERT INTO marker VALUES(0)')
+                db.execute('BEGIN IMMEDIATE')
+                db.execute('UPDATE marker SET value=1')
+                db.set_authorizer(guard.commit_authorizer)
+                with self.assertRaises(sqlite3.DatabaseError):
+                    db.commit()
+                db.rollback()
+                self.assertEqual(0, db.execute('SELECT value FROM marker').fetchone()[0])
+            lock = os.open(str(self.root / 'host.lock'), os.O_RDONLY)
+            try:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.assertIsNone(guard.process.poll())
+            finally:
+                os.close(lock)
+            self.assertFalse(cached.status('original')['send_intent'])
 
 
 if __name__ == '__main__':
