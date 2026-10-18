@@ -1,0 +1,36 @@
+"""Private hook for the ORIGINAL receiver; not a second receiver or installer.
+
+Root adds this to its existing runner. Keep all original ready hooks/socket/
+config/source pins and preserve the runner's original finally cleanup.
+"""
+from assistant_mesh.cloud_owner_runtime import CloudOwnerRuntime, install_owner, load_config
+
+
+def serve_with_cloud(original_runner, private_config, original_ready):
+    document = load_config(private_config)
+    runtime = []
+
+    def ready(http_server, api, channel):
+        original_ready(http_server, api, channel)
+        component = CloudOwnerRuntime(api, document)
+        runtime.append(component)
+        report = component.start()
+        # Root records this privately. not_prepared is an actual missing/stale
+        # grant/claim, not permission to invent a task or launch a Cloud job.
+        # report['serving'] proves ONLY the local narrow listener is running.
+        return report
+
+    try:
+        # Closure on the original runner calls serve_entrance(original_config,
+        # original_socket, ready=ready). Do not construct another API/Store.
+        return original_runner(ready)
+    finally:
+        for component in runtime:
+            component.close()
+
+
+def owner_install_on_existing_api(api, private_config, *, authorized=False):
+    # Separate deliberate owner operation, never called automatically by ready.
+    # This returns the NON-secret bootstrap; inject the bearer separately using
+    # the existing authorized Cloud network-secret mechanism.
+    return install_owner(api, load_config(private_config), authorized=authorized)

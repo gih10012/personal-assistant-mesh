@@ -1,0 +1,46 @@
+{
+  "format": "mesh-cloud-owner-runtime/1",
+  "adoptions_directory": "/PRIVATE/cloud-adoption",
+  "conversation_directory": "/PRIVATE/cloud-conversation",
+  "loopback_port": 18686,
+  "task_holder": "REPLACE_ACTUAL_EXISTING_STORE_CLAIM_HOLDER",
+  "token_sha256": "REPLACE_SHA256_OF_SEPARATELY_INJECTED_SCOPED_CREDENTIAL",
+  "grant": {
+    "format": "mesh-cloud-membership/1",
+    "mesh_task_id": "REPLACE_ACTUAL_EXISTING_STORE_TASK_ID",
+    "mesh_epoch": 1,
+    "lease_id": "REPLACE_PRIVATE_ORIGINAL_GRANT_CLAIM_REFERENCE",
+    "request_id": "REPLACE_ORIGINAL_OWNER_ENROLLMENT_REQUEST_ID",
+    "expires_at": 0,
+    "callback_url": "https://REPLACE_AUTHORIZED_PUBLIC_HOST/cloud/node",
+    "scopes": ["node:hello", "task:read", "tasks:submit", "artifact:write", "task:report"],
+    "capabilities": [],
+    "enrollment": {
+      "format": "mesh-enrollment/1",
+      "mesh_id": "REPLACE_STABLE_MESH_ID",
+      "node_id": "REPLACE_NODE_ID_DERIVED_FROM_ADOPTION_JOB_ID",
+      "owner_binding": "REPLACE_EXISTING_INGRESS_OWNER_BINDING",
+      "repo_pin": {
+        "repository": "https://github.com/gih10012/personal-assistant-mesh",
+        "commit": "REPLACE_ACTUAL_INSTALLED_COMMIT"
+      },
+      "runtime": {
+        "kind": "temporary",
+        "expires_at": 0,
+        "state_ref": "mesh:REPLACE_PRIVATE_DURABLE_CLOUD_STATE_REFERENCE"
+      },
+      "join": {
+        "peer_id": "REPLACE_EXISTING_JOIN_PEER_ID",
+        "authority_id": "REPLACE_EXISTING_INGRESS_AUTHORITY_ID",
+        "route_ref": "route:REPLACE_AUTHORIZED_PUBLIC_HTTPS_ROUTE",
+        "credential_ref": "secret:REPLACE_SCOPED_CLOUD_NETWORK_SECRET_REFERENCE",
+        "trust_ref": "trust:REPLACE_OWNER_TRUST_REFERENCE"
+      },
+      "continuation": {
+        "project_id": "REPLACE_FIXED_PROJECT_ID",
+        "session_ref": "session:REPLACE_EXISTING_PROJECT_REFERENCE",
+        "state_ref": "mesh:REPLACE_PRIVATE_DURABLE_RESULT_REFERENCE"
+      }
+    }
+  }
+}
