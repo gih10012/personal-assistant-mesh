@@ -32,6 +32,8 @@ ENTRANCE_INSTRUCTIONS = (
     '不要回复“在吗”时播昨天的任务，不要发重试/探针/任务ID模板或旧错误刷屏。'
     '最终文本默认留私有；真正回复本人要明确调用entrance reply，静默用silent。'
     'reply前读history取得latest_inbound_event_id，原回复unknown必须原ID查status，不能换ID重发。'
+    '另有owner配置的Claw CLI可读history/context/status、按原ID发文字媒体和下载；能力不止reply。'
+    '常规对话仍用reply防陈旧回复；恢复由原唯一authority/refresher处理，不自己开iLink轮询或复制账号。'
     '入口是推荐能力，不拦截任何原生Shell、文件、网络、MCP；Leader也保留直接Claw权限。'
     '在已有本人授权和零新增费用内自主使用工具；不新建付费key、不新增花费、不扩大第三人通讯。')
 
@@ -145,6 +147,14 @@ class EntranceWorker(Worker):
             'reply': '原生final不会自动发送；显式reply/silent/handoff。'
                 '原IDunknown仅status；新消息到来先刷新上下文再决定，避免跨天/错话。',
             'native_tools_intercepted': False}
+        reference['claw_cli'] = {'module': 'assistant_mesh.claw_cli',
+            'config_path': getattr(self, 'config_path', None), 'task_id': (self.current or {}).get('id'),
+            'epoch': (self.current or {}).get('epoch'),
+            'arguments': '--config CONFIG --task-id TASK --epoch EPOCH --call-id ORIGINAL_CALL COMMAND',
+            'commands': ['status', 'history', 'context', 'send-status', 'send-text', 'send-media',
+                         'download', 'recover-context'],
+            'backend': 'owner-enabled original authority; no operator bearer, new poller or local fallback',
+            'same_execution_node_files': True, 'native_features_restricted': False}
         return reference
 
     def on_tool(self, call):
@@ -223,10 +233,21 @@ def serve_entrance(config, socket_path, ready=None):
         raise ValueError('entrance_original_legacy_receiver_required')
     _check_frozen_source(server)
     media = media_from_config(config)
-    if not _SERVE_LOCK.acquire(False):
-        raise ValueError('owner_service_already_running')
     original, control = server.Store, None
     selected = entrance_store_class(original, config['entrance'], media)
+    if config.get('claw_cli') is not None:
+        options = config['claw_cli']
+        if (not isinstance(options, dict) or set(options) - {'enabled', 'max_bytes'}
+                or type(options.get('enabled')) is not bool):
+            raise ValueError('claw_cli_owner_configuration_required')
+        if options['enabled']:
+            from .claw_cli import claw_store_class
+            from .claw_upload import uploader_from_config
+            selected = claw_store_class(selected, uploader_from_config(config),
+                options.get('max_bytes', 32 * 1024 * 1024), any(
+                    'native.wechat.refresh' in peer.get('capabilities', []) for peer in config.get('peers', [])))
+    if not _SERVE_LOCK.acquire(False):
+        raise ValueError('owner_service_already_running')
 
     def passive(path, **options):
         options['recover_inflight'] = False

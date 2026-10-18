@@ -1,4 +1,4 @@
-"""Build a NEW frozen receiver source + four additive entrance modules only.
+"""Build a NEW frozen receiver source + additive entrance/Claw CLI modules only.
 
 No production path/ledger/credentials are opened, installed, started or copied.
 The exact previously reviewed legacy builder preserves 38/40 original modules.
@@ -11,7 +11,8 @@ import os
 from pathlib import Path
 
 
-MODULES = ('entrance.py', 'entrance_failure.py', 'entrance_runtime.py', 'entrance_media.py')
+MODULES = ('entrance.py', 'entrance_failure.py', 'entrance_runtime.py', 'entrance_media.py',
+           'claw_cli.py', 'claw_upload.py')
 
 
 def build(base_root, destination, support_root=None):
