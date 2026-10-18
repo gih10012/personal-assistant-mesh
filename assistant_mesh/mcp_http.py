@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from . import native_messaging as native
 from .mcp_http_auth import OwnerTokenVerifier, NotConfigured, SOURCE, validate_policy
+from .ingress import _identifier
 
 
 SDK_PIN = '2.3.0'
@@ -25,13 +26,14 @@ INSTRUCTIONS = (
 
 class LocalIngressBackend:
     """Use existing owner-configured Ingress/Results; no new Store/recovery."""
-    def __init__(self, ingress, results):
+    def __init__(self, ingress, results, *, source=SOURCE):
         if ingress is None or results is None or ingress.owner_id != results.owner_id:
             raise NotConfigured('mcp_http_ingress_not_configured')
         self.ingress, self.results = ingress, results
+        self.source = _identifier(source, 'backend_source')
 
     def request(self, principal, action, payload):
-        if principal['owner_id'] != self.ingress.owner_id or principal['source'] != SOURCE:
+        if principal['owner_id'] != self.ingress.owner_id or principal['source'] != self.source:
             raise PermissionError('mcp_http_ingress_owner_mismatch')
         peer = {'role': 'ingress', 'ingress': dict(principal)}
         if action == 'submit':
@@ -50,13 +52,14 @@ class RemoteIngressBackend:
     subject. A Client path alone is not role proof: deployment checks the server
     configuration. OAuth access tokens are NEVER forwarded to the Mesh server.
     """
-    def __init__(self, clients, owner_binding):
+    def __init__(self, clients, owner_binding, *, source=SOURCE):
         if not isinstance(clients, dict) or not clients:
             raise NotConfigured('mcp_http_ingress_not_configured')
         self.clients, self.owner = dict(clients), owner_binding
+        self.source = _identifier(source, 'backend_source')
 
     def request(self, principal, action, payload):
-        if principal['owner_id'] != self.owner or principal['source'] != SOURCE:
+        if principal['owner_id'] != self.owner or principal['source'] != self.source:
             raise PermissionError('mcp_http_ingress_owner_mismatch')
         client = self.clients.get(principal['subject'])
         if client is None:
@@ -100,11 +103,13 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
     is deliberately no unauthenticated/static-token production fallback.
     """
     policy = validate_policy(config, allow_loopback_for_tests=allow_loopback_for_tests)
-    if backend is None or not callable(getattr(backend, 'request', None)):
+    if (backend is None or not callable(getattr(backend, 'request', None))
+            or getattr(backend, 'source', SOURCE) != SOURCE):
         raise NotConfigured('mcp_http_ingress_not_configured')
     from . import conversation
     if conversation_service is not None and (not isinstance(conversation_service, conversation.ConversationService)
-            or conversation_service.owner != policy['owner_binding'] or conversation_service.backend is not backend):
+            or conversation_service.owner != policy['owner_binding'] or conversation_service.backend is not backend
+            or conversation_service.source != SOURCE):
         raise NotConfigured('mcp_http_conversation_not_configured')
     conversation_runtime = getattr(conversation_service, 'runtime', None)
     if conversation_runtime is not None and (getattr(conversation_runtime, 'service', None) is not conversation_service

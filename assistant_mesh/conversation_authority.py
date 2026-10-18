@@ -25,9 +25,12 @@ def digest(value):
 
 class ConversationAuthority:
     """Original ingress binding + native lease/interaction/steering transaction."""
-    def __init__(self, ingress):
+    def __init__(self, ingress, *, sources=(SOURCE,)):
         if ingress is None or not callable(getattr(ingress.store, '_task_is_live', None)):
             raise ValueError('conversation_original_ingress_required')
+        if not isinstance(sources, (tuple, list)) or not sources:
+            raise ValueError('conversation_sources_required')
+        self.sources = frozenset(_identifier(source, 'conversation_source') for source in sources)
         self.ingress, self.store = ingress, ingress.store
         with self.store.transaction() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS conversation_deliveries(
@@ -36,7 +39,7 @@ class ConversationAuthority:
 
     def _binding(self, db, peer, request_id, write=False):
         principal = self.ingress._principal(peer, 'tasks:submit' if write else 'tasks:read')
-        if principal['source'] != SOURCE:
+        if principal['source'] not in self.sources:
             raise PermissionError('conversation_source_not_authorized')
         request_id = _identifier(request_id, 'request_id')
         key = self.ingress._request_key(principal, request_id)
@@ -174,11 +177,13 @@ class ConversationAuthority:
             return dict(receipt, found=True)
 
 
-def attach(api):
+def attach(api, *, sources=(SOURCE,)):
     """Owner ready hook; one exact route on the existing authenticated API."""
     if getattr(api, '_conversation_authority', None) is not None:
+        if api._conversation_authority.sources != frozenset(sources):
+            raise Conflict('conversation_installed_sources_changed')
         return api._conversation_authority
-    authority = ConversationAuthority(api.ingress)
+    authority = ConversationAuthority(api.ingress, sources=sources)
     previous = api.dispatch
     def dispatch(method, path, payload, peer):
         parsed = urlsplit(path)

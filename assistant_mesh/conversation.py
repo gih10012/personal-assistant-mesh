@@ -122,8 +122,10 @@ class ConversationService:
     absence denies question publication and answers, not ordinary messages.
     The validator is CODE installed by the owner, never a JSON-approved boolean.
     """
-    def __init__(self, directory, owner_id, backend, *, live_interaction_validator=None, clock=time.time):
+    def __init__(self, directory, owner_id, backend, *, live_interaction_validator=None,
+                 clock=time.time, source=SOURCE):
         self.owner = _identifier(owner_id, 'conversation_owner')
+        self.source = _identifier(source, 'conversation_source')  # trusted installation, never tool JSON
         if not callable(getattr(backend, 'request', None)):
             raise NotConfigured('conversation_ingress_required')
         if live_interaction_validator is not None and not callable(live_interaction_validator):
@@ -142,7 +144,7 @@ class ConversationService:
                 conversation TEXT NOT NULL,sequence INTEGER NOT NULL,message_id TEXT NOT NULL,
                 fingerprint TEXT NOT NULL,body TEXT NOT NULL,
                 PRIMARY KEY(conversation,sequence),UNIQUE(conversation,message_id))''')
-            expected = {'format': FORMAT, 'owner': self.owner, 'source': SOURCE}
+            expected = {'format': FORMAT, 'owner': self.owner, 'source': self.source}
             old = dict(db.execute('SELECT key,value FROM conversation_metadata'))
             if old != expected:
                 if (old or db.execute('SELECT 1 FROM conversations LIMIT 1').fetchone()
@@ -168,13 +170,13 @@ class ConversationService:
 
     def _binding(self, principal, payload, write=False):
         binding = validate_peer({'role': 'ingress', 'ingress': principal}, self.owner)
-        if binding['source'] != SOURCE or ('tasks:submit' if write else 'tasks:read') not in binding['scopes']:
+        if binding['source'] != self.source or ('tasks:submit' if write else 'tasks:read') not in binding['scopes']:
             raise PermissionError('conversation_not_authorized')
         status = self.backend.request(binding, 'status', {'request_id': payload['request_id']})
         view = project_response('status', payload['request_id'], status)['data']
         if not view['accepted']:
             raise PermissionError('conversation_original_request_not_visible')
-        identity = digest([FORMAT, self.owner, SOURCE, binding['subject'], payload['conversation_id']])
+        identity = digest([FORMAT, self.owner, self.source, binding['subject'], payload['conversation_id']])
         return identity, view['task_id']
 
     @staticmethod

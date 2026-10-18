@@ -28,7 +28,7 @@ class ConversationBridge:
             raise ValueError('conversation_bridge_owner_context_required')
         self.service, self.client = service, client
         self.principal = validate_peer({'role': 'ingress', 'ingress': principal}, service.owner)
-        if self.principal['source'] != SOURCE:
+        if self.principal['source'] != self.service.source:
             raise PermissionError('conversation_bridge_source_rejected')
         self.lock, self.requests = threading.RLock(), {}
         with service.transaction() as db:

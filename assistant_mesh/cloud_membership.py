@@ -2,8 +2,9 @@
 
 This is a transport-independent authority facade, not a public listener or an
 OpenAI API. A deployment authenticates a *separate* scoped node credential and
-calls handle(). Its journal and full artifacts live outside the task VM, in the
-existing private CloudJobs directory. No local Codex auth/home is copied.
+calls handle(). Its journal and full artifacts live outside the task VM, in a
+private CloudJobs or owner-initiated CloudAdoptions directory. No local Codex
+auth/home is copied. Owner-authorized enrollment is not provider attestation.
 
 prepare() is an owner-side operation. A valid credential proves the delegated
 identity, not independently verified Cloud execution or remote quiescence.
@@ -31,7 +32,9 @@ SCOPES = frozenset(('node:hello', 'task:read', 'task:report', 'artifact:write',
 _ACTION_SCOPE = {'hello': 'node:hello', 'status': 'task:read', 'report': 'task:report',
                  'artifact': 'artifact:write', 'task_submit': 'tasks:submit',
                  'task_status': 'task:read', 'task_continue': 'tasks:continue',
-                 'discover': 'capabilities:read', 'call': 'capabilities:call'}
+                 'discover': 'capabilities:read', 'call': 'capabilities:call',
+                 'conversation_open': 'tasks:submit', 'conversation_receive': 'task:read',
+                 'conversation_reply': 'tasks:submit', 'conversation_receipt': 'task:read'}
 _HASH = re.compile(r'[0-9a-f]{64}\Z')
 _NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')
 
@@ -83,11 +86,16 @@ class CloudMembership:
     lease is always checked regardless of the callback.
     """
     def __init__(self, jobs, *, ingress=None, capability_gateway=None,
-                 lease_validator=None, clock=None):
+                 lease_validator=None, clock=None, conversation_service=None):
         self.jobs = jobs
         self.ingress = ingress
         self.gateway = capability_gateway
         self.lease_validator = lease_validator
+        self.conversation = conversation_service
+        if conversation_service is not None:
+            from .conversation import ConversationService
+            if not isinstance(conversation_service, ConversationService) or conversation_service.source != DISPLAY_ID:
+                raise ValueError('cloud_conversation_source_required')
         self.clock = clock or jobs.clock or time.time
         self.artifacts = _private_dir(jobs.path / 'node-artifacts', create=True)
         with jobs._transaction() as db:
@@ -139,6 +147,9 @@ class CloudMembership:
             raise Conflict('cloud_membership_job_identity_mismatch')
         if self.ingress and enrollment['owner_binding'] != self.ingress.owner_id:
             raise PermissionError('cloud_membership_owner_mismatch')
+        from .cloud_adoption import CloudAdoptions
+        if isinstance(self.jobs, CloudAdoptions) and enrollment['owner_binding'] != self.jobs.owner:
+            raise PermissionError('cloud_membership_owner_mismatch')
         return value
 
     def _row(self, db, job_id):
@@ -173,8 +184,10 @@ class CloudMembership:
     def prepare(self, job_id, document, *, token_sha256, authorized=False):
         """Bind an already privately supplied scoped credential, never mint one.
 
-        This must happen before the single Cloud launch. It does not dispatch,
-        enroll a live VM, install a secret or call any network endpoint.
+        For Mesh-launched CloudJobs this precedes its single Cloud launch. For
+        CloudAdoptions it may follow the owner's already-running Cloud task;
+        that journal never submits anything. This only prepares Mesh enrollment,
+        not a live VM, provider proof, secret installation or network operation.
         """
         if authorized is not True:
             raise PermissionError('cloud_membership_owner_required')
@@ -207,7 +220,13 @@ class CloudMembership:
     def get(self, job_id):
         with self.jobs._transaction() as db:
             row, value = self._row(db, job_id)
-            return dict(self._view(row, value), expired=value['expires_at'] <= self.clock())
+            view = dict(self._view(row, value), expired=value['expires_at'] <= self.clock())
+        from .cloud_adoption import CloudAdoptions
+        if isinstance(self.jobs, CloudAdoptions):
+            job = self.jobs.get(job_id)
+            view.update({key: job[key] for key in (
+                'enrollment_origin', 'provider_identity_verified', 'provenance')})
+        return view
 
     def bootstrap(self, job_id):
         """Trusted owner reads the non-secret bootstrap, for the task prompt.
@@ -246,7 +265,9 @@ class CloudMembership:
                     or _ACTION_SCOPE[action] not in value['scopes']):
                 raise PermissionError('cloud_node_action_not_authorized')
             job, _ = self.jobs._row(db, row['job_id'])
-            if job['state'] != 'submitted':
+            from .cloud_adoption import CloudAdoptions
+            adopted = isinstance(self.jobs, CloudAdoptions) and job['state'] == 'adopted'
+            if job['state'] != 'submitted' and not adopted:
                 raise Conflict('cloud_provider_identity_unconfirmed')
             if action != 'hello' and row['hello_at'] is None:
                 raise Conflict('cloud_node_hello_required')
@@ -263,7 +284,12 @@ class CloudMembership:
         if not isinstance(arguments, dict):
             raise ValueError('invalid_cloud_node_arguments')
         args = json.loads(_json(arguments))
-        if action in ('hello', 'status', 'discover'):
+        if action.startswith('conversation_'):
+            if self.conversation is None or self.conversation.owner != value['enrollment']['owner_binding']:
+                raise PermissionError('cloud_conversation_not_configured')
+            from .conversation import arguments as conversation_arguments
+            args = conversation_arguments(action[len('conversation_'):], args)
+        elif action in ('hello', 'status', 'discover'):
             if args:
                 raise ValueError('invalid_cloud_node_arguments')
         elif action == 'artifact':
@@ -342,8 +368,11 @@ class CloudMembership:
         request_id = _text(envelope['request_id'], 'node_request_id', 160)
         args = self._arguments(action, envelope['arguments'], value)
         binding = dict(value, job_id=job_id, node_id=node_id(job_id))
-        if action in ('status', 'task_status', 'discover'):
-            return self._execute(job_id, action, args, binding, request_id)
+        if action in ('status', 'task_status', 'discover', 'conversation_receive', 'conversation_receipt'):
+            response = self._execute(job_id, action, args, binding, request_id)
+            if action.startswith('conversation_'):
+                self._principal(token, action)  # A bounded wait cannot disclose after revocation/expiry.
+            return response
         body, fingerprint = _json(envelope), _sha(envelope)
         with self.jobs._transaction() as db:
             row, current = self._row(db, job_id)
@@ -360,7 +389,8 @@ class CloudMembership:
                     return json.loads(old['response'])
                 return {'request_id': request_id, 'job_id': job_id, 'state': 'unknown',
                         'automatic_retry': False, 'execution_verified': False}
-            if row['state'] == 'reported' and action not in ('task_submit', 'task_continue'):
+            if row['state'] == 'reported' and action not in (
+                    'task_submit', 'task_continue', 'conversation_open', 'conversation_reply'):
                 raise Conflict('cloud_node_already_reported')
             if self.lease_validator and self.lease_validator(binding) is not True:
                 raise Conflict('stale_cloud_task_lease')
@@ -389,6 +419,27 @@ class CloudMembership:
         return response
 
     def _execute(self, job_id, action, args, binding, request_id):
+        if action.startswith('conversation_'):
+            operation = action[len('conversation_'):]
+            principal = {'owner_id': binding['enrollment']['owner_binding'],
+                'source': DISPLAY_ID, 'subject': node_id(job_id),
+                'scopes': ['tasks:read'] + (['tasks:submit'] if 'tasks:submit' in binding['scopes'] else [])}
+            runtime = getattr(self.conversation, 'runtime', None)
+            context = {key: args[key] for key in ('conversation_id', 'request_id')}
+            report = None
+            if runtime is not None and operation == 'receive':
+                report = runtime.before_receive(principal, context)
+            result = self.conversation.request(principal, operation, args)
+            if runtime is not None and operation in ('reply', 'receipt'):
+                callback = (runtime.after_reply if operation == 'reply' and result.get('new_message') is True
+                            else runtime.original_receipt)
+                try:
+                    report = callback(principal, context, args['message_id'])
+                except Exception:
+                    report = {'state': 'native_delivery_unconfirmed', 'automatic_retry': False}
+            if report is not None:
+                result = dict(result, runtime=report)
+            return result
         if action == 'hello':
             with self.jobs._transaction() as db:
                 self._row(db, job_id)
