@@ -1,0 +1,7 @@
+{
+  "format": "mesh-conversation-runtime/1",
+  "directory": "/PRIVATE/existing-conversation-journal",
+  "owner_id": "OWNER_BINDING_FROM_EXISTING_OAUTH_POLICY",
+  "subject": "MESH_SUBJECT_FROM_EXISTING_OAUTH_POLICY",
+  "ingress_client": "/PRIVATE/existing-scoped-ingress-client.json"
+}

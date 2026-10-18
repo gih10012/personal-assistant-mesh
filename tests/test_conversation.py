@@ -72,7 +72,10 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual('to_mesh', reply['message']['direction'])
         self.assertEqual('2026-10-16T08:01:02Z', reply['message']['original_time'])
         self.assertIsNone(reply['message']['sent_at'])
-        self.assertEqual(reply, self.service.request(self.principal, 'reply', incoming))
+        replay = self.service.request(self.principal, 'reply', incoming)
+        self.assertEqual(reply['message'], replay['message'])
+        self.assertTrue(reply['new_message'])
+        self.assertFalse(replay['new_message'])
         # Simulate lost write ACK: the next operation is a read-only same-ID lookup.
         receipt = self.service.request(self.principal, 'receipt', dict(BINDING, message_id='in-1'))
         self.assertEqual(reply['message'], receipt['message'])

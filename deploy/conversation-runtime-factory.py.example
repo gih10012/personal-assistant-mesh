@@ -1,0 +1,28 @@
+"""Private same-ASGI wiring fragment; no key creation, installer or listener.
+
+Root's existing private factory loads its OAuth document exactly as before,
+then uses this SAME backend/service. Keep all secrets outside source/packages.
+"""
+import json
+
+from assistant_mesh.native_messaging import _private_bytes, _unique, _nonfinite
+from assistant_mesh.conversation_runtime import load_context
+from assistant_mesh.chat_github_oauth import create_app
+
+
+def assemble(oauth_document, private_bridge_config):
+    document = json.loads(_private_bytes(private_bridge_config).decode('utf8'),
+                          object_pairs_hook=_unique, parse_constant=_nonfinite)
+    backend, service, bridge = load_context(document)
+    oauth_document = dict(oauth_document)
+    original_clients = oauth_document.pop('ingress_clients', None)
+    if original_clients is not None and original_clients != {document['subject']: document['ingress_client']}:
+        raise ValueError('conversation_runtime_original_ingress_client_required')
+    policy = oauth_document['policy']
+    if (policy['owner_binding'] != document['owner_id']
+            or {item['mesh_subject'] for item in policy['subjects']} != {document['subject']}):
+        raise ValueError('conversation_runtime_fixed_owner_subject_required')
+    _, _, app = create_app(oauth_document, backend=backend, conversation_service=service)
+    # This is the original auth/MCP app, not a new endpoint. The explicit bridge
+    # installs bounded in-call receive/reply/receipt hooks; no daemon is needed.
+    return app

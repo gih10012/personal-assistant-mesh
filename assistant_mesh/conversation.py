@@ -202,7 +202,10 @@ class ConversationService:
                 or not re.fullmatch('[0-9a-f]{64}', interaction['params_sha256'])):
             raise ValueError('conversation_interaction_binding_invalid')
         _identifier(interaction['interaction_id'], 'conversation_interaction')
-        if self.validator(dict(interaction)) is not True:
+        contextual = getattr(self.validator, 'validate_original_question', None)
+        live = (contextual(dict(interaction), request_id=row['request_id']) if callable(contextual)
+                else self.validator(dict(interaction)))
+        if live is not True:
             raise Conflict('conversation_original_interaction_not_live')
 
     def request(self, principal, action, payload):
@@ -260,7 +263,7 @@ class ConversationService:
                 if old['fingerprint'] != fingerprint:
                     raise Conflict('conversation_original_message_changed')
                 return dict(self._base(row), message=json.loads(old['body']), recorded=True,
-                            replayed_effect=False, native_interaction_effective=False)
+                            replayed_effect=False, native_interaction_effective=False, new_message=False)
             if value.get('reply_to'):
                 target = db.execute('SELECT body FROM conversation_messages WHERE conversation=? AND message_id=?',
                                     (identity, value['reply_to'])).fetchone()
@@ -287,7 +290,7 @@ class ConversationService:
                        (identity, sequence, value['message_id'], fingerprint, encoded(message).decode('utf8')))
         with self.changed:
             self.changed.notify_all()
-        return dict(self._base(row), recorded=True, message=message, replayed_effect=False)
+        return dict(self._base(row), recorded=True, message=message, replayed_effect=False, new_message=True)
 
     def publish(self, principal, payload):
         """PRIVATE owner-code helper, never an MCP/public endpoint.

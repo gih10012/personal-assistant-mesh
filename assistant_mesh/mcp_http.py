@@ -106,6 +106,11 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
     if conversation_service is not None and (not isinstance(conversation_service, conversation.ConversationService)
             or conversation_service.owner != policy['owner_binding'] or conversation_service.backend is not backend):
         raise NotConfigured('mcp_http_conversation_not_configured')
+    conversation_runtime = getattr(conversation_service, 'runtime', None)
+    if conversation_runtime is not None and (getattr(conversation_runtime, 'service', None) is not conversation_service
+            or any(not callable(getattr(conversation_runtime, name, None)) for name in
+                   ('before_receive', 'after_reply', 'original_receipt'))):
+        raise NotConfigured('mcp_http_conversation_runtime_not_configured')
     verifier = OwnerTokenVerifier(token_verifier, policy)
     try:
         from importlib.metadata import version
@@ -215,7 +220,32 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
     if conversation_service is not None:
         async def converse(action, arguments):
             token = get_access_token()
+            binding = {key: arguments[key] for key in ('conversation_id', 'request_id')}
+            runtime_result = None
+            if conversation_runtime is not None and action == 'receive':
+                try:
+                    principal = verifier.principal(token)
+                    runtime_result = await asyncio.to_thread(conversation_runtime.before_receive, principal, binding)
+                except Exception:
+                    runtime_result = {'state': 'mesh_projection_unavailable', 'automatic_retry': False}
             result = await asyncio.to_thread(conversation.dispatch, conversation_service, verifier, token, action, arguments)
+            if result['ok'] and conversation_runtime is not None and action in ('reply', 'receipt'):
+                try:
+                    principal = verifier.principal(token)
+                    callback = (conversation_runtime.after_reply if action == 'reply' and result['data'].get('new_message') is True
+                                else conversation_runtime.original_receipt)
+                    runtime_result = await asyncio.to_thread(callback, principal, binding, arguments['message_id'])
+                except Exception:
+                    # The original journal write already succeeded. Never turn
+                    # a lost Mesh ACK into permission to rewrite/repost it.
+                    runtime_result = {'state': 'native_delivery_unconfirmed', 'automatic_retry': False}
+            if runtime_result is not None:
+                result['runtime'] = runtime_result
+            try:
+                verifier.principal(token)
+            except PermissionError:
+                result = {'schema': 1, 'ok': False, 'error': 'not_authorized_or_not_visible',
+                          'outcome': 'unknown', 'retry_with_new_id': False}
             meta = scope_challenge(token, result, 'tasks:submit' if action in ('open', 'reply') else 'tasks:read')
             return CallToolResult(content=[TextContent(type='text', text=json.dumps(result, ensure_ascii=False))],
                                   structured_content=result, is_error=not result['ok'], _meta=meta)
@@ -228,17 +258,17 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
             return await converse('open', {'conversation_id': conversation_id, 'request_id': request_id})
 
         @server.tool(name='mesh_conversation_receive',
-                     description='Receive Mesh/Leader messages, progress, questions and selected results since the retained cursor. Optional bounded wait up to 20 seconds; not background wake. Preserve returned cursor only after reading all messages.',
-                     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False,
+                     description='Receive Mesh/Leader messages since the retained cursor. When the owner enables runtime wiring, first synchronize real progress/questions/approved results; this never drains client replies. Optional bounded wait up to 20 seconds; not background wake. Preserve cursor after reading the full page.',
+                     annotations=ToolAnnotations(read_only_hint=conversation_runtime is None, destructive_hint=False,
                                                  idempotent_hint=True, open_world_hint=False))
         async def conversation_receive(conversation_id: str, request_id: str, after: int = 0, limit: int = 20, wait_ms: int = 0):
             return await converse('receive', {'conversation_id': conversation_id, 'request_id': request_id,
                                              'after': after, 'limit': limit, 'wait_ms': wait_ms})
 
         @server.tool(name='mesh_conversation_reply',
-                     description='Record an owner/client conversation message with one retained message_id and optional original reply_to. Not native approval or proof of human consent. Unknown ACK: query original receipt; never replay or change ID.',
-                     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
-                                                 idempotent_hint=True, open_world_hint=False))
+                     description='Record one retained-ID owner/client message. Optional owner-installed runtime forwards only a newly recorded message to the original live Mesh question/steering queue. Native approval/human consent is never inferred. Existing IDs and unknown ACKs only read the original receipt, never repost.',
+                     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=conversation_runtime is not None,
+                                                 idempotent_hint=True, open_world_hint=conversation_runtime is not None))
         async def conversation_reply(conversation_id: str, request_id: str, message_id: str, text: str,
                                      reply_to: str = None, original_time: str = None):
             return await converse('reply', {'conversation_id': conversation_id, 'request_id': request_id,
