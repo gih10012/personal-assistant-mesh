@@ -87,6 +87,7 @@ def forwarding(ip):
 
 
 def route(config, path, port, methods, body_limit, metadata=False):
+    oauth_mcp = path == '/mcp' and port is not None and config.get('oauth_port') is not None
     directives = ['    location = ' + path + ' {',
         '        if ($request_method !~ "^(' + '|'.join(methods) + ')$") { return 405; }',
         '        client_max_body_size ' + str(body_limit) + ';']
@@ -99,11 +100,18 @@ def route(config, path, port, methods, body_limit, metadata=False):
         # Cloud retains its separate task-token gate and verifier.
         if path != '/mcp' or port is None:
             directives += ['        if ($mesh_bearer = 0) { return 401; }']
-        directives += ['        if ($mesh_json = 0) { return 415; }']
+        json_gate = '$mesh_oauth_mcp_json' if oauth_mcp else '$mesh_json'
+        directives += ['        if (' + json_gate + ' = 0) { return 415; }']
     if port is None:
         directives += ['        return 503;', '    }']
         return '\n'.join(directives)
     directives += [forwarding(config['public_ip'])]
+    if oauth_mcp:
+        # SDK 2.3's modern transport checks these against the body. Dropping
+        # them makes otherwise valid tools/list and tools/call return 400.
+        # No arbitrary headers or caller-supplied Mesh identity are forwarded.
+        directives += ['        proxy_set_header Mcp-Method $http_mcp_method;',
+                       '        proxy_set_header Mcp-Name $http_mcp_name;']
     if metadata:
         # Public resource metadata is not a general OAuth/management proxy and
         # does not receive bearer/cookie/client forwarding identity.
@@ -146,9 +154,17 @@ def oauth_cookie_pattern():
     return r'^1:(?=.{1,16384}$) *' + item + r'(?:; *' + item + ')*$'
 
 
+def oauth_mcp_json_pattern():
+    return r'^POST:application/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*$'
+
+
 def oauth_maps():
     targets = ['/mcp', '/cloud/node', '/.well-known/oauth-protected-resource/mcp'] + list(OAUTH_PATHS)
-    lines = ['    map $request_uri $mesh_tls_target {', '        default 0;']
+    lines = ['    map "$request_method:$http_content_type" $mesh_oauth_mcp_json {',
+             '        default 0;',
+             '        ' + json.dumps('~*' + oauth_mcp_json_pattern()) + ' 1;',
+             '        "~^(GET|DELETE):" 1;', '    }',
+             '    map $request_uri $mesh_tls_target {', '        default 0;']
     lines += ['        ' + json.dumps(path) + ' 1;' for path in targets]
     lines += ['        ' + json.dumps('~' + oauth_query_pattern(path, keys)) + ' 1;'
               for path, keys in sorted(OAUTH_QUERIES.items())]

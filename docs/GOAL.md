@@ -2,7 +2,8 @@
 
 更新时间：2026-10-19。整个 goal **paused，未完成**，本人明确暂停，原生
 状态已实核；本次“你修吧”仅授权单独修复GitHub OAuth回调`iss`兼容，
-没有恢复整个Goal。该修复已热加载，仍待本人重新关联验收；以下active
+没有恢复整个Goal。回调和MCP发现网关兼容已热加载，真实Chat的
+`server/discover`及`tools/list`已返回200，客户端工具目录/消费仍待核；以下active
 记载是暂停前保留的阶段证据，不覆盖最新暂停。完整目标/43任务不缩小。
 本文件是后续 owner
 指令的有效目标合同，与 [PLAN](PLAN.md)、[TASKS](TASKS.json) 一起续接。

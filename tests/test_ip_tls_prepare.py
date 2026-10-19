@@ -303,6 +303,27 @@ class IPTLSPreparationTests(unittest.TestCase):
         authorize = tls.oauth_query_pattern('/authorize', tls.OAUTH_QUERIES['/authorize'])
         self.assertIsNone(re.fullmatch(authorize, '/authorize?iss=' + issuer))
 
+    def test_oauth_mcp_keeps_modern_routing_headers_and_normal_json_media_types(self):
+        config = self.oauth_config()
+        part = tls.route(config, '/mcp', config['mcp_port'], ('POST', 'GET', 'DELETE'), 65536)
+        self.assertIn('if ($mesh_oauth_mcp_json = 0) { return 415; }', part)
+        self.assertIn('proxy_set_header Mcp-Method $http_mcp_method;', part)
+        self.assertIn('proxy_set_header Mcp-Name $http_mcp_name;', part)
+        self.assertIn('proxy_pass_request_headers off;', part)
+        self.assertIn('proxy_set_header Authorization $http_authorization;', part)
+        self.assertNotIn('Mcp-Method', tls.oauth_route(config, '/token', ('POST',), form=True))
+        self.assertNotIn('Mcp-Method', tls.route(config, '/cloud/node', config['cloud_port'], ('POST',), 8388608))
+        pattern = tls.oauth_mcp_json_pattern()
+        for mime in ('application/json', 'application/json;charset=utf-8',
+                     'Application/JSON; charset=UTF-8', 'application/json; charset="utf-8"',
+                     'application/json ;\tcharset = utf-8 '):
+            self.assertIsNotNone(re.fullmatch(pattern, 'POST:' + mime, re.I), mime)
+        for mime in ('text/json', 'application/jsonp', 'application/x-www-form-urlencoded',
+                     'application/json; charset=iso-8859-1', 'application/json; charset=utf8',
+                     'application/json; charset=utf-8; charset=utf-8',
+                     'application/json; arbitrary=value', 'application/json\n'):
+            self.assertIsNone(re.fullmatch(pattern, 'POST:' + mime, re.I), mime)
+
     def test_oauth_front_channel_accepts_only_actual_quoted_base64_cookie_names(self):
         pattern = tls.oauth_cookie_pattern()
         state = '__Host-MCP_CONSENT_STATE_' + 'a' * 32
