@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sqlite3
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -185,6 +186,33 @@ class EntranceAbandonTests(unittest.TestCase):
                                                            (self.policy['scope'],)).fetchone()))
         with self.assertRaisesRegex(review.util.ReviewDenied, 'existing_intent_use_status'):
             review.apply(self.path, self.approval())
+
+    def test_bounded_backup_keeps_space_floor_and_rejects_a_larger_full_restore(self):
+        bound = self.f.database.stat().st_size
+        reserve = bound + 32 * 1024 * 1024 + 1024 ** 3
+        before = self.f.database.read_bytes(), self.f.rollout.read_bytes(), self.backup.read_bytes()
+        with patch.object(review.shutil, 'disk_usage', return_value=SimpleNamespace(free=reserve - 1)):
+            with self.assertRaisesRegex(review.util.ReviewDenied, 'backup_space_required'):
+                review.inspect(self.path)
+        with patch.object(review.shutil, 'disk_usage', return_value=SimpleNamespace(free=reserve)):
+            self.assertEqual(self.task, review.inspect(self.path)['selected']['task'])
+        self.assertEqual(before, (self.f.database.read_bytes(), self.f.rollout.read_bytes(), self.backup.read_bytes()))
+
+        # A valid, fully pinned dump may include more unrelated data than the
+        # current live DB. The one-ledger cap must deny that complete restore;
+        # it cannot silently increase the cap to make the verification pass.
+        sql = gzip.decompress(before[2]).decode('utf8')
+        extra = "INSERT INTO memories VALUES('oversized-backup','synthetic','" + 'x' * bound + "',0);\n"
+        oversized = sql.replace('COMMIT;', extra + 'COMMIT;').encode('utf8')
+        self.backup.write_bytes(gzip.compress(oversized))
+        self.spec['backup'].update(sha256=review.util.sha(self.backup.read_bytes()),
+            size=self.backup.stat().st_size, sql_sha256=review.util.sha(oversized), sql_size=len(oversized))
+        self.f.private('owner-abandon.json', self.spec)
+        with patch.object(review.shutil, 'disk_usage', return_value=SimpleNamespace(free=reserve)):
+            with self.assertRaisesRegex(sqlite3.OperationalError, 'full'):
+                review.inspect(self.path)
+        self.assertEqual(before[:2], (self.f.database.read_bytes(), self.f.rollout.read_bytes()))
+        self.assertEqual([], list(self.reviews.iterdir()))
 
 
 if __name__ == '__main__':

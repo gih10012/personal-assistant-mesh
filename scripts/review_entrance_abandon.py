@@ -297,8 +297,12 @@ def verify_backup(spec, auth, before):
     version = util.digest_checked_backup(path)
     require(version['sha256'] == pin['sha256'] and version['size'] == pin['size'], 'abandon_backup_changed')
     root = util.private_directory(spec['review_root'])
-    bound = 2 * util.file_metadata(auth['database'], private=True)['size']
-    require(shutil.disk_usage(str(root)).free >= bound + 1024 ** 3, 'abandon_backup_space_required')
+    # This is a NEW empty verification DB, not a second live-ledger backup.
+    # Keep a hard one-ledger page cap, a separate 32MiB work reserve and the
+    # existing 1GiB free-space floor. A larger restore must fail, never expand.
+    bound = util.file_metadata(auth['database'], private=True)['size']
+    require(shutil.disk_usage(str(root)).free >= bound + 32 * 1024 * 1024 + 1024 ** 3,
+            'abandon_backup_space_required')
     with contextlib.closing(util.quota.readonly(auth['database'])) as live:
         schema = [tuple(r) for r in live.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name')]
     checksum, size = util.hashlib.sha256(), 0

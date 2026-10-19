@@ -64,6 +64,19 @@ receipts and prefix. It never restores over the authority DB or creates a new
 backup. A concurrent unrelated task may advance after that consistent snapshot;
 the original reviewed rows must still match at CAS.
 
+The new empty verification DB has a hard `max_page_count` cap equal to one live
+ledger's current size, with a separate 32MiB work reserve and a 1GiB free-space
+floor checked before restoration and after each SQL statement. This reuses the
+bounded disposable-DB policy from the independently reviewed deferred helper.
+If the full restore needs more pages or free space falls below the floor, audit
+fails and removes only its own temporary verification directory. It never grows
+the cap, prunes history/backups, or skips complete gzip/SQL/selected-row checks.
+Root must obtain a fresh space reading; the smaller cap does not promise every
+backup fits. With the reported 1,423,278,080B free and 269,266,944B ledger, the
+older gate requires 1,612,275,712B and would reject before restoration; this is
+an arithmetic admission check, not an actual host execution. The bounded
+preflight requires 1,376,563,200B, leaving only 46,714,880B at that reading.
+
 `closure` is `evidence_path,evidence_sha256`. Its private JSON file has exactly:
 
 ```
@@ -111,8 +124,11 @@ The checkpoint's effect-reservation bit becomes false ONLY under that explicit
 owner-abandon review, so normal new input is not permanently blocked by this
 abandoned internal notice. This does not authorize retrying the original input.
 
-Two isolated SQLite checks cover audit nonmutation, full/prefix artifact and
+The original two isolated SQLite checks cover audit nonmutation, full/prefix artifact and
 state preservation, original identity, lost ACK/status/no second apply, explicit
 approval/closure/epoch/input/backup denials, and COMMIT-boundary rollback. They
 mock the service boundary: they are NOT host systemd/cgroup or Python3.6 proof.
+An additional focused SQLite check covers the exact reserve boundary, source
+nonmutation and rejection of a larger fully pinned restore by the one-ledger
+page cap; it passed locally without rerunning the original two checks.
 Root must perform the actual host read-only audit before any apply.
