@@ -5,7 +5,41 @@ the complete owner goal, task IDs, dependencies and next actions; update the
 coordination record when work or evidence changes. Runtime tasks and external
 results must be verified from their actual authority, not inferred from this file.
 
-Latest owner priority (2026-10-16), overriding older entrypoint scheduling:
+Latest approved stage (2026-10-20): see
+`docs/STAGE-ENTRANCES-2026-10-20.md`. The owner cleared the previous native Goal
+and explicitly requested a new one; the new full-scope Goal is active. Do not
+claim its accounting migrated or recreate the original 43 coordinating tasks.
+First synchronize the revised role contract, then recover the existing Claw
+entrance and send the owner's teaching-evaluation commission using PERSONAL
+WeChat -> existing ClawBot, not the bot -> owner reporting route. The actual
+Mesh Leader must read the authorized WeCom context, perform the school business
+with the owner's evaluation criteria, and report naturally. Root must not do
+the business itself and call that an end-to-end Mesh acceptance.
+
+In parallel, add an implicitly selected skill to the EXISTING Chat plugin:
+ordinary new Chat chooses Mesh when personal-device/action/long-running work
+needs it, without requiring an @ mention. Preserve other native tools. Native
+scheduled tasks return to that same ordinary Chat; Work web / desktop Cloud
+uses official MCP Events (2026-07-28) for completion/attention webhooks. These
+are separate destinations, not arbitrary injection into ordinary Chat. No paid
+Agents API or new model key. Preserve the verified plugin/App/OAuth identities.
+Persist task-agent final replies at the authorized task-completion transaction;
+delivery failure must not rerun completed native work or require Root to approve
+every normal answer. Never export whole native histories as conversational replies.
+
+The original Chat diagnostic DID run in the original Leader thread at
+2026-10-19 23:54 Asia/Shanghai: two correlated read-only execs and native
+task_complete are verified. Its result was not returned to Chat. Do not repeat
+that task or interpret live=false after completion, conservative
+execution_verified=false, or per-message native_interaction_effective as an
+offline-Leader test. Restore only that original reviewed result separately.
+Resume the stopped chat_explicit_sync_20261019 specialist on its saved work;
+if quota remains unavailable, preserve its exact checkpoint and have Root take
+over the remaining review without pretending the specialist completed it.
+Cloud Codex/Harmony/Live and the full long-term graph remain in scope but are
+not additional implementation expansion during this entrance-wrap-up stage.
+
+Earlier owner priority (2026-10-16), retained where consistent with the stage:
 first publish/synchronize the role contract in `docs/ENTRANCE-AGENT-CONTRACT.md`,
 then implement the continuous-memory low-cost ClawBot entrance agent, then the
 ChatGPT-INTERNAL plugin and official Codex Cloud outbound connection to public
