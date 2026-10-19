@@ -9,7 +9,9 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = 'personal-assistant-mesh-remote'
-FILES = ('plugin.json', 'mcp.json')
+FILES = ('plugin.json', 'mcp.json', 'skills/mesh-assistant/SKILL.md',
+         'skills/mesh-assistant/agents/openai.yaml',
+         'skills/mesh-assistant/references/async-followup.md')
 
 
 def build(output):
@@ -32,7 +34,7 @@ def build(output):
     with zipfile.ZipFile(str(output)) as archive:
         if sorted(archive.namelist()) != sorted(NAME + '/' + name for name in FILES):
             raise ValueError('remote_plugin_archive_invalid')
-        for name in FILES:
+        for name in ('plugin.json', 'mcp.json'):
             json.loads(archive.read(NAME + '/' + name).decode('utf8'))
     raw = output.read_bytes()
     return {'archive': str(output), 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),

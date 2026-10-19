@@ -1,0 +1,5 @@
+interface:
+  display_name: "Personal Mesh Assistant"
+  short_description: "Delegate personal-device work and follow its original conversation"
+policy:
+  allow_implicit_invocation: true
