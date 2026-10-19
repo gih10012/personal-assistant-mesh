@@ -1,0 +1,17 @@
+{
+  "public_ip": "47.84.73.177",
+  "runtime_root": "/opt/mesh-ip-tls",
+  "mcp_port": 18685,
+  "cloud_port": null,
+  "oauth_port": 18685,
+  "dns_profile": {
+    "hostname": "47-84-73-177.sslip.io",
+    "mcp_port": 3290,
+    "cloud_port": null,
+    "oauth_port": 3290,
+    "accounts": {
+      "staging": "REPLACE_EXISTING_STAGING_ACCOUNT_ID",
+      "production": "REPLACE_EXISTING_PRODUCTION_ACCOUNT_ID"
+    }
+  }
+}
