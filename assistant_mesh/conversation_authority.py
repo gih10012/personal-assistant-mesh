@@ -201,11 +201,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Explicit optional hook on the sole entrance receiver')
     parser.add_argument('--config', required=True)
     parser.add_argument('--socket', required=True)
+    parser.add_argument('--source', action='append', dest='sources',
+                        type=lambda value: _identifier(value, 'conversation_source'),
+                        help='Trusted owner ingress source; repeat to allow more than one (default: chatgpt-chat)')
     args = parser.parse_args(argv)
+    sources = tuple(args.sources) if args.sources is not None else (SOURCE,)
     from .config import private_json
     from .entrance_runtime import serve_entrance
     return serve_entrance(private_json(args.config), args.socket,
-                          ready=lambda http, api, channel: attach(api))
+                          ready=lambda http, api, channel: attach(api, sources=sources))
 
 
 if __name__ == '__main__':
