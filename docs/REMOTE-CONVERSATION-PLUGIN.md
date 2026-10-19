@@ -36,7 +36,7 @@ client capability and back-channel; this source does not silently assume it.
 ## Small authenticated surface
 
 Default construction still exposes exactly the original three tools. Passing
-an owner-installed `ConversationService` opts in to four additional tools on
+an owner-installed `ConversationService` opts in to five additional tools on
 the **same authenticated `/mcp`**:
 
 | Tool | Purpose | Resource scopes |
@@ -45,6 +45,11 @@ the **same authenticated `/mcp`**:
 | `mesh_conversation_receive` | Read ordered messages after a retained cursor; optional wait 0–20 seconds | `tasks:read` |
 | `mesh_conversation_reply` | Append a retained-ID client message, optionally replying to an original message | `tasks:read` + `tasks:submit` |
 | `mesh_conversation_receipt` | Same original message lookup after an uncertain write ACK | `tasks:read` |
+| `mesh_conversation_sync` | Explicitly advance one recorded client message when its original task becomes live; admitted/unknown intents only read the original receipt | `tasks:read` + `tasks:submit` |
+
+Sync requires the installed original `ConversationBridge`; without it the tool
+returns `conversation_sync_runtime_unavailable` and attempts no delivery. See
+[explicit sync](CHAT-CONVERSATION-SYNC.md) for the retained-ID call and boundaries.
 
 All parameters are closed-schema. Clients cannot supply source, subject, role,
 owner, task/epoch grant, directory or native session. `OwnerTokenVerifier`
@@ -149,7 +154,7 @@ directory submission is requested or performed.
 Root must install the optional service in the existing isolated VPS sidecar,
 preserve its private journal/backup and fixed ingress binding, then install the
 remote plugin in the already confirmed main account. No extra public routes
-are required. Verify original3 plus new4 tools, one explicit task, original
+are required. Verify original3 plus new5 tools, one explicit task, original
 conversation open, Leader-published progress/question, client reply, private
 consumer receipt and same-cursor reconnect. Distinguish journal receipt, actual
 Leader consumption and owner phone/Chat acceptance. The official Codex Cloud

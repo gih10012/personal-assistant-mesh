@@ -211,7 +211,7 @@ class ConversationSDKTests(unittest.TestCase):
     http = mcp_tests.ActualSDKHTTPTests.http
     rpc = staticmethod(mcp_tests.ActualSDKHTTPTests.rpc)
 
-    def test_real_authenticated_http_seven_tools_two_directions_and_modern_client(self):
+    def test_real_authenticated_http_eight_tools_two_directions_and_modern_client(self):
         import uvicorn
         from mcp import Client
         from mcp.client.streamable_http import streamable_http_client
@@ -241,7 +241,7 @@ class ConversationSDKTests(unittest.TestCase):
             self.assertTrue(server.started)
             self.assertEqual(401, self.http(payload=self.rpc('tools/list'), bearer=None)[0])
             tools = self.http(payload=self.rpc('tools/list'))[2]['result']['tools']
-            self.assertEqual(7, len(tools))
+            self.assertEqual(8, len(tools))
             self.assertIn('mesh_approved_result', {tool['name'] for tool in tools})
             for tool in tools:
                 self.assertEqual(tool['securitySchemes'], tool['_meta']['securitySchemes'])

@@ -37,7 +37,7 @@ No browser, new model, credentials/account, public route or background wake.
    Its only schema addition is `conversation_deliveries`, an operation receipt
    table in the original authority transaction, not a new task/identity registry.
 3. In the existing modern OAuth/MCP isolated image, add
-   `conversation_runtime.py`, updated `conversation.py` and `mcp_http.py`;
+   `conversation_runtime.py`, `conversation_sync.py`, updated `conversation.py` and `mcp_http.py`;
    `conversation_authority.py` is also imported for the fixed route constants.
    `chat_github_oauth.py` and OAuth engine/config remain unchanged from the
    original reviewed integration. Existing dependency pins still apply.
@@ -68,6 +68,10 @@ No browser, new model, credentials/account, public route or background wake.
   token cannot invoke this write hook or drain another message.
 - `mesh_conversation_receipt` queries the original native receipt only; it
   cannot perform even a first delivery. Lost ACKs never get new IDs or POSTs.
+- `mesh_conversation_sync` is an explicit `tasks:submit` operation for one
+  already recorded client message. It can advance a reply previously left
+  `awaiting_original_live_task`; admitted/unknown intents only query their
+  original native receipt. It does not scan or drain other pending replies.
 - The journal's trusted live-question callback receives its immutable bound
   request ID, so an ASGI process started before a separate CLI creates a new
   conversation does not rely on a stale startup map or recursively open the
@@ -86,7 +90,8 @@ claim. It does not create/requeue a task, change native history, upgrade a
 client's scope, or activate Chat/Cloud. If a new reply arrives before any live
 claim, its journal message remains queued and the hook says
 `awaiting_original_live_task`; ordinary receive does not pretend it was sent.
-An owner/Leader private step can handle it later. No silent fallback posts it
+The client can later call [explicit sync](CHAT-CONVERSATION-SYNC.md) with the
+same IDs, or an owner/Leader can use the private step. No silent fallback posts it
 to a new task or pretends a dead/paused task has consumed it.
 
 ## Native delivery levels are intentionally different
