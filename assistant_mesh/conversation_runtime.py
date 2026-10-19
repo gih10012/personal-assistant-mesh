@@ -67,7 +67,11 @@ class ConversationBridge:
         self._principal(principal)
         with self.lock:
             identity, task = self._context(binding)
-            return self._outbound(identity, binding, self.observe(binding))
+            report = self._outbound(identity, binding, self.observe(binding))
+            projection = getattr(self, '_conversation_emit_projection', None)
+            if projection is not None:  # Explicit owner hook; no producer write on receive.
+                report.update(projection(identity, binding))
+            return report
 
     def after_reply(self, principal, binding, message_id):
         """Only the original message just recorded by this authorized call."""

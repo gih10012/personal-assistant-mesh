@@ -255,8 +255,11 @@ class ConversationService:
             with self.changed:
                 self.changed.wait(min(0.25, remaining))
 
-    def _append(self, identity, value, task, direction, kind, interaction):
-        fingerprint = digest([direction, kind, value, interaction])
+    def _append(self, identity, value, task, direction, kind, interaction, provenance=None):
+        parts = [direction, kind, value, interaction]
+        if provenance is not None:
+            parts.append(provenance)  # Keep all existing message fingerprints unchanged.
+        fingerprint = digest(parts)
         with self.transaction() as db:
             row = self._row(db, identity, value, task)
             old = db.execute('SELECT fingerprint,body FROM conversation_messages WHERE conversation=? AND message_id=?',
@@ -288,13 +291,15 @@ class ConversationService:
                 'received_at': now, 'processed_at': now, 'sent_at': None, 'interaction': interaction,
                 'request_id': row['request_id'], 'task_id': row['task_id'],
                 'client_display_verified': False, 'native_interaction_effective': False}
+            if provenance is not None:
+                message['provenance'] = provenance
             db.execute('INSERT INTO conversation_messages VALUES(?,?,?,?,?)',
                        (identity, sequence, value['message_id'], fingerprint, encoded(message).decode('utf8')))
         with self.changed:
             self.changed.notify_all()
         return dict(self._base(row), recorded=True, message=message, replayed_effect=False, new_message=True)
 
-    def publish(self, principal, payload):
+    def publish(self, principal, payload, *, provenance=None):
         """PRIVATE owner-code helper, never an MCP/public endpoint.
 
         The owner selects exactly what is published. Do not copy raw rollouts,
@@ -305,11 +310,23 @@ class ConversationService:
                 'conversation_id', 'request_id', 'message_id', 'text', 'reply_to', 'original_time', 'kind', 'interaction'}:
             raise ValueError('conversation_publication_invalid')
         kind, interaction = payload.get('kind', 'message'), payload.get('interaction')
-        if kind not in ('message', 'progress', 'question', 'result') or (kind != 'question' and interaction is not None):
+        if kind not in ('message', 'progress', 'question', 'result', 'final') or (kind != 'question' and interaction is not None):
             raise ValueError('conversation_publication_invalid')
         value = arguments('reply', {key: item for key, item in payload.items() if key not in ('kind', 'interaction')})
+        if provenance is not None:
+            fields = {'producer', 'human_reviewed', 'source_message_id', 'source_call_id',
+                      'source_task_epoch', 'source_created_at'}
+            if (not isinstance(provenance, dict) or set(provenance) != fields
+                    or provenance['producer'] != 'authenticated_task_agent'
+                    or provenance['human_reviewed'] is not False
+                    or type(provenance['source_task_epoch']) is not int or provenance['source_task_epoch'] < 1
+                    or provenance['source_created_at'] != value['original_time']):
+                raise ValueError('conversation_agent_provenance_invalid')
+            for key in ('source_message_id', 'source_call_id'):
+                _identifier(provenance[key], key)
+            provenance = json.loads(encoded(provenance).decode('utf8'))
         identity, task = self._binding(principal, value, write=True)
-        return self._append(identity, value, task, 'to_client', kind, interaction)
+        return self._append(identity, value, task, 'to_client', kind, interaction, provenance)
 
     def question(self, principal, payload):
         """Read/live-check the original question before OPTIONAL elicitation."""
