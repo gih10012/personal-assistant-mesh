@@ -307,7 +307,11 @@ class IPTLSPreparationTests(unittest.TestCase):
                 (tls.OAUTH_PATHS[0], ('GET', 'HEAD', 'OPTIONS'), {})):
             part = tls.oauth_route(self.oauth_config(), path, methods, **options)
             self.assertIn('^(' + '|'.join(methods) + ')$', part)
-            self.assertIn('if ($mesh_oauth_post_query = 1) { return 404; }', part)
+            if path == '/consent':
+                self.assertNotIn('if ($mesh_oauth_post_query = 1) { return 404; }', part)
+                self.assertIn('if ($mesh_oauth_form = 0) { return 415; }', part)
+            else:
+                self.assertIn('if ($mesh_oauth_post_query = 1) { return 404; }', part)
             self.assertIn('if ($mesh_oauth_body = 0) { return 413; }', part)
             self.assertIn('proxy_set_header Authorization "";', part)
             self.assertNotIn('$http_authorization', part)
@@ -326,6 +330,17 @@ class IPTLSPreparationTests(unittest.TestCase):
                 self.assertNotIn('proxy_hide_header Set-Cookie;', part)
             else:
                 self.assertIn('proxy_hide_header Set-Cookie;', part)
+        # A browser preserves the consent page's query on form POST. The
+        # original ASGI fixture manually posts the txn_id/CSRF body to bare
+        # /consent; this checks the additional real browser URI boundary.
+        self.assertIn('if ($mesh_tls_target = 0) { return 404; }', config)
+        self.assertIn('if ($mesh_tls_cookie = 0) { return 400; }', config)
+        self.assertEqual(('txn_id',), tls.OAUTH_QUERIES['/consent'])
+        consent = tls.oauth_query_pattern('/consent', tls.OAUTH_QUERIES['/consent'])
+        self.assertIsNotNone(re.fullmatch(consent, '/consent?txn_id=SYNTHETIC_TXN'))
+        for query in ('txn_id=SYNTHETIC_TXN&txn_id=duplicate', 'txn_id=x&unknown=x',
+                      'txn_id=bad%XX', 'txn_id=raw/value', 'txn_id=' + 'x' * 8193):
+            self.assertIsNone(re.fullmatch(consent, '/consent?' + query))
         self.assertIn('proxy_pass http://127.0.0.1:18686/cloud/node;', config)
         self.assertIn('if ($http_origin != "") { return 400; }', config)
         self.assertNotIn('proxy_pass http://127.0.0.1:17680', config)

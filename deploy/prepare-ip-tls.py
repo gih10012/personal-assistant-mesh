@@ -166,9 +166,13 @@ def oauth_maps():
 def oauth_route(config, path, methods, form=False, registration=False):
     lines = ['    location = ' + path + ' {',
              '        if ($request_method !~ "^(' + '|'.join(methods) + ')$") { return 405; }',
-             '        client_max_body_size ' + str(65536 if form or registration else 1024) + ';',
-             '        if ($mesh_oauth_post_query = 1) { return 404; }',
-             '        if ($mesh_oauth_body = 0) { return 413; }']
+             '        client_max_body_size ' + str(65536 if form or registration else 1024) + ';']
+    # The SDK browser form posts to /consent?txn_id=... . The server-wide
+    # $mesh_tls_target guard already permits only its one bounded, encoded,
+    # non-duplicate txn_id query; SDK body/CSRF/cookie validation remains intact.
+    if path != '/consent':
+        lines += ['        if ($mesh_oauth_post_query = 1) { return 404; }']
+    lines += ['        if ($mesh_oauth_body = 0) { return 413; }']
     if form or registration:
         lines += ['        if ($mesh_oauth_' + ('json' if registration else 'form') + ' = 0) { return 415; }']
     headers = forwarding(config['public_ip']).replace(
