@@ -39,7 +39,15 @@ Mesh目标与所有历史不重建。不把本地文档更新冒充远端agent�
 history中，独立关联实际工具调用/输出，核到完整角色合同及Claw CLI
 history/status/context。模型正确辨认内部同步、选择silent，原outbox
 保持170条，没有模板通知。它不是本人新微信、图片/文件或真实Leader
-转交验收；原Leader角色核读和旧needs_review结案仍待。
+转交验收。原Leader现已在原线程完成一次独立角色同步，完整5401B合同
+出现在已完成的真实工具输出中；原18632493B历史前缀逐字节保留。不是
+把文件安装、摘要或模型自报当作核读，也不代表所有离线agent均已核读。
+
+旧延期Chat九命令的已知效果已按原case唯一结案：完整备份/历史审计、
+真实host锁跨SQLite CAS与原回执读回，failed/deferred、epoch1→2；
+effects_zero=false，未重排原输入、未授权重试、未改旧chunks/native
+state。原Worker随后自然领取并完成三项原排队任务，线程不变、没有
+重启或恢复DB。旧浏览器queued/零发送意图保留，仍不主动唤起Chat。
 
 公网同一OAuth/MCP实例及窄路由已部署，外部公信HTTPS实测metadata200、
 无token MCP401且带正确认证challenge、管理`/v1/status`404。私有USER
@@ -55,14 +63,26 @@ OAuth；而公网metadata仍200、challenge正确。短时无凭据路径日志�
 官方Cloud的owner-initiated adopted-job`22bba5c`已独审并合入`e0738ef`；
 现成隔离venv的3项现代SDK回归通过、零skip。真实Store租约绑定及可
 关闭的薄runtime候选`2f9ed24`亦独审后合入`b348010`，作者13项针对性
-检查通过；它还没有在宿主3.6.8验证/部署，亦未有官方Cloud实际入网。
-不要让旧“Root先prepare/submit Cloud job”成为
+检查通过。冻结构建已合入`c54662f/443ad99`：从实际50模块receiver源码
+副本增量构建60模块，原48个字节不变；六个核心pins及闭包外45模块
+保持。实际宿主Python3.6.8已通过无DB/SDK导入与8项隔离runtime检查，
+零skip，但没有部署/真实Cloud入网。
+
+另已纠正一个入口边界：该runtime要求有效task/claim，只适合任务执行
+profile，不能代替Leader空闲时Cloud自己hello、查询或提交新命令的
+一般入口。独立Cloud入口正在并行实现：owner授权的有限期身份与任务
+执行租约分离，初始零任务也能连接；真正执行/steering仍校验原task和
+epoch。Chat/Cloud显式write-sync推进已保存的原回复，只读不偷偷执行、
+unknown不重投。不要让旧“Root先prepare/submit Cloud job”成为
 本人的自发Cloud入网前提；owner授权/未证实来源与官方provider核验分级，
 不凭自报URL造官方证明、不重放旧launch unknown。主动唤起仍延后。
 
-下一：沿实际错误定位普通Chat发现/授权与原插件绑定；沿已审原case核完整历史/
-真实host锁后结案旧延期任务，补原Leader核读/真实转交；部署Cloud薄
-入网与同身份双向桥。关键交付后微信邀请本人试用，不堆无关全量检查。
+下一：沿实际错误定位普通Chat发现/授权与原插件绑定，可选DNS兼容
+实验不等于已证明IP被禁；并行完成Cloud空闲入口和Chat显式sync，再
+由Root串行接公网/原authority。原Leader核读和旧case已完成，不重做；
+本人新消息/媒体/真实转交仍需实证。关键交付后微信邀请本人试用，
+不堆无关全量检查。本人本次提醒已再次核实原生Goal active，未新建/
+reset；额度中断专员实核停止后，沿原分支/线程/操作身份续接。
 见[当前实际交接](STATUS-2026-10-19.md)。
 
 ## 2026-10-17 检查点（以下保留历史）

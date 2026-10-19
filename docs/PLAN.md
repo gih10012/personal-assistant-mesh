@@ -44,25 +44,32 @@
    当前原表单发现请求已实际返回404“不实现OAuth”；公网发现端点正常，
    预期路径临时日志未见新客户端请求，根因未证。诊断配置已按原hash
    恢复；不凭此改schema、放宽认证或假定IP禁令，不重复Create。
-2. **Root／原Leader真实续接**：旧延期Chat已知效果候选及跨CAS持真实
-   host锁修复已集成；先fresh原case审计/完整备份核验，只结案failed/
-   deferred，不重排旧输入/改native state或覆盖旧chunks。随后补原连续
-   Leader角色核读及实际入口handoff，不绕旧guard新开Leader。
-3. **Cloud独审分支＋Root**：`22bba5c`已独审合入`e0738ef`；原隔离venv
-   的3项SDK回归通过/零skip。最小owner runtime `2f9ed24`也经独审后
-   合入`b348010`，13项作者检查通过。下一宿主3.6.8/冻结闭包验证、
-   真实有效claim及私有接线；不造任务/keeper或拿grammar当宿主实跑。
-   复用已有443窄`/cloud/node`、
-   CloudHTTPClient/enrollment和双向会话桥。本人Cloud任务自行入网，
-   不强迫Root先submit；未验证provider来源明确unattested，不能自报
-   成官方证明。安装/环境/凭据注入和真实Cloud消息/成果分别验，不新增
-   模型key/费用，不主动发Cloud job，不复制本机auth目录。
+2. **Root／原Leader已恢复，补实际入口handoff**：旧延期case已唯一
+   failed/deferred结案，真实host锁跨CAS/原回执读回并显式释放；未重排
+   原输入、未授权retry或改旧history/native state。原Worker自然完成
+   三项原排队任务，同原线程再完成角色核读：完整5401B合同存在于
+   已完成工具输出，原18632493B前缀保持。上述不重做、不重开Leader；
+   下一等本人真实新消息验证入口同thread/原ID转交，不伪造微信来验。
+3. **Cloud空闲入口＋显式双向sync并行**：任务绑定runtime已合入，
+   实际50→60模块冻结候选/六核心pins及宿主3.6.8无DB/SDK导入、8项
+   隔离检查均通过，尚未生产加载。它保留为有真实claim的执行profile，
+   不充当一般入口。Cloud需要owner有限期身份先连接，Leader空闲/
+   零任务时也能hello/read/submit；任务执行、提问及steering再绑定原
+   task/epoch。复用443窄`/cloud/node`、Ingress和现有双向桥，不造
+   keeper/假任务，不强迫Root先submit。另由Chat专员增加显式写scope
+   sync，Cloud复用同helper；推进已保存的原message/receipt，只读不
+   drain，unknown只查原回执。真实Cloud环境/hello/消息/成果仍待验，
+   provider未核明确unattested；不主动发job、不复制auth或新增费用。
 4. **本人验证**：入口首轮内部silent不等于本人新消息、媒体、连续后续
    与Leader转交成功；公网metadata/插件保存也不等于Chat授权。0/1/2
    真正可试用后ClawBot微信通知本人直接试，实际问题同通道联系。
 
-独立审查/实现继续分支并行，只有实际生产与GUI由Root串行。现源集成
-点`b348010`（生产公网仍冻结`69cde80`），新进展与private运行回执见
+独立审查/实现继续分支并行：Cloud idle入口、Chat显式sync、可选DNS/
+TLS兼容addon各自worktree，只有实际生产与GUI由Root串行。DNS是沿
+已观察发现错误的兼容实验，不是IP封禁结论；保留原IP证书/自动续期/
+回退，不放宽认证或开放管理API。额度中断按真实停止状态续原专员，
+不重放原操作。现源集成点`443ad99`（生产公网仍冻结`69cde80`），
+本人再次提醒时原生Goal仍active、不reset。新进展与private运行回执见
 [当前交接](STATUS-2026-10-19.md)。
 
 ## 2026-10-17 续接（保留历史，当前以上节为准）

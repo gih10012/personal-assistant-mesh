@@ -109,9 +109,17 @@ base源码manifest `aff7d6e64d3092208a7683cd4db1ffa6259b555890732245701780e63601
 `conversation_authority.py`，新增10个。闭包外45个原模块与六个核心均独立
 逐字节核对相等。该实际候选在本机3.14.7的 `-S -B` 子进程再次完成无
 SQLite连接/无SDK导入与原8项runtime检查、0skip。未读其他私有配置/DB，
-未执行生产或远端操作；宿主3.6.8两步检查仍待 Root 实跑。
+作者未执行生产或远端操作。其后Root已将同一归档传到VPS私有检查
+目录，在实际宿主Python3.6.8以`-S -B`完成上述两步：所有清单/核心
+hash、无SQLite连接/无SDK导入均通过，8项隔离runtime检查1.204s、
+零skip。没有安装生产grant、启动实际listener或调用模型/Cloud任务。
 
-Root 实际源码副本与宿主两步检查完成后，仍须独占审查/切换唯一receiver，
-保留原 ready hook、owner IPC、入口/Claw功能与 native pins；只新增 Cloud
-组件的 ready/finally 安装。真实 claim/grant、TLS/secret、官方Cloud自身
-连接与双向验收仍按原owner-runtime合同分别核实，整个Goal保持active。
+## 使用范围纠正
+
+这片候选保留为绑定真实task/claim的受管执行profile，不直接作为普通
+Cloud的一般入口：Leader空闲/零任务时，客户端也必须能用独立owner
+有限期身份hello、读状态和提交新任务。该入口与执行租约分离的薄
+适配另行实现；真正执行/steering仍保留原task/epoch校验，不造keeper。
+因此宿主检查通过不触发自动切换唯一receiver，更不冒称官方Cloud
+入网。未来确需该执行profile时再由Root独占接入，保留原ready hook、
+owner IPC、入口/Claw及native pins，真实claim/grant与Cloud双向分别验。
