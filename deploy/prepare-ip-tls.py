@@ -24,7 +24,7 @@ OAUTH_PATHS = ('/.well-known/oauth-authorization-server', '/authorize', '/token'
                '/register', '/auth/callback', '/consent')
 OAUTH_QUERIES = {
     '/authorize': ('response_type', 'client_id', 'redirect_uri', 'scope', 'state',
-                   'code_challenge', 'code_challenge_method', 'resource'),
+                   'code_challenge', 'code_challenge_method', 'resource', 'ui_locales'),
     '/auth/callback': ('code', 'state', 'error', 'error_description', 'error_uri'),
     '/consent': ('txn_id',)}
 OAUTH_FRONT_CHANNEL = ('/authorize', '/auth/callback', '/consent')

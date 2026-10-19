@@ -262,6 +262,25 @@ class IPTLSPreparationTests(unittest.TestCase):
             for prefix in ('//', '/%61', '/x/../'):
                 self.assertIsNone(re.fullmatch(pattern, prefix + path.lstrip('/') + '?' + keys[0] + '=x'))
 
+    def test_authorize_ui_locales_normal_client_shape_remains_closed(self):
+        pattern = tls.oauth_query_pattern('/authorize', tls.OAUTH_QUERIES['/authorize'])
+        # Synthetic values only; mirror the normal UI's observed key set.
+        pairs = [('response_type', 'code'),
+                 ('client_id', 'https%3A%2F%2Fchatgpt.com%2Foauth%2Fclient.json'),
+                 ('redirect_uri', 'https%3A%2F%2Fchatgpt.com%2Fconnector_platform_oauth_redirect'),
+                 ('scope', 'tasks%3Aread+tasks%3Asubmit'),
+                 ('code_challenge', 'a' * 43), ('code_challenge_method', 'S256'),
+                 ('resource', 'https%3A%2F%2F8-8-8-8.sslip.io%2Fmcp'),
+                 ('state', 'SYNTHETIC_STATE'), ('ui_locales', 'zh-CN')]
+        query = '/authorize?' + '&'.join(key + '=' + value for key, value in pairs)
+        self.assertIsNotNone(re.fullmatch(pattern, query))
+        for invalid in (query + '&ui_locales=en-US', query + '&unknown_hint=value',
+                        query.replace('ui_locales=', 'ui%5Flocales='),
+                        query.replace('ui_locales=zh-CN', 'ui_locales=bad%XX')):
+            self.assertIsNone(re.fullmatch(pattern, invalid))
+        callback = tls.oauth_query_pattern('/auth/callback', tls.OAUTH_QUERIES['/auth/callback'])
+        self.assertIsNone(re.fullmatch(callback, '/auth/callback?code=SYNTHETIC&ui_locales=zh-CN'))
+
     def test_oauth_front_channel_accepts_only_actual_quoted_base64_cookie_names(self):
         pattern = tls.oauth_cookie_pattern()
         state = '__Host-MCP_CONSENT_STATE_' + 'a' * 32
