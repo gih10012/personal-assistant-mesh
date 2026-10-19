@@ -1,0 +1,14 @@
+{
+  "format": "mesh-cloud-entrance-owner/1",
+  "directory": "/PRIVATE/cloud-entrance",
+  "conversation_directory": "/PRIVATE/cloud-entrance-conversation",
+  "ingress_client": "/PRIVATE/existing-dedicated-cloud-ingress-client.json",
+  "loopback_port": 18686,
+  "policy": {
+    "format": "mesh-cloud-entrance/1",
+    "owner_binding": "REPLACE_EXISTING_VERIFIED_MESH_OWNER_BINDING",
+    "subject": "REPLACE_EXISTING_FIXED_CLOUD_INGRESS_SUBJECT",
+    "project_id": "REPLACE_FIXED_PROJECT_ID",
+    "callback_url": "https://REPLACE_EXISTING_AUTHORIZED_HOST/cloud/node"
+  }
+}

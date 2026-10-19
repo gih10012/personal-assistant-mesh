@@ -1,0 +1,53 @@
+"""Root's private standalone loopback sidecar fragment, not the sole receiver.
+
+No OAuth/model/provider/task/claim is created. Ordinary startup never installs
+or renews a credential. Root keeps current HTTPS hosting and scoped ingress.
+"""
+import json
+from http.server import HTTPServer
+from socketserver import ThreadingMixIn
+
+from assistant_mesh.cloud_entrance import assemble
+from assistant_mesh.cloud_http import make_http_handler
+from assistant_mesh.native_messaging import _private_bytes, _unique, _nonfinite, client_from_config
+
+
+def private_document(path):
+    return json.loads(_private_bytes(path).decode('utf8'),
+                      object_pairs_hook=_unique, parse_constant=_nonfinite)
+
+
+def build(private_config):
+    document = private_document(private_config)
+    if (not isinstance(document, dict) or set(document) != {'format', 'directory', 'conversation_directory',
+            'ingress_client', 'loopback_port', 'policy'} or document['format'] != 'mesh-cloud-entrance-owner/1'):
+        raise ValueError('cloud_entrance_owner_configuration_required')
+    port = document['loopback_port']
+    if type(port) is not int or not 1024 <= port <= 65535:
+        raise ValueError('cloud_entrance_owner_loopback_port_required')
+    # This existing Client MUST authenticate at Mesh as role=ingress with the
+    # same owner/source=openai-codex-cloud/subject and only read/submit scopes.
+    # A client path or a GitHub/OpenAI/operator bearer is not that binding.
+    client = client_from_config(document['ingress_client'])
+    entrance = assemble(document['directory'], document['conversation_directory'], document['policy'], client)
+    handler = make_http_handler(entrance, document['policy']['callback_url'],
+                               trusted_proxy_peers=('127.0.0.1',), max_request_bytes=65536)
+    return entrance, handler, port
+
+
+def install_owner(entrance, private_grant, token_sha256, *, authorized=False):
+    # Explicit local owner operation only; never wired to /cloud/node.
+    # Hash is for the separately delegated Mesh credential, not a model key.
+    return entrance.install(private_document(private_grant), token_sha256=token_sha256, authorized=authorized)
+
+
+class LoopbackServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+def serve(private_config):
+    entrance, handler, port = build(private_config)
+    # Root integrates with its existing owned sidecar lifecycle. No Store,
+    # receiver, iLink poller, keeper, worker or background Cloud wake is started.
+    with LoopbackServer(('127.0.0.1', port), handler) as server:
+        server.serve_forever()

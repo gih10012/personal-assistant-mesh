@@ -1,0 +1,7 @@
+{
+  "format": "mesh-cloud-entrance-grant/1",
+  "grant_id": "REPLACE_ORIGINAL_OWNER_AUTHORIZATION_ID",
+  "entrance_id": "REPLACE_PURELY_DERIVED_ENTRANCE_ID_FROM_POLICY",
+  "expires_at": 0,
+  "scopes": ["node:hello", "tasks:read", "tasks:submit"]
+}
