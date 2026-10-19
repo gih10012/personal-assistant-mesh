@@ -25,7 +25,7 @@ OAUTH_PATHS = ('/.well-known/oauth-authorization-server', '/authorize', '/token'
 OAUTH_QUERIES = {
     '/authorize': ('response_type', 'client_id', 'redirect_uri', 'scope', 'state',
                    'code_challenge', 'code_challenge_method', 'resource', 'ui_locales'),
-    '/auth/callback': ('code', 'state', 'error', 'error_description', 'error_uri'),
+    '/auth/callback': ('code', 'state', 'error', 'error_description', 'error_uri', 'iss'),
     '/consent': ('txn_id',)}
 OAUTH_FRONT_CHANNEL = ('/authorize', '/auth/callback', '/consent')
 
@@ -123,9 +123,16 @@ def oauth_query_pattern(path, keys):
         # occurrence instead of a nested .* backtracking duplicate detector.
         other = r'(?:(?!' + re.escape(key) + r'=)[^&]+&)*'
         checks.append(r'(?!' + other + re.escape(key) + r'=[^&]*&' + other + re.escape(key) + r'=)')
-    names = '(?:' + '|'.join(re.escape(key) for key in keys) + ')'
+    github_issuer = path == '/auth/callback' and 'iss' in keys
+    names = '(?:' + '|'.join(re.escape(key) for key in keys
+                             if not (github_issuer and key == 'iss')) + ')'
     value = r'(?:[A-Za-z0-9._~+-]|%[0-9A-Fa-f]{2})*'
     item = names + '=' + value
+    if github_issuer:
+        # GitHub's observed upstream response issuer, not our downstream Mesh
+        # issuer. Preserve older responses without iss; when present accept
+        # only this exact encoded issuer (hex digit case may differ).
+        item = '(?:' + item + r'|iss=https%3[Aa]%2[Ff]%2[Ff]github\.com%2[Ff]login%2[Ff]oauth)'
     return (r'^' + re.escape(path) + r'\?(?=.{1,8192}$)' + ''.join(checks)
             + item + r'(?:&' + item + '){0,' + str(len(keys) - 1) + '}$')
 

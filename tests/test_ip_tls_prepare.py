@@ -248,8 +248,11 @@ class IPTLSPreparationTests(unittest.TestCase):
     def test_oauth_raw_queries_preserve_encoded_values_order_and_reject_unknown_duplicate_or_ambiguous_keys(self):
         for path, keys in tls.OAUTH_QUERIES.items():
             pattern = tls.oauth_query_pattern(path, keys)
-            forward = path + '?' + '&'.join(key + '=https%3A%2F%2Fexample.invalid%2Fcb%3Fx%3D1' for key in keys)
-            reverse = path + '?' + '&'.join(key + '=scope+with+spaces' for key in reversed(keys))
+            issuer = 'https%3A%2F%2Fgithub.com%2Flogin%2Foauth'
+            forward = path + '?' + '&'.join(key + '=' + (issuer if key == 'iss' else
+                'https%3A%2F%2Fexample.invalid%2Fcb%3Fx%3D1') for key in keys)
+            reverse = path + '?' + '&'.join(key + '=' + (issuer if key == 'iss' else
+                'scope+with+spaces') for key in reversed(keys))
             self.assertIsNotNone(re.fullmatch(pattern, forward))
             self.assertIsNotNone(re.fullmatch(pattern, reverse))
             self.assertIsNone(re.fullmatch(pattern, forward + '&' + keys[0] + '=again'))
@@ -280,6 +283,25 @@ class IPTLSPreparationTests(unittest.TestCase):
             self.assertIsNone(re.fullmatch(pattern, invalid))
         callback = tls.oauth_query_pattern('/auth/callback', tls.OAUTH_QUERIES['/auth/callback'])
         self.assertIsNone(re.fullmatch(callback, '/auth/callback?code=SYNTHETIC&ui_locales=zh-CN'))
+
+    def test_github_callback_issuer_is_optional_exact_and_not_a_general_query_bypass(self):
+        pattern = tls.oauth_query_pattern('/auth/callback', tls.OAUTH_QUERIES['/auth/callback'])
+        legacy = '/auth/callback?code=SYNTHETIC_CODE&state=SYNTHETIC_STATE'
+        issuer = 'https%3A%2F%2Fgithub.com%2Flogin%2Foauth'
+        self.assertIsNotNone(re.fullmatch(pattern, legacy))
+        for value in (issuer, issuer.replace('%3A', '%3a').replace('%2F', '%2f')):
+            self.assertIsNotNone(re.fullmatch(pattern, legacy + '&iss=' + value))
+            self.assertIsNotNone(re.fullmatch(pattern, '/auth/callback?iss=' + value +
+                '&state=SYNTHETIC_STATE&code=SYNTHETIC_CODE'))
+        for value in ('', 'https%3A%2F%2Fforeign.invalid%2Flogin%2Foauth',
+                      issuer + '%2F', issuer + '.invalid', issuer.replace('%3A', '%XX'),
+                      issuer.replace('%2F', '%252F'), 'https://github.com/login/oauth'):
+            self.assertIsNone(re.fullmatch(pattern, legacy + '&iss=' + value))
+        for suffix in ('&iss=' + issuer, '&code=OTHER', '&state=OTHER',
+                       '&unknown=value', '&i%73s=' + issuer):
+            self.assertIsNone(re.fullmatch(pattern, legacy + '&iss=' + issuer + suffix))
+        authorize = tls.oauth_query_pattern('/authorize', tls.OAUTH_QUERIES['/authorize'])
+        self.assertIsNone(re.fullmatch(authorize, '/authorize?iss=' + issuer))
 
     def test_oauth_front_channel_accepts_only_actual_quoted_base64_cookie_names(self):
         pattern = tls.oauth_cookie_pattern()
