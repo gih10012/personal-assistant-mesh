@@ -55,10 +55,19 @@ state。原Worker随后自然领取并完成三项原排队任务，线程不变
 MCP服务器”注册/正常OAuth，并将真实App绑定到原插件。两JSON包保存
 不等于普通Chat已连接，不能用桌面打开或Codex安装顶替。
 
-本次已在原表单取得实际发现错误：ChatGPT后台返回404，称目标不实现
+本次先在原IP表单取得实际发现错误：ChatGPT后台返回404，称目标不实现
 OAuth；而公网metadata仍200、challenge正确。短时无凭据路径日志只见
 本机校验，预期发现路径未见新的客户端HTTP；这不证明禁IP、缓存或TLS
 根因。临时配置已恢复原hash，TLS未restart；表单未提交，不重复建App。
+
+随后DNS兼容源码经独审合入`982b299`，已实际部署：同VPS免费hostname
+证书staging→production签发及模拟续期通过，独立DNS OAuth/MCP侧车、
+双host窄网关和12h DNS timer上线，原IP证书/侧车/续期保留。外部CA+
+hostname核验metadata200、MCP401正确challenge、管理404。原生Chat原
+表单换为该hostname后，实际自动发现OAuth并选中CIMD，旧错误不再
+出现；尚未Create、完成本人OAuth或App绑定。兼容成功不倒推IP根因。
+receiver/入口/原Leader Worker未为此重启；TLS为额外挂载明确受控重建，
+首个过早readiness失败的完整回退也保留，不声称TLS原PID未变。
 
 官方Cloud的owner-initiated adopted-job`22bba5c`已独审并合入`e0738ef`；
 现成隔离venv的3项现代SDK回归通过、零skip。真实Store租约绑定及可
@@ -70,16 +79,19 @@ OAuth；而公网metadata仍200、challenge正确。短时无凭据路径日志�
 
 另已纠正一个入口边界：该runtime要求有效task/claim，只适合任务执行
 profile，不能代替Leader空闲时Cloud自己hello、查询或提交新命令的
-一般入口。独立Cloud入口正在并行实现：owner授权的有限期身份与任务
+一般入口。独立Cloud入口已独审合入`b33fd4a`：owner授权的有限期身份与任务
 执行租约分离，初始零任务也能连接；真正执行/steering仍校验原task和
-epoch。Chat/Cloud显式write-sync推进已保存的原回复，只读不偷偷执行、
-unknown不重投。不要让旧“Root先prepare/submit Cloud job”成为
+epoch。Chat显式write-sync已合入`24052f0`，实际pinned SDK3项通过、
+零skip，新DNS侧车已包含其源码；仍无已授权Chat模型调用。Cloud共用
+该helper推进原回复，只读不执行、unknown不重投。可信source CLI已合入
+`e165f36`；实际50模块仅换authority的新receiver候选已准备，其余49/
+六核心保持，未宿主实跑或切换。不要让旧“Root先prepare/submit Cloud job”成为
 本人的自发Cloud入网前提；owner授权/未证实来源与官方provider核验分级，
 不凭自报URL造官方证明、不重放旧launch unknown。主动唤起仍延后。
 
-下一：沿实际错误定位普通Chat发现/授权与原插件绑定，可选DNS兼容
-实验不等于已证明IP被禁；并行完成Cloud空闲入口和Chat显式sync，再
-由Root串行接公网/原authority。原Leader核读和旧case已完成，不重做；
+下一：原Chat表单发现已通过，补现有GitHub App精确DNS callback、正常
+授权/App绑定；核候选后由Root串行接Cloud公网与原authority。DNS兼容
+成功不等于证明IP被禁。原Leader核读和旧case已完成，不重做；
 本人新消息/媒体/真实转交仍需实证。关键交付后微信邀请本人试用，
 不堆无关全量检查。本人本次提醒已再次核实原生Goal active，未新建/
 reset；额度中断专员实核停止后，沿原分支/线程/操作身份续接。

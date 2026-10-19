@@ -44,6 +44,9 @@
    当前原表单发现请求已实际返回404“不实现OAuth”；公网发现端点正常，
    预期路径临时日志未见新客户端请求，根因未证。诊断配置已按原hash
    恢复；不凭此改schema、放宽认证或假定IP禁令，不重复Create。
+   随后DNS证书签发、独立侧车及双TLS已实际上线，原IP路径保留；
+   原表单已自动发现并选中CIMD，尚未Create或授权。下一复用现有
+   GitHub身份App增加精确DNS callback，再继续正常注册/本人OAuth。
 2. **Root／原Leader已恢复，补实际入口handoff**：旧延期case已唯一
    failed/deferred结案，真实host锁跨CAS/原回执读回并显式释放；未重排
    原输入、未授权retry或改旧history/native state。原Worker自然完成
@@ -53,13 +56,17 @@
 3. **Cloud空闲入口＋显式双向sync并行**：任务绑定runtime已合入，
    实际50→60模块冻结候选/六核心pins及宿主3.6.8无DB/SDK导入、8项
    隔离检查均通过，尚未生产加载。它保留为有真实claim的执行profile，
-   不充当一般入口。Cloud需要owner有限期身份先连接，Leader空闲/
+   不充当一般入口。Cloud空闲入口已独审合入`b33fd4a`，owner有限期身份先连接，Leader空闲/
    零任务时也能hello/read/submit；任务执行、提问及steering再绑定原
    task/epoch。复用443窄`/cloud/node`、Ingress和现有双向桥，不造
-   keeper/假任务，不强迫Root先submit。另由Chat专员增加显式写scope
-   sync，Cloud复用同helper；推进已保存的原message/receipt，只读不
+   keeper/假任务，不强迫Root先submit。Chat显式写scope sync已合入
+   `24052f0`，实际pinned SDK3项/零skip；Cloud复用同helper，原message/
+   receipt保持，只读不
    drain，unknown只查原回执。真实Cloud环境/hello/消息/成果仍待验，
    provider未核明确unattested；不主动发job、不复制auth或新增费用。
+   owner source CLI已合入`e165f36`，实际50模块最小候选仅改authority，
+   其余49/六核心保持。下一宿主小检查、专属peer/明确source allowlist
+   与受控唯一receiver接线，不部署不必要的60模块task-bound profile。
 4. **本人验证**：入口首轮内部silent不等于本人新消息、媒体、连续后续
    与Leader转交成功；公网metadata/插件保存也不等于Chat授权。0/1/2
    真正可试用后ClawBot微信通知本人直接试，实际问题同通道联系。
@@ -68,7 +75,8 @@
 TLS兼容addon各自worktree，只有实际生产与GUI由Root串行。DNS是沿
 已观察发现错误的兼容实验，不是IP封禁结论；保留原IP证书/自动续期/
 回退，不放宽认证或开放管理API。额度中断按真实停止状态续原专员，
-不重放原操作。现源集成点`443ad99`（生产公网仍冻结`69cde80`），
+不重放原操作。现源集成点`e165f36`；原IP公网仍冻结`69cde80`，新DNS
+侧车精确`24052f0`已实际加载，receiver仍旧50模块源、未切新候选。
 本人再次提醒时原生Goal仍active、不reset。新进展与private运行回执见
 [当前交接](STATUS-2026-10-19.md)。
 
