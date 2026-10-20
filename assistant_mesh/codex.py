@@ -18,6 +18,7 @@ from .config import discover_codex_auth, private_json
 from .codex_provider import custom_provider, private_profile_home, provider_overrides
 from .model_provider_policy import validate_provider_cost
 from .native_ws import NativeSocketError, UnixWebSocket, _private_socket
+from .reasoning import prepare_turn
 
 
 class CodexError(ValueError):
@@ -520,6 +521,7 @@ class Codex:
                 or getattr(self, '_term_sent', False) is True
                 or (getattr(self, 'native_lifecycle', {}) or {}).get('outcome') == 'drained_unverified'):
             raise CodexError('codex_native_drain_rpc_blocked')
+        self.reasoning_selection = None
         # Worker callbacks update the live task checkpoint synchronously.
         # Preserve the prior native authority before any such callback replaces
         # its lifecycle; otherwise a yielded goal can silently lose its guard.
@@ -637,9 +639,24 @@ class Codex:
         # goal/set on an idle thread can create its own automatic turn; starting
         # another user turn after that would race/duplicate native generation.
         if not requested_goal or requested_goal.get('status', 'active') == 'active':
-            self._activity('native_start_intent', {'thread_id': self.thread_id,
-                           'method': 'turn/start', 'goal_managed': self.native_lifecycle['goal_managed']})
-            started = self.rpc('turn/start', turn, timeout=60)
+            turn, selection = prepare_turn(self.rpc, turn, self.model,
+                                          self.config.get('reasoning_effort'))
+            if selection is not None:
+                self.reasoning_selection = selection
+                self.native_lifecycle['reasoning_selection'] = selection
+            intent = {'thread_id': self.thread_id, 'method': 'turn/start',
+                      'goal_managed': self.native_lifecycle['goal_managed']}
+            if selection is not None:
+                intent['native_lifecycle'] = self.native_lifecycle
+            self._activity('native_start_intent', intent)
+            try:
+                started = self.rpc('turn/start', turn, timeout=60)
+            except BaseException:
+                if selection is not None:
+                    selection['status'] = 'unknown'
+                raise
+            if selection is not None:
+                selection.update(status='accepted', turn_id=started['turn']['id'])
             self._adopt_turn(started['turn'], receipt=True)
         if requested_goal:
             self._activity('native_start_intent', {'thread_id': self.thread_id,
