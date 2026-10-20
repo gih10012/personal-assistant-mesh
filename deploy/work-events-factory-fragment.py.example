@@ -1,22 +1,25 @@
 """Private-factory ASSEMBLY TEMPLATE, not a deploy/daemon/credential factory.
 
 Root keeps its current file loading, paths, App/OAuth config and one process.
-Pass the already-loaded documents; do not import/run this example in production
-until the CURRENT account-grant reader has been reviewed for the pinned engine.
-No static True, registered-client/consent existence or PID is a grant reader.
+Pass the already-loaded documents. Current grants reuse the original provider;
+no static True, registered-client/consent existence or PID is a grant reader.
 """
-import inspect
 
-from assistant_mesh.chat_github_oauth import create_app, validate_config
+import json
+import os
+
+from assistant_mesh.chat_github_oauth import create_app as build_app, validate_config
 from assistant_mesh.conversation_event_feed import project_policies
 from assistant_mesh.conversation_runtime import load_context
 from assistant_mesh.mcp_event_sources import (
     ProjectEventAccess, RemoteReceiptSource, attach_lifecycle)
 from assistant_mesh.mcp_events import MCPEvents
+from assistant_mesh.mcp_event_grants import CurrentOAuthGrants
 from assistant_mesh.mcp_http_auth import NotConfigured, SOURCE
+from assistant_mesh.native_messaging import _private_bytes, _unique, _nonfinite
 
 
-def _event_policy(document, account_active):
+def _event_policy(document):
     if document is None:
         return None  # Preserve existing factory's no-Events behavior.
     if (not isinstance(document, dict)
@@ -24,52 +27,66 @@ def _event_policy(document, account_active):
             or type(document.get('enabled')) is not bool):
         raise NotConfigured('work_events_private_configuration_required')
     if document['enabled'] is False:
-        if set(document) != {'format', 'enabled'}:
+        if not set(document) <= {'format', 'enabled', 'directory', 'project_policies'}:
             raise NotConfigured('work_events_disabled_configuration_shape')
         return None
-    if (set(document) != {'format', 'enabled', 'directory', 'project_policies'}
-            or not callable(account_active) or inspect.iscoroutinefunction(account_active)):
-        raise NotConfigured('work_events_real_sync_account_grant_reader_required')
+    if set(document) != {'format', 'enabled', 'directory', 'project_policies'}:
+        raise NotConfigured('work_events_private_configuration_required')
     project_policies(document['project_policies'])
     return document
 
 
-def assemble(oauth_document, runtime_document, *, event_document=None, account_active=None):
+def assemble(oauth_document, runtime_document, *, event_document=None):
     """Replace only the original factory's assembly call, NOT its secret loading.
 
-    account_active(principal) must synchronously query actual current account/
-    subject authorization and return STRICT True. If the real grant authority
-    is async, Root must first review an existing-loop bridge; do not invoke
-    asyncio.run on that event loop or substitute a cached installation claim.
-    The current template deliberately supplies NO fake checker implementation.
+    The CurrentOAuthGrants loop bridge is installed BEFORE the Events lifecycle,
+    so its synchronous checker runs on the original OAuth ASGI loop. No async
+    component is run on a second event loop and no configurable boolean checker
+    or model-provided grant is accepted.
     """
-    event_policy = _event_policy(event_document, account_active)
+    event_policy = _event_policy(event_document)
     # Exact same original load_context creates one backend/service/bridge/client.
     backend, service, bridge = load_context(runtime_document)
     oauth = dict(oauth_document)
-    old_clients = oauth.pop('ingress_clients', None)
+    if 'ingress_clients' not in oauth:
+        raise NotConfigured('work_events_original_ingress_client_required')
+    old_clients = oauth.pop('ingress_clients')
     expected_clients = {runtime_document['subject']: runtime_document['ingress_client']}
-    if old_clients is not None and old_clients != expected_clients:
+    if old_clients != expected_clients:
         raise NotConfigured('work_events_original_ingress_client_changed')
     policy = validate_config(oauth)['policy']
     if (policy['owner_binding'] != runtime_document['owner_id']
             or {entry['mesh_subject'] for entry in policy['subjects']} != {runtime_document['subject']}):
         raise NotConfigured('work_events_original_owner_subject_changed')
 
-    events = source = None
+    events = source = grants = None
     if event_policy is not None:
-        grants = project_policies(event_policy['project_policies'])
-        if set(grants) != {(SOURCE, runtime_document['subject'])}:
+        project_grants = project_policies(event_policy['project_policies'])
+        if set(project_grants) != {(SOURCE, runtime_document['subject'])}:
             raise NotConfigured('work_events_original_project_grant_binding_required')
-        access = ProjectEventAccess(policy, event_policy['project_policies'], account_active=account_active)
+        grants = CurrentOAuthGrants(event_policy['directory'], policy)
+        access = ProjectEventAccess(policy, event_policy['project_policies'], account_active=grants.account_active)
         events = MCPEvents(event_policy['directory'], policy['owner_binding'], authorize=access)
         # Reuse the ORIGINAL bridge's authenticated ingress Client/principal.
         # Do not reread a different config, make an operator client or pass JWTs.
         source = RemoteReceiptSource(bridge.client, bridge.principal, access)
 
-    provider, server, app = create_app(oauth, backend=backend,
+    provider, server, app = build_app(oauth, backend=backend,
         conversation_service=service, event_service=events)
     if source is not None:
+        grants.install(provider, server, app)
         # Wrap rather than replace the original OAuth/SDK lifespan and contexts.
         attach_lifecycle(app, events, source, enabled=True)
     return provider, server, app
+
+
+def load(path):
+    return json.loads(_private_bytes(path).decode('utf8'), object_pairs_hook=_unique, parse_constant=_nonfinite)
+
+
+def create_app():
+    """Same existing factory entrypoint/env names; optional Events file only."""
+    oauth = load(os.environ['MESH_CHAT_OAUTH_CONFIG'])
+    runtime = load(os.environ['MESH_CONVERSATION_CONFIG'])
+    event_path = os.environ.get('MESH_WORK_EVENTS_CONFIG')
+    return assemble(oauth, runtime, event_document=load(event_path) if event_path else None)[2]

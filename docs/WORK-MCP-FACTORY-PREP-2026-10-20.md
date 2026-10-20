@@ -1,5 +1,10 @@
 # Same-ASGI Work Events factory: read-only deployment preparation
 
+The following is the historical `395c94a` preparation/checkpoint. Root has now
+provided the actual pinned pure source and factory shape; the implemented
+[current-grant wiring](WORK-MCP-OAUTH-GRANTS-2026-10-20.md) supersedes its missing
+checker gate. Deployment and actual-account acceptance remain Root operations.
+
 Base `906be49`; independent `work/work-mcp-factory-prep-20261020` branch in the
 original Events worktree. No production read/write, GUI, account, callback,
 model, dependency installation or old8+2 test rerun. The supplied fragment is a
