@@ -45,7 +45,7 @@ class ConversationFinalCandidateTests(unittest.TestCase):
                 builder.build(base, target, '0' * 64, ROOT)
             self.assertFalse(target.exists())
             report = builder.build(base, target, pin, ROOT)
-            self.assertEqual(9, len(report['overlay_modules']))
+            self.assertEqual(10, len(report['overlay_modules']))
             allowed = {'assistant_mesh/' + name for name in builder.SUPPORT_SHA256}
             allowed.update(('assistant_mesh/store.py', 'assistant_mesh/legacy_fenced_receiver.py'))
             for name, expected in builder.inspect_base(base)['source_sha256'].items():
@@ -58,7 +58,7 @@ from pathlib import Path
 def no_database(*args, **kwargs):
     raise AssertionError('import must not open a ledger')
 sqlite3.connect = no_database
-from assistant_mesh import server, conversation_final, conversation_emit
+from assistant_mesh import server, conversation_final, conversation_emit, conversation_event_feed
 from assistant_mesh.legacy_fenced_receiver import _check_frozen_source
 from assistant_mesh.entrance_runtime import serve_entrance
 from assistant_mesh.conversation_runtime import ConversationBridge

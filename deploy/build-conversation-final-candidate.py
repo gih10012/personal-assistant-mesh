@@ -27,6 +27,7 @@ CORE_SHA256 = {
 FINAL_STORE_SHA256 = 'be2df48e03021f48c382efc4690fa7a8ee5e67da8bd93497e725566532e30c0b'
 PATCH_SHA256 = '1c9285211430e15b3c753082ae54db35cf1cd220fc884cebe17712a0fd6dd3ec'
 SUPPORT_SHA256 = {
+    'conversation_event_feed.py': '61ea42be1543137bb6afbe3ca40d8ab32bf354f72938c1309f5b6107ef03132b',
     'conversation_final.py': '87a44d7763822680e7264c3cef755fd9ac1a04ab43e744eaa959532159773652',
     'conversation_emit.py': '62cdbd46cec437e69f365f298852e1b05b036a15291356235952e0900ac66547',
     'conversation.py': 'ba39fd3f96f11743aab24eb2c992810fdaa4cbe629c18b17f286862d0949644d',
@@ -85,7 +86,7 @@ def _parse(data):
 
 
 def _closure(overlay):
-    pending, reached, boundaries, graph = ['conversation_final', 'conversation_emit', 'conversation_sync'], set(), set(), {}
+    pending, reached, boundaries, graph = ['conversation_final', 'conversation_emit', 'conversation_sync', 'conversation_event_feed'], set(), set(), {}
     while pending:
         name = pending.pop()
         if name in reached:

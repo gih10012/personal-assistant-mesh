@@ -81,9 +81,10 @@ human_reviewed=false；execution_verified 仍保守，不把 `live=false`
    都拒绝。不将现代 Store/Worker 复制进去，也不启动 candidate。
 
 2. 在原宿主做必要无 DB/SDK 导入及准确 source hash 核验；现代 Python
-   的3.6 grammar 检查不是宿主3.6.8实跑证据。完整固定九库是：
+   的3.6 grammar 检查不是宿主3.6.8实跑证据。随Work私有feed集成后固定十库是：
    `conversation_final, conversation_emit, conversation, conversation_runtime,
-   conversation_authority, conversation_sync, ingress, ingress_backend, mcp_http_auth`。
+   conversation_authority, conversation_sync, ingress, ingress_backend, mcp_http_auth,
+   conversation_event_feed`。
    特别 `conversation -> mcp_http_auth` 不得漏。`LocalIngressBackend` /
    `RemoteIngressBackend` 从现代 MCP 模块原样窄提至纯 `ingress_backend`；
    `mcp_http` reexport 保持旧调用 API，runtime 直接依赖纯库。冻结
@@ -93,7 +94,7 @@ human_reviewed=false；execution_verified 仍保守，不把 `live=false`
    builder report 逐文件 hashes、import_graph、changed_original_files 可复核。
    receiver 只 import 纯库，绝不在3.6调用现代 SDK `create_server`。独立
    Events 合并只需保留 `mcp_http` 的 backend reexport，其变动不改变
-   此冻结九库闭包/pins。
+   此冻结纯库闭包/pins。
 
 3. Root 保留原 ready/IPC/Claw hooks，配置只给原 Leader peer 加有限
    `owner.conversation.final`（需要显式进度 CLI 时另给 emit grant）；
