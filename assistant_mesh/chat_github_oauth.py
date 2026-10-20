@@ -113,7 +113,8 @@ def _private_component_logs():
                 logger.addFilter(_PrivateOAuthLog())
 
 
-def create_app(document, *, backend, conversation_service=None, allow_loopback_for_tests=False, http_client=None):
+def create_app(document, *, backend, conversation_service=None, event_service=None,
+               allow_loopback_for_tests=False, http_client=None):
     """Owner-installed factory; not a public daemon or GitHub App creator.
 
     http_client is only an owner-code seam for a synthetic IdP transport in
@@ -334,6 +335,7 @@ def create_app(document, *, backend, conversation_service=None, allow_loopback_f
 
     server, resource_app = create_server(policy, token_verifier=ProxyResourceVerifier(), backend=backend,
                                          conversation_service=conversation_service,
+                                         event_service=event_service,
                                          allow_loopback_for_tests=allow_loopback_for_tests)
     # Keep the existing resource's metadata/challenge and three tools. Only the
     # established AS routes are mounted; no generic Mesh/Store API appears here.
