@@ -41,8 +41,18 @@ SYSTEMD_FIELDS = ('Id', 'LoadState', 'ActiveState', 'SubState', 'MainPID', 'Cont
 def load(path, expired=False):
     raw, version = util.read_checked(path, private=True, limit=util.MAX_SPEC)
     spec = parse(raw.decode('utf8'))
-    util.exact(spec, ('protocol', 'case', 'issued_at', 'expires_at', 'worker_config',
-        'server_config', 'review_root', 'expected', 'backup', 'closure'), 'abandon_spec_shape')
+    fields = {'protocol', 'case', 'issued_at', 'expires_at', 'worker_config',
+              'server_config', 'review_root', 'expected', 'backup', 'closure'}
+    require(isinstance(spec, dict) and fields <= set(spec)
+            and not set(spec) - fields - {'backup_verification'}, 'abandon_spec_shape')
+    if 'backup_verification' in spec:
+        offhost = spec['backup_verification']
+        util.exact(offhost, ('mode', 'snapshot_path', 'snapshot_sha256', 'receipt_path', 'receipt_sha256'),
+                   'abandon_offhost_verification_shape')
+        require(offhost['mode'] == 'owner-off-host', 'abandon_offhost_verification_mode')
+        for key in ('snapshot_sha256', 'receipt_sha256'):
+            require(isinstance(offhost[key], str) and re.fullmatch('[0-9a-f]{64}', offhost[key]),
+                    'abandon_offhost_digest_required')
     require(spec['protocol'] == PROTOCOL and spec['case'] == CASE, 'abandon_case_required')
     start, end = spec['issued_at'], spec['expires_at']
     require(type(start) in (int, float) and type(end) in (int, float)
@@ -170,6 +180,12 @@ def native(spec, value):
                 'abandon_exact_ns_strings_required')
         expected[key] = int(expected[key])
     require(version == expected and exp['old_artifact']['raw_size'] < len(raw), 'abandon_full_history_changed')
+    native_records(raw, exp, value)
+    return raw, version
+
+
+def native_records(raw, exp, value):
+    """Same full-record checks for local file bytes and owner-off-host copies."""
     active, lines, calls, outputs, counts = False, [], [], [], {}
     for number, line in enumerate(raw.splitlines(True)):
         require(line.endswith(b'\n'), 'abandon_incomplete_native_record')
@@ -203,7 +219,14 @@ def native(spec, value):
     expected_calls = [{key: tool[key] for key in ('call_id', 'input', 'input_sha256')} for tool in exp['tools']]
     expected_outputs = [(tool['call_id'], tool['output_canonical_sha256']) for tool in exp['tools']]
     require(calls == expected_calls and outputs == expected_outputs, 'abandon_original_execs_changed')
-    return raw, version
+
+
+def offhost_module():
+    loader = importlib.util.spec_from_file_location('_entrance_offhost_verifier',
+        str(Path(__file__).with_name('verify_entrance_backup_offhost.py')))
+    module = importlib.util.module_from_spec(loader)
+    loader.loader.exec_module(module)
+    return module
 
 
 def closure(spec):
@@ -293,6 +316,8 @@ def closure(spec):
 
 def verify_backup(spec, auth, before):
     """Audited deferred-review pattern: complete gzip/SQL, disposable DB only."""
+    if 'backup_verification' in spec:
+        return offhost_module().check_receipt(spec, auth, before)
     pin = spec['backup']; path = Path(pin['path'])
     version = util.digest_checked_backup(path)
     require(version['sha256'] == pin['sha256'] and version['size'] == pin['size'], 'abandon_backup_changed')
@@ -348,6 +373,12 @@ def verify_backup(spec, auth, before):
     return version
 
 
+def repeat_backup(spec, auth, before, expected):
+    if 'backup_verification' in spec:
+        return offhost_module().check_receipt(spec, auth, before) == expected
+    return util.digest_checked_backup(spec['backup']['path']) == expected
+
+
 def inspect(path):
     spec, version = load(path); auth = authority(spec)
     live = closure(spec)
@@ -362,7 +393,7 @@ def inspect(path):
 
 def receipt_for(spec):
     exp = spec['expected']; identifier = case_id(spec)
-    return {'protocol': PROTOCOL, 'id': identifier, 'task_id': exp['task_id'],
+    receipt = {'protocol': PROTOCOL, 'id': identifier, 'task_id': exp['task_id'],
         'source_epoch': exp['epoch'], 'closed_epoch': exp['epoch'] + 1, 'status': 'failed',
         'owner_decision': 'owner-abandoned-unknown', 'native_outcome': 'unknown',
         'native_terminal_proven': False, 'historical_reader_eof_proven': False,
@@ -370,6 +401,13 @@ def receipt_for(spec):
         'complete_artifact': digest([NAMESPACE, 'full-history', identifier]),
         'full_rollout_sha256': exp['rollout_file']['sha256'], 'native_session_state_changed': False,
         'old_chunks_changed': False, 'retry_authorized': False}
+    if 'backup_verification' in spec:
+        receipt['backup_verification'] = {
+            'mode': 'owner-off-host', 'snapshot_sha256': spec['backup_verification']['snapshot_sha256'],
+            'receipt_sha256': spec['backup_verification']['receipt_sha256'],
+            'authority_basis': 'explicit-owner-final-spec-sha256', 'host_attestation': False,
+            'complete_backup_verified_on_apply_host': False}
+    return receipt
 
 
 def closed_task(before, spec):
@@ -453,7 +491,7 @@ def apply(path, approved_sha256):
                 require(load(path)[1] == version and authority(spec) == auth, 'abandon_controls_cas_changed')
                 require(selected(db, auth, spec) == before and native(spec, before)[1] == context['rollout'],
                         'abandon_original_cas_changed')
-                require(util.digest_checked_backup(spec['backup']['path']) == context['backup']
+                require(repeat_backup(spec, auth, before, context['backup'])
                         and util.read_checked(history, private=True)[1] == packed_version
                         and closure(spec) == context['closure'], 'abandon_evidence_cas_changed')
                 db.execute('CREATE TABLE IF NOT EXISTS ' + TABLE + '''(
@@ -488,6 +526,8 @@ def apply(path, approved_sha256):
                         try:
                             require(load(path)[1] == version and authority(spec) == auth
                                     and native(spec, before)[1] == context['rollout']
+                                    and ('backup_verification' not in spec
+                                         or repeat_backup(spec, auth, before, context['backup']))
                                     and closure(spec) == context['closure'], 'abandon_commit_boundary_changed')
                         except (OSError, ValueError, subprocess.SubprocessError):
                             return sqlite3.SQLITE_DENY
@@ -496,7 +536,10 @@ def apply(path, approved_sha256):
             except BaseException:
                 db.rollback(); raise
         require(status(path, current_session=True)['applied'] is True
-                and closure(spec) == context['closure'], 'abandon_same_case_readback_required')
+                and closure(spec) == context['closure']
+                and ('backup_verification' not in spec
+                     or offhost_module().evidence_unchanged(spec, context['backup'])),
+                'abandon_same_case_readback_required')
         util.write_json(directory / '07-receipt.json', receipt)
         return dict(receipt, applied=True, outcome_unknown=False)
     except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
@@ -519,7 +562,7 @@ def main(argv=None):
         else:
             context = inspect(args.spec_file)
             answer = dict(receipt_for(context['spec']), eligible=True, applied=False, read_only=True,
-                          backup_sha256=context['backup']['sha256'])
+                          backup_sha256=context['spec']['backup']['sha256'])
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError) as error:
         answer = {'protocol': PROTOCOL, 'eligible': False, 'applied': False,
                   'code': str(error) if isinstance(error, util.ReviewDenied) else 'abandon_review_unavailable'}
