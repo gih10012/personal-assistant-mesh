@@ -471,6 +471,7 @@ def supervise(manager, request_id):
             manager._update(request_id, status='running', native_pid=process.pid,
                             cli_selection_sent=True, effective_verified=False)
             buffer = b''
+            oversized_line = False
             stop_deadline = None
             dead_at = None
             while True:
@@ -507,6 +508,9 @@ def supervise(manager, request_id):
                         buffer += data
                         while b'\n' in buffer:
                             line, buffer = buffer.split(b'\n', 1)
+                            if oversized_line or len(line) > 4 * MAX_PROMPT:
+                                oversized_line = False
+                                continue
                             try:
                                 event = json.loads(line.decode('utf8'))
                             except (ValueError, UnicodeError):
@@ -520,7 +524,10 @@ def supervise(manager, request_id):
                             if event.get('type') == 'turn.completed':
                                 completed = True
                         if len(buffer) > 4 * MAX_PROMPT:
-                            raise AgentError('agent_event_line_too_large')
+                            # Keep all original bytes on disk; a very large tool
+                            # output is not grounds to abort native capabilities.
+                            buffer = b''
+                            oversized_line = True
                 # WNOWAIT leaves the exact child PID reserved until all signals
                 # to its owned group finish; PID/PGID reuse cannot target a new
                 # unrelated process in the completion/stop race.
