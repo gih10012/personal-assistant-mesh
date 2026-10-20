@@ -56,17 +56,19 @@ human_reviewed=false；execution_verified 仍保守，不把 `live=false`
 ## Root 最短 source → 私有接线 → 回退
 
 1. 对当前唯一 receiver 的**源码副本**运行 builder inspect；不向 builder
-   传 state/DB/配置目录。Root 报告的当前50模块 base manifest 为
-   `c2dc96ab64dfa78256f409ab7f4e5a6aae35b1304d8a299e0fed1f3de4889b77`。
+   传 state/DB/配置目录。Root 报告的50 package模块、文件名不带prefix的
+   聚合 hash `c2dc96ab64dfa78256f409ab7f4e5a6aae35b1304d8a299e0fed1f3de4889b77`
+   **不是**此 builder 所需的全base manifest，不能拿来传构建参数。
    聚合规则为 `sha256(data) + '  ' + 相对文件名 + '\n'` 排序后再 SHA256，
    与既有 Cloud source builder 相同，含原顶层 `.py` launch hooks；
-   manifest 与单个 report 文件 hash 不是同一个值。确认实际副本一致再构建：
+   manifest 与单个 report 文件 hash 也不是同一个值。先检查实际副本，
+   只将 inspect 输出的 `base_manifest_sha256` 原值传给下一步：
 
    ```bash
    python3 -B deploy/build-conversation-final-candidate.py --base-root /PRIVATE/READONLY_RECEIVER_SOURCE
    python3 -B deploy/build-conversation-final-candidate.py \
      --base-root /PRIVATE/READONLY_RECEIVER_SOURCE --destination /PRIVATE/NEW_FINAL_CANDIDATE \
-     --base-manifest-sha256 c2dc96ab64dfa78256f409ab7f4e5a6aae35b1304d8a299e0fed1f3de4889b77
+     --base-manifest-sha256 ACTUAL_INSPECT_FULL_BASE_MANIFEST_SHA256
    ```
 
    输入 Store 必须为 `081633994459ffd2fb253e5514ea398d011b0eb8adcf059b251bbde10a705f08`；
