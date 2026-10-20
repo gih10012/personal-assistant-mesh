@@ -264,9 +264,11 @@ class AgentManager:
                          'model': model, 'reasoning_effort': effort, 'session_id': None}
             else:
                 agent = dict(self._known(value, agent_id))
-                old = value['requests'][agent['current_request_id']]
+                prior_request_id = agent['current_request_id']
+                old = value['requests'][prior_request_id]
                 if old['status'] != 'completed' or not agent.get('session_id'):
                     raise AgentError('agent_prior_turn_not_safely_completed')
+                prior_session_id = agent['session_id']
                 cwd, model, effort = agent['cwd'], agent['model'], agent['reasoning_effort']
             revision = agent['revision']
         receipt = self.validator(agent_id, model, effort)
@@ -285,8 +287,14 @@ class AgentManager:
                 return self._status(value, agent_id, replayed=True, request_id=request_id)
             if operation == 'spawn' and agent_id in value['agents']:
                 raise AgentError('agent_already_exists')
-            if operation == 'resume' and self._known(value, agent_id)['revision'] != revision:
-                raise AgentError('agent_profile_changed_before_launch')
+            if operation == 'resume':
+                current = self._known(value, agent_id)
+                if current['revision'] != revision:
+                    raise AgentError('agent_profile_changed_before_launch')
+                if (current.get('current_request_id') != prior_request_id
+                        or current.get('session_id') != prior_session_id
+                        or value['requests'][prior_request_id]['status'] != 'completed'):
+                    raise AgentError('agent_prior_turn_changed_before_launch')
             # Persist the original intent before launching anything. Crash or
             # observation loss leaves it unknown: same ID only queries it.
             _write(request_root / 'prompt.txt', prompt.encode('utf8'))

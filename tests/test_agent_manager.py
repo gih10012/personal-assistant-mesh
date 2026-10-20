@@ -6,6 +6,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -171,6 +172,48 @@ print(json.dumps({'type':'turn.completed','usage':{}}))
         self.assertEqual('complete-one', original['request_id'])
         self.assertEqual('completed', original['status'])
         self.assertEqual('low', original['selection']['reasoning_effort'])
+
+    def test_two_concurrent_resumes_cannot_both_claim_the_same_completed_turn(self):
+        with patch('assistant_mesh.agent_manager.subprocess.Popen') as spawn:
+            spawn.return_value.pid = 987654
+            self.manager.spawn('original-complete', 'worker-one', str(self.root),
+                               'No model in concurrent-resume fixture.', 'synthetic-native', 'low')
+        self.manager._update('original-complete', status='completed',
+                             session_id='synthetic-original-thread', outcome_unknown=False)
+        barrier = threading.Barrier(2)
+        validated = self.manager.validator
+
+        def concurrent_validate(identity, model, effort):
+            receipt = validated(identity, model, effort)
+            barrier.wait(timeout=3)
+            return receipt
+
+        self.manager.validator = concurrent_validate
+        results, errors = [], []
+
+        def resume(request):
+            try:
+                results.append(self.manager.resume(request, 'worker-one', 'New explicit input: ' + request))
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch('assistant_mesh.agent_manager.subprocess.Popen') as spawn:
+            spawn.return_value.pid = 987654
+            threads = [threading.Thread(target=resume, args=(name,)) for name in ('resume-A', 'resume-B')]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+                self.assertFalse(thread.is_alive())
+            spawn.assert_called_once()
+        self.assertEqual(1, len(results))
+        self.assertEqual(1, len(errors))
+        self.assertIsInstance(errors[0], AgentError)
+        self.assertEqual('agent_prior_turn_changed_before_launch', str(errors[0]))
+        with self.manager._locked() as value:
+            self.assertEqual(results[0]['request_id'], value['agents']['worker-one']['current_request_id'])
+            self.assertEqual(2, len(value['requests']))
+            self.assertEqual('completed', value['requests']['original-complete']['status'])
 
 
 if __name__ == '__main__':
