@@ -239,6 +239,9 @@ class Ingress:
                        (request_key, binding['source'], binding['subject'], request_id,
                         fingerprint, encoded, task_id, self.store.clock()))
             row = self._binding(db, request_key, binding, request_id)
+            reply_policy = getattr(self, '_conversation_reply_admission', None)
+            if reply_policy is not None:
+                reply_policy(db, row)
             return dict(self._view(db, row), task_created=True)
 
     def status(self, peer, payload):

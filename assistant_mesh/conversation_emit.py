@@ -101,28 +101,35 @@ class ConversationEmits:
 
     def emit(self, peer, payload):
         node, value = self._worker(peer), _identity(payload, write=True)
-        operation = self._operation(node, value)
+        if value['call_id'] == 'automatic-task-final-v1' or value['message_id'].startswith('mesh-auto-final-'):
+            raise PermissionError('conversation_emit_automatic_final_identity_reserved')
         with self.store.transaction() as db:
             self._namespace(db)
             task = db.execute('SELECT * FROM tasks WHERE id=?', (value['task_id'],)).fetchone()
             if not self.store._task_is_live(db, task, node=node, epoch=value['epoch']):
                 raise Conflict('conversation_emit_original_lease_not_live')
             binding = self._binding(db, value['task_id'])
-            old = db.execute('SELECT * FROM conversation_emits WHERE operation_id=?', (operation,)).fetchone()
-            if old is not None:
-                message = self._message(old)
-                if old['request_key'] != binding['request_key'] or old['body'] != encoded(value).decode('utf8'):
-                    raise Conflict('conversation_emit_call_content_conflict')
-                return self._receipt(message, created=False)
-            if db.execute('SELECT 1 FROM conversation_emits WHERE request_key=? AND message_id=?',
-                          (binding['request_key'], value['message_id'])).fetchone():
-                raise Conflict('conversation_emit_message_identity_conflict')
-            db.execute('''INSERT INTO conversation_emits(operation_id,request_key,task_id,epoch,node,
-                call_id,message_id,fingerprint,body,created) VALUES(?,?,?,?,?,?,?,?,?,?)''',
-                (operation, binding['request_key'], value['task_id'], value['epoch'], node,
-                 value['call_id'], value['message_id'], digest(value), encoded(value).decode('utf8'), self.store.clock()))
-            row = db.execute('SELECT * FROM conversation_emits WHERE operation_id=?', (operation,)).fetchone()
-            return self._receipt(self._message(row), created=True)
+            return self._append_in_db(db, binding, node, value)
+
+    def _append_in_db(self, db, binding, node, value):
+        """Internal only: caller has fenced the authenticated producer in THIS transaction."""
+        value = _identity(value, write=True)
+        operation = self._operation(node, value)
+        old = db.execute('SELECT * FROM conversation_emits WHERE operation_id=?', (operation,)).fetchone()
+        if old is not None:
+            message = self._message(old)
+            if old['request_key'] != binding['request_key'] or old['body'] != encoded(value).decode('utf8'):
+                raise Conflict('conversation_emit_call_content_conflict')
+            return self._receipt(message, created=False)
+        if db.execute('SELECT 1 FROM conversation_emits WHERE request_key=? AND message_id=?',
+                      (binding['request_key'], value['message_id'])).fetchone():
+            raise Conflict('conversation_emit_message_identity_conflict')
+        db.execute('''INSERT INTO conversation_emits(operation_id,request_key,task_id,epoch,node,
+            call_id,message_id,fingerprint,body,created) VALUES(?,?,?,?,?,?,?,?,?,?)''',
+            (operation, binding['request_key'], value['task_id'], value['epoch'], node,
+             value['call_id'], value['message_id'], digest(value), encoded(value).decode('utf8'), self.store.clock()))
+        row = db.execute('SELECT * FROM conversation_emits WHERE operation_id=?', (operation,)).fetchone()
+        return self._receipt(self._message(row), created=True)
 
     @staticmethod
     def _receipt(message, created=False):
@@ -253,6 +260,15 @@ def _project(bridge, identity, binding):
         provenance = {'producer': 'authenticated_task_agent', 'human_reviewed': False,
                       'source_message_id': message['message_id'], 'source_call_id': message['call_id'],
                       'source_task_epoch': message['epoch'], 'source_created_at': created}
+        # Fence replies BEFORE making this message visible, so a crash between
+        # publication and projection bookkeeping cannot adopt a newer epoch.
+        with service.transaction() as db:
+            db.execute('INSERT OR IGNORE INTO conversation_bridge_publications VALUES(?,?,?)',
+                       (identity, target, message['epoch']))
+            publication = db.execute('SELECT task_epoch FROM conversation_bridge_publications '
+                                     'WHERE identity=? AND message_id=?', (identity, target)).fetchone()
+            if publication['task_epoch'] != message['epoch']:
+                raise Conflict('conversation_emit_original_publication_epoch_changed')
         old = service.request(bridge.principal, 'receipt', dict(binding, message_id=target))
         if not old['found']:
             saved = service.publish(bridge.principal, payload, provenance=provenance)

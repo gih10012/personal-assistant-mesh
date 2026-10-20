@@ -6,6 +6,11 @@ PAM-006 双向会话薄叶；负责人 `/root/chat_discovery_review_20261019`，
 实际分发/核读和部署；没有生产、GUI、模型、账号、凭据或新 App 操作。
 GOAL/PLAN/TASKS 不改，完整 Goal 未完成。
 
+2026-10-20 同叶续接：新增 [受认证完成事务自动 final](CONVERSATION-FINAL-2026-10-20.md)。
+下述显式 emit 仍用于进度、自然问题及未启用自动策略的既有 profile；
+新 Chat 的显式 server reply policy 启用后，最终自然答复由冻结 Worker
+原 `/v1/task/update` 一并登记，不再要求模型额外记住发 final。
+
 ## 授权与原身份
 
 新增 `conversation_emit.py`，默认不安装 route、不建表、不创建 Store/
@@ -70,6 +75,8 @@ agent 写出**的消息，再映射到原 ConversationService。不会从 task �
 它不是 provider 来源证明、human approval 或独立 execution 验证。
 中断或重建后，按源 cursor 和稳定 ID 只恢复同消息投影，不产生另一条
 源写入。消息仍需客户端 receive/wait，关闭客户端的后台唤醒另属待办。
+投影在消息可见**之前**登记并核对原 `conversation_bridge_publications`
+epoch；原消息的回复不会因为 task 已 epoch2 重领而投向新 generation。
 
 原 `IngressResults` operator-only 发布/read gate 和内容 CAS **不变**。
 `final` 是 agent 向原委托客户端选择发送的自然结论，不是 approved
@@ -80,8 +87,9 @@ publication，更不自动导出 `task.result`、checkpoint 或完整 native his
 Root 将下列使用合同真正分发到原 Leader，并核其完整工具读取回执：
 “当前任务有已授权 Chat/Cloud 原 ingress 绑定且 peer 获 grant 时，选择
 有用进展、自然提问或结论，用原 worker config 和当前 task/epoch 显式
-emit。final 必须在本次 lease 仍 live、任务 finalize **之前**发送；原生
-final 文本和 completed 状态不会替你发送。丢 ACK 只查原 receipt；不得
+emit。未启用自动 final 策略的 profile，显式 final 必须在本次 lease
+仍 live、任务 finalize **之前**发送；新策略 Chat 不需额外 final CLI。
+丢 ACK 只查原 receipt；不得
 使用 operator 配置代发或把普通回答升级为 human approval。”
 
 原3198 `resource_access.cli.argv` 提供原 config 路径，
@@ -98,12 +106,13 @@ PYTHONPATH=/PRIVATE/REVIEWED_FROZEN_SOURCE python3 -B -m assistant_mesh.conversa
 丢 ACK 时同 task/epoch/call 改为 `receipt`，**不带 payload-file**；不要重新
 emit。CLI 只发一次请求，异常返回 unconfirmed，不读出或输出 token。
 过期时新 emit 被拒；不能为了 final 延长 claim、造 keeper 或完成后在
-read hook 补写。若要保证 finalize 必发，需要另行明确设计，不在本叶。
+read hook 补写。自动 final 只在[新策略/原完成事务](CONVERSATION-FINAL-2026-10-20.md)
+登记，不回填历史任务。
 
-Root 部署时更新三个非核心库 `conversation_emit.py/conversation.py/
-conversation_runtime.py` 的冻结闭包/pins，并在实际 Leader 可执行的已审
-源码路径提供 CLI。不得为解决 import 复制现代 Store/Worker/Codex/
-sessions/server/channel。这里没有切换 receiver 或注册新 public route。
+Root 部署须使用[完整九库闭包与精确冻结 patch 构建器](CONVERSATION-FINAL-2026-10-20.md)，
+不是只复制三个 emit 库，并在实际 Leader 可执行的已审源码路径提供 CLI。
+不得为解决 import 复制现代 Store/Worker/Codex/sessions/server/channel。
+这里没有切换 receiver 或注册新 public route。
 
 ## 已有小组与真实余项
 

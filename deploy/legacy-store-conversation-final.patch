@@ -1,0 +1,22 @@
+diff --git a/assistant_mesh/store.py b/assistant_mesh/store.py
+--- a/assistant_mesh/store.py
++++ b/assistant_mesh/store.py
+@@ -429,13 +429,18 @@
+         return True
+ 
++    _conversation_final_hook_version = 1
++
+     def update_task(self, task_id, node, epoch, checkpoint=None, result=None, status=None):
+         with self.transaction() as db:
+             row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+             now = self.clock()
+             if not self._task_is_live(db, row, node, epoch):
+                 raise Conflict('stale_task_lease')
+             if status is not None and status not in ('completed', 'failed', 'waiting_auth', 'waiting_backend', 'waiting_children', 'continuing', 'needs_review'):
+                 raise ValueError('invalid_terminal_status')
++            final_hook = getattr(self, '_conversation_final_in_db', None)
++            if final_hook is not None:
++                final_hook(db, row, node, epoch, checkpoint, result, status)
+             next_checkpoint = json.loads(row['checkpoint'])
+             if checkpoint:
+                 next_checkpoint.update(checkpoint)

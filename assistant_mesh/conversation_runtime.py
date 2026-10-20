@@ -11,7 +11,7 @@ import urllib.error
 from .conversation import ConversationService, digest, utc
 from .conversation_authority import ROUTE, FORMAT
 from .ingress import validate_peer
-from .mcp_http import RemoteIngressBackend
+from .ingress_backend import RemoteIngressBackend
 from .mcp_http_auth import SOURCE
 from .native_messaging import _private_bytes, _unique, _nonfinite, client_from_config, project_response
 from .store import Conflict
