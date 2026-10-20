@@ -1,5 +1,13 @@
 # Personal Assistant Mesh working contract
 
+Latest owner override (2026-10-20/21): the native development Goal is PAUSED,
+and the school evaluation is independently paused until the owner explicitly
+resumes that business. The owner separately authorized a bounded change and
+controlled tests for per-agent model/reasoning selection (including Leader)
+and a simple agent create/configure/status/stop entry. Only that leaf may move;
+do not resume Chat/Events deployments, the school task, or other paused work.
+The earlier active snapshots below are historical, not authority to resume.
+
 Read `docs/GOAL.md`, `docs/PLAN.md` and `docs/TASKS.json` before changing this project. Preserve
 the complete owner goal, task IDs, dependencies and next actions; update the
 coordination record when work or evidence changes. Runtime tasks and external
