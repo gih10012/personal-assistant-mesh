@@ -58,7 +58,7 @@ class MCPEvents:
                 attempts INTEGER NOT NULL,next_attempt REAL NOT NULL,last_code TEXT,
                 PRIMARY KEY(subscription,event_id))''')
             expected = {'format': FORMAT, 'owner': self.owner, 'source': SOURCE}
-            old = dict(db.execute("SELECT key,value FROM event_metadata WHERE key<>'receipt_cursor'"))
+            old = dict(db.execute("SELECT key,value FROM event_metadata WHERE key NOT IN ('receipt_cursor','private_feed_binding')"))
             if old != expected:
                 if old or db.execute('SELECT 1 FROM event_subscriptions LIMIT 1').fetchone():
                     raise Conflict('events_namespace_conflict')
@@ -288,17 +288,24 @@ class EventDeliveryLoop:
         self.stop = threading.Event(); self.thread = None
 
     def step(self):
+        feed_error = False
         if self.source is not None:
-            with self.service.transaction() as db:
-                row = db.execute("SELECT value FROM event_metadata WHERE key='receipt_cursor'").fetchone()
-            page = self.source(json.loads(row[0]) if row else None, 20)
-            if not isinstance(page, dict) or set(page) != {'receipts', 'next_cursor'} or not isinstance(page['receipts'], list) or len(page['receipts']) > 20:
-                raise ValueError('invalid_event_receipt_page')
-            for receipt in page['receipts']:
-                self.service.record_task_event(**receipt)
-            with self.service.transaction() as db:
-                db.execute("INSERT OR REPLACE INTO event_metadata VALUES('receipt_cursor',?)", (encoded(page['next_cursor']).decode(),))
-        return self.service.deliver_one()
+            try:
+                with self.service.transaction() as db:
+                    row = db.execute("SELECT value FROM event_metadata WHERE key='receipt_cursor'").fetchone()
+                page = self.source(json.loads(row[0]) if row else None, 20)
+                if not isinstance(page, dict) or set(page) != {'receipts', 'next_cursor'} or not isinstance(page['receipts'], list) or len(page['receipts']) > 20:
+                    raise ValueError('invalid_event_receipt_page')
+                for receipt in page['receipts']:
+                    self.service.record_task_event(**receipt)
+                with self.service.transaction() as db:
+                    db.execute("INSERT OR REPLACE INTO event_metadata VALUES('receipt_cursor',?)", (encoded(page['next_cursor']).decode(),))
+            except Exception:
+                feed_error = True  # Original cursor/receipt IDs retained, no business replay.
+        result = self.service.deliver_one()
+        if feed_error:
+            result['receipt_feed_unavailable'] = True
+        return result
 
     def start(self):
         if self.thread is not None:

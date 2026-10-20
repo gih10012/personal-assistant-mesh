@@ -94,6 +94,9 @@ The loop resumes durable pending deliveries after restart, stops on close, and
 does not start automatically just by importing/registering an event service.
 Root must wire BOTH service registration and this owned lifecycle before claiming
 asynchronous delivery. Otherwise discovery alone is not an active dispatcher.
+The follow-up [private feed wiring](WORK-MCP-EVENT-FEED-2026-10-20.md) now supplies
+that source-scoped receiver facade, existing-Client adapter and opt-in lifespan;
+Root still supplies real grants/revocation evidence and performs deployment.
 
 Each callback connection re-resolves DNS, rejects ANY private/local/non-public
 answer (including translated/tunnel addresses), dials only that numeric sockaddr,
