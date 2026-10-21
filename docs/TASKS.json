@@ -15,9 +15,14 @@
     "contract": "docs/AGENT-CONTROL-2026-10-21.md",
     "coordinating_tasks": ["PAM-010", "PAM-004"],
     "original_43_ids_and_dependencies_preserved": true,
-    "reasoning_source": "33ded33; five focused checks passed; no actual inference acceptance yet",
-    "lifecycle_source": "independent agent_lifecycle_entry_20261020 branch in progress",
-    "runtime_cutover_or_effective_reasoning_verified": false,
+    "reasoning_source": "33ded33; five focused checks passed; actual native effort metadata matched for same-session Luna low/max, original Leader high/self-configure/next-max, original Claw max",
+    "lifecycle_source": "78e5010/ebd38e2/684830c integrated; independent review reproduced concurrent-resume P1, fixed with original request/session/completed/revision CAS; root four base checks and one new concurrent check passed",
+    "runtime_cutover_or_effective_reasoning_verified": true,
+    "runtime_verification_scope": "VPS independent CLI and narrowly profiled original Leader/Claw; original core files and receiver unchanged, original sessions/full-history hashes unchanged at cutover; not all nodes/platforms or native active-goal automatic turns",
+    "laptop_existing_worker_profile_hook_installed": false,
+    "external_agent_stop_adapter_installed": false,
+    "owner_claw_progress_request": "mesh-agent-control-contact-20261021-v1",
+    "owner_claw_progress_status": "accepted; delivery_verified=false",
     "old_goal_chat_events_or_school_business_resumed": false
   },
   "approved_entrance_wrap_up_20261020": {

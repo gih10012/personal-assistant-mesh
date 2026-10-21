@@ -7,6 +7,11 @@
 该片不恢复整体 Goal、评教或 Chat/Events 部署，不重建原43任务/依赖。
 见 [agent 控制小片](AGENT-CONTROL-2026-10-21.md)。以下 active 为保留历史。
 
+该单独小片现已在VPS真实核到：独立Luna同session low→max，原Leader
+high轮自行配置后下一原线程轮max，原Claw原线程max，均与实际native
+元数据一致；不等于所有旧节点/平台已接线或外部agent停止适配已完成。
+整体Goal/评教仍paused；本人要求的Claw联系进度已accepted，手机未独立验收。
+
 2026-10-20续接：本人暂停后已再次明确恢复active，沿同一完整Goal/原43项
 任务/操作身份继续。Claw原内部unknown已按原case完成一次owner审核结案：
 完整备份在本人电脑真实还原核验，当前writer关闭边界及原行/历史/权限

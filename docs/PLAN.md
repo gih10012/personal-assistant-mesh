@@ -7,6 +7,11 @@
 不删记忆、不重放未知工作。代码/检查并行，生产写入仅 Root。其它
 本阶段工作保持暂停；下列 active/下一部署计划只作历史，不自动续行。
 
+单独agent-control小片的VPS入口/原Leader与Claw窄接线及原生参数验收
+已完成，见该片实证；后续只按本人对该片的授权继续其他节点的薄适配、
+external stop原authority和active-native-goal自动轮边界，不重跑本轮已
+核两次Luna/两次Leader。整体Goal、评教和Chat/Events等旧工作仍暂停。
+
 更新时间：2026-10-20，新的完整原生Goal已active。当前批准执行的是
 [入口收尾阶段](STAGE-ENTRANCES-2026-10-20.md)：先角色合同实际同步，
 恢复Claw原连续会话/按原case处理旧guard；本人微信发送真实评教委托，
