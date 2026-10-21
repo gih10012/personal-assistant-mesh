@@ -10,6 +10,7 @@ import os
 
 from assistant_mesh.chat_github_oauth import create_app as build_app, validate_config
 from assistant_mesh.conversation_event_feed import project_policies
+from assistant_mesh.conversation_emit import enable_projection
 from assistant_mesh.conversation_runtime import load_context
 from assistant_mesh.mcp_event_sources import (
     ProjectEventAccess, RemoteReceiptSource, attach_lifecycle)
@@ -36,7 +37,7 @@ def _event_policy(document):
     return document
 
 
-def assemble(oauth_document, runtime_document, *, event_document=None):
+def assemble(oauth_document, runtime_document, *, event_document=None, final_projection=False):
     """Replace only the original factory's assembly call, NOT its secret loading.
 
     The CurrentOAuthGrants loop bridge is installed BEFORE the Events lifecycle,
@@ -44,6 +45,8 @@ def assemble(oauth_document, runtime_document, *, event_document=None):
     component is run on a second event loop and no configurable boolean checker
     or model-provided grant is accepted.
     """
+    if type(final_projection) is not bool:
+        raise NotConfigured('conversation_final_projection_owner_enable_required')
     event_policy = _event_policy(event_document)
     # Exact same original load_context creates one backend/service/bridge/client.
     backend, service, bridge = load_context(runtime_document)
@@ -58,6 +61,10 @@ def assemble(oauth_document, runtime_document, *, event_document=None):
     if (policy['owner_binding'] != runtime_document['owner_id']
             or {entry['mesh_subject'] for entry in policy['subjects']} != {runtime_document['subject']}):
         raise NotConfigured('work_events_original_owner_subject_changed')
+    if final_projection:
+        # Copy only durable authenticated emits on receive. This never reads
+        # raw task.result, creates a final, drains replies or retries business.
+        enable_projection(bridge, enabled=True)
 
     events = source = grants = None
     if event_policy is not None:
@@ -89,4 +96,8 @@ def create_app():
     oauth = load(os.environ['MESH_CHAT_OAUTH_CONFIG'])
     runtime = load(os.environ['MESH_CONVERSATION_CONFIG'])
     event_path = os.environ.get('MESH_WORK_EVENTS_CONFIG')
-    return assemble(oauth, runtime, event_document=load(event_path) if event_path else None)[2]
+    projection = os.environ.get('MESH_CONVERSATION_FINAL_PROJECTION', '0')
+    if projection not in ('0', '1'):
+        raise NotConfigured('conversation_final_projection_owner_enable_required')
+    return assemble(oauth, runtime, event_document=load(event_path) if event_path else None,
+                    final_projection=projection == '1')[2]

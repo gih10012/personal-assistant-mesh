@@ -13,8 +13,12 @@ from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import patch
 
-import jwt
-from starlette.applications import Starlette
+try:
+    import jwt
+    from starlette.applications import Starlette
+    LEDGER_FIXTURE_AVAILABLE = True
+except ImportError:
+    LEDGER_FIXTURE_AVAILABLE = False
 
 from assistant_mesh.mcp_event_grants import CurrentOAuthGrants
 from assistant_mesh.mcp_http_auth import NotConfigured
@@ -98,7 +102,8 @@ class ProviderFixture:
         self.state.refresh.rows.pop(hashlib.sha256(token.token.encode()).hexdigest(), None)
 
 
-class GrantLedgerChecks(unittest.IsolatedAsyncioTestCase):
+@unittest.skipUnless(LEDGER_FIXTURE_AVAILABLE, 'optional signed-token/ASGI fixture environment absent; not grant verification')
+class GrantLedgerChecks(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.TestCase)):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='mesh-events-grants.')
         self.addCleanup(self.temp.cleanup); self.now = [time.time()]
@@ -182,15 +187,52 @@ class GrantLedgerChecks(unittest.IsolatedAsyncioTestCase):
 
 
 try:
-    from tests.test_chat_github_oauth import AVAILABLE, ActualOAuthTests, CLIENT, ORIGIN
+    from tests import test_chat_github_oauth as oauth_fixture
+    AVAILABLE = oauth_fixture.AVAILABLE
 except ImportError:
     AVAILABLE = False
 
 
 @unittest.skipUnless(AVAILABLE, 'requires actual pinned OAuth env; not covered by source-shaped checks')
-class PinnedOAuthGrantCheck(unittest.IsolatedAsyncioTestCase):
+class PinnedOAuthGrantCheck(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.TestCase)):
+    async def test_existing_no_refresh_connection_is_adopted_on_authenticated_mcp_only(self):
+        fixture = oauth_fixture.ActualOAuthTests('test_refresh_uses_component_and_cannot_add_mesh_scopes_or_expose_upstream_tokens')
+        await fixture.asyncSetUp()
+        try:
+            fixture.idp_refresh = False
+            # Existing connection: its normal successful code exchange predates
+            # this Events installation. No new login/code/refresh is requested.
+            code, verifier = await fixture.authorization_code('tasks:read')
+            response = await fixture.http.post('/token', data={'grant_type': 'authorization_code',
+                'client_id': oauth_fixture.CLIENT, 'code': code, 'code_verifier': verifier,
+                'redirect_uri': fixture.redirect_uri, 'resource': oauth_fixture.ORIGIN + '/mcp'})
+            self.assertEqual(200, response.status_code, response.text)
+            tokens = response.json()
+            directory = fixture.directory / 'event-grants'; directory.mkdir(mode=0o700)
+            gate = CurrentOAuthGrants(directory, fixture.config['policy'])
+            gate.install(fixture.provider, fixture.server, fixture.app)
+            principal = {'owner_id': 'synthetic-owner', 'source': 'chatgpt-chat',
+                         'subject': 'fixed-owner-main-chat', 'scopes': ['tasks:read']}
+            async with fixture.app.router.lifespan_context(fixture.app):
+                self.assertFalse(await asyncio.to_thread(gate.account_active, principal))
+                unauthorized = await fixture.rpc('NOT_A_BEARER', 'tools/list')
+                self.assertEqual(401, unauthorized.status_code)
+                self.assertFalse(await asyncio.to_thread(gate.account_active, principal))
+                original_calls = len(fixture.idp_requests)
+                listed = await fixture.rpc(tokens['access_token'], 'tools/list')
+                self.assertEqual(200, listed.status_code, listed.text)
+                self.assertTrue(await asyncio.to_thread(gate.account_active, principal))
+                # Only identity validation; no /token exchange or business call.
+                self.assertTrue(all(url.endswith('/user') for unused_method, url
+                                    in fixture.idp_requests[original_calls:]))
+                gate.revoke_subject(principal)
+                self.assertEqual(200, (await fixture.rpc(tokens['access_token'], 'tools/list')).status_code)
+                self.assertFalse(await asyncio.to_thread(gate.account_active, principal))
+        finally:
+            await fixture.asyncTearDown()
+
     async def test_real_pinned_engine_registration_rotation_and_revocation(self):
-        fixture = ActualOAuthTests('test_refresh_uses_component_and_cannot_add_mesh_scopes_or_expose_upstream_tokens')
+        fixture = oauth_fixture.ActualOAuthTests('test_refresh_uses_component_and_cannot_add_mesh_scopes_or_expose_upstream_tokens')
         await fixture.asyncSetUp()
         try:
             directory = fixture.directory / 'event-grants'; directory.mkdir(mode=0o700)
@@ -202,10 +244,10 @@ class PinnedOAuthGrantCheck(unittest.IsolatedAsyncioTestCase):
                 tokens = await fixture.tokens('tasks:read')
                 self.assertTrue(await asyncio.to_thread(gate.account_active, principal))
                 refreshed = await fixture.http.post('/token', data={'grant_type': 'refresh_token',
-                    'client_id': CLIENT, 'refresh_token': tokens['refresh_token'], 'scope': 'tasks:read', 'resource': ORIGIN + '/mcp'})
+                    'client_id': oauth_fixture.CLIENT, 'refresh_token': tokens['refresh_token'], 'scope': 'tasks:read', 'resource': oauth_fixture.ORIGIN + '/mcp'})
                 self.assertEqual(200, refreshed.status_code, refreshed.text)
                 self.assertTrue(await asyncio.to_thread(gate.account_active, principal))
-                client = await fixture.provider.get_client(CLIENT)
+                client = await fixture.provider.get_client(oauth_fixture.CLIENT)
                 refresh = await fixture.provider.load_refresh_token(client, refreshed.json()['refresh_token'])
                 await fixture.provider.revoke_token(refresh)
                 self.assertFalse(await asyncio.to_thread(gate.account_active, principal))
@@ -214,8 +256,8 @@ class PinnedOAuthGrantCheck(unittest.IsolatedAsyncioTestCase):
                 fixture.idp_refresh = False
                 code, verifier = await fixture.authorization_code('tasks:read')
                 response = await fixture.http.post('/token', data={'grant_type': 'authorization_code',
-                    'client_id': CLIENT, 'code': code, 'code_verifier': verifier,
-                    'redirect_uri': fixture.redirect_uri, 'resource': ORIGIN + '/mcp'})
+                    'client_id': oauth_fixture.CLIENT, 'code': code, 'code_verifier': verifier,
+                    'redirect_uri': fixture.redirect_uri, 'resource': oauth_fixture.ORIGIN + '/mcp'})
                 self.assertEqual(200, response.status_code, response.text)
                 no_refresh = response.json()
                 self.assertIsNone(no_refresh.get('refresh_token'))
