@@ -8,6 +8,21 @@
   "latest_owner_status": "docs/STATUS-2026-10-20.md",
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
   "latest_continuation_at": "2026-10-20",
+  "separate_existing_node_capabilities_20261021": {
+    "long_term_native_goal_status": "paused",
+    "school_evaluation_status": "paused",
+    "current_authorized_scope": "adapt existing laptop skills/MCP as portable action implementations or device-bound A2A helper capabilities",
+    "deferred_scope": "automatic discovery, migration/proxy judgement and capability enrollment for newly joining nodes; plan only",
+    "coordinating_tasks": ["PAM-002", "PAM-004", "PAM-005"],
+    "contract": "docs/LOCAL-CAPABILITIES-2026-10-21.md",
+    "owner": "existing_node_capability_adapt_20261021",
+    "branch": "work/existing-node-capabilities-20261021",
+    "base": "423a8a6",
+    "status": "implementation assigned; not deployed or verified",
+    "audit_findings_only_not_implemented": ["AA data/advisor not in live autonomous selection", "no production free OpenCode fallback/recovery decision loop", "stable business-task center still absent"],
+    "old_unknown_tasks_replayed_or_guards_cleared": false,
+    "original_43_ids_and_dependencies_preserved": true
+  },
   "separate_owner_agent_control_20261021": {
     "long_term_native_goal_status": "paused",
     "school_evaluation_status": "paused; explicit owner resume of that business required",

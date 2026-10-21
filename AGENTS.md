@@ -1,5 +1,17 @@
 # Personal Assistant Mesh working contract
 
+Latest separate authorization (2026-10-21): implement the existing laptop's
+skill/MCP capability adaptation; general NEW-node automatic inventory,
+portability judgement, migration and proxy enrollment are planned for later.
+Keep the overall native Goal and school evaluation paused. Reuse capability
+class/instance and A2A: portable code/workflows may move, device-bound actions
+remain on their provider and are delegated to a local helper. Assess actions
+and dependencies, not an entire skill name as one portable/not-portable bit.
+Never copy auth/session state or private artifacts into packages/public Git.
+The AA/quota/Mobius reviews were read-only; their findings do not authorize
+fixing policies, replaying unknown tasks or changing the reference project.
+See docs/LOCAL-CAPABILITIES-2026-10-21.md. Root owns shared deployment/GUI writes.
+
 Latest owner override (2026-10-20/21): the native development Goal is PAUSED,
 and the school evaluation is independently paused until the owner explicitly
 resumes that business. The owner separately authorized a bounded change and
