@@ -183,7 +183,28 @@ class Governance:
             db.execute('INSERT OR REPLACE INTO task_ratings VALUES(?,?,?)', (task_id, revision, canonical(value)))
         return dict(value, revision=revision)
 
-    def choose(self, task):
+    def select_route(self, rating, role_profile=None):
+        if role_profile is not None:
+            if (not isinstance(role_profile, dict) or not text(role_profile.get('model'))
+                    or not text(role_profile.get('reasoning_effort'))):
+                raise GovernanceError('governance_role_profile_incomplete')
+            candidates = [r for r in self.routes.values() if r['model'] == role_profile['model']
+                          and r['effort'] == role_profile['reasoning_effort']
+                          and rating['difficulty'] in r['difficulties']]
+            if not candidates:
+                raise GovernanceError('governance_role_profile_below_or_outside_floor')
+            # Multiple route labels do not create a new quality authorization.
+            route = sorted(candidates, key=lambda r: r['id'])[0]
+        else:
+            route_id = rating.get('route_id') or (self.policy or {}).get('defaults', {}).get(rating['difficulty'])
+            route = self.routes.get(route_id)
+        if not route or rating['difficulty'] not in route['difficulties']:
+            raise GovernanceError('governance_qualified_route_required')
+        if rating['difficulty'] == 'D3' and (route['quality'] != 'strong' or route['cost_basis'] == 'free'):
+            raise GovernanceError('governance_advanced_quality_floor')
+        return dict(route)
+
+    def choose(self, task, role_profile=None):
         cp = task.get('checkpoint') or {}
         failure = cp.get('runtime_failure') or {}
         if (task.get('status') in ('paused', 'needs_review', 'completed', 'failed')
@@ -197,14 +218,10 @@ class Governance:
         rating = metadata(raw)
         if not row:
             self.rate(task['id'], rating, task['id'] + ':initial-governance')
-        route_id = rating.get('route_id') or (self.policy or {}).get('defaults', {}).get(rating['difficulty'])
-        route = self.routes.get(route_id)
-        if not route or rating['difficulty'] not in route['difficulties']:
-            raise GovernanceError('governance_qualified_route_required')
-        if rating['difficulty'] == 'D3' and (route['quality'] != 'strong' or route['cost_basis'] == 'free'):
-            raise GovernanceError('governance_advanced_quality_floor')
+        route = self.select_route(rating, role_profile)
         return {'rating': rating, 'route': dict(route), 'policy_revision': self.policy['revision'],
                 'policy_sha256': self.policy_hash, 'quota_policy': 'wait_for_qualified_route',
+                'selection_basis': 'owner_role_profile' if role_profile is not None else 'task_route_or_default',
                 'automatic_free_or_pi_fallback': False, 'independent_quality_verified': False}
 
     def observe(self, route_id, account_id, raw):

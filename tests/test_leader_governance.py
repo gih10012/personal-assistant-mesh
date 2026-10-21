@@ -24,6 +24,7 @@ def rating(difficulty='D3', **extra):
 
 def task(difficulty='D3'):
     return {'id': 'original-task', 'epoch': 3, 'status': 'running', 'checkpoint': {},
+            'scope': 'leader:project:personal-assistant-workspace',
             'context': {'governance': rating(difficulty)}}
 
 
@@ -39,12 +40,16 @@ class FakeCodex:
     def account(self):
         return {'authenticated': True}
 
+    def rate_limits(self):
+        return {'status': 'unknown'}
+
     def rpc(self, method, params, timeout=30):
         self.calls.append((method, copy.deepcopy(params)))
         if method == 'account/rateLimits/read':
             return self.quotas.get(self.auth_home)
         if method == 'model/list':
-            return {'data': [{'id': self.model, 'supportedReasoningEfforts': [{'reasoningEffort': 'high'}]}]}
+            return {'data': [{'id': self.model, 'supportedReasoningEfforts': [
+                {'reasoningEffort': 'high'}, {'reasoningEffort': 'max'}]}]}
         if method == 'turn/start':
             return {'turn': {'id': 'fake-turn-no-model-call'}}
         raise AssertionError(method)
@@ -63,7 +68,7 @@ class LeaderGovernanceTests(unittest.TestCase):
         FakeCodex.instances, FakeCodex.quotas = [], {}
 
     def worker(self):
-        cls = make_worker(Worker, FakeCodex, self.state)
+        cls = make_worker(Worker, FakeCodex, self.state, scopes=[task()['scope']])
         worker = cls({'codex': {'workspace': '/not-used', 'auth_home': 'account-a'},
                       'codex_accounts': [{'auth_home': 'account-a'}, {'auth_home': 'account-b'}],
                       'pi': {'must_not_initialize': True}}, client=Mock())
@@ -144,12 +149,45 @@ class LeaderGovernanceTests(unittest.TestCase):
                 class PreservedFailureBackend(backend):
                     original_failure_wrapper = True
                 super(DecoratedWorker, self).__init__(config, backend=PreservedFailureBackend, **options)
-        cls = make_worker(DecoratedWorker, FakeCodex, self.state)
+        cls = make_worker(DecoratedWorker, FakeCodex, self.state, scopes=[task()['scope']])
         worker = cls({'codex': {'workspace': '/not-used', 'auth_home': 'only-account'}}, client=Mock())
         worker.current = task()
         native = worker.open_backend()
         self.assertTrue(native.original_failure_wrapper)
         native.close()
+
+    def test_old_unrated_scope_preserves_existing_role_profile(self):
+        profile = {'model': 'gpt-6.1-sol', 'reasoning_effort': 'max', 'revision': 4}
+        cls = make_worker(Worker, FakeCodex, self.state, scopes=[task()['scope']],
+                          profile_loader=lambda agent: profile)
+        worker = cls({'codex': {'workspace': '/not-used', 'auth_home': 'only-account',
+                               'model': 'gpt-6.1-sol'}}, client=Mock())
+        worker.current = task(); worker.current['scope'] = 'original-unrated-owner-scope'
+        worker.current['context'] = {}
+        native = worker.open_backend()
+        native.rpc('turn/start', {'threadId': 'original-owner-thread', 'input': []})
+        self.assertEqual('max', native.calls[-1][1]['effort'])
+        self.assertIsNone(self.state.decision('original-task', 3))
+
+    def test_qualified_explicit_profile_is_retained_and_weaker_profile_waits(self):
+        policy = copy.deepcopy(POLICY)
+        policy['routes'].append(dict(policy['routes'][1], id='strong-max', effort='max'))
+        self.state = Governance(str(Path(self.temporary.name) / 'profile.sqlite'), policy, clock=lambda: self.now)
+        profile = {'model': 'gpt-6.1-sol', 'reasoning_effort': 'max', 'revision': 4}
+        cls = make_worker(Worker, FakeCodex, self.state, scopes=[task()['scope']],
+                          profile_loader=lambda agent: profile)
+        worker = cls({'codex': {'workspace': '/not-used', 'auth_home': 'only-account'}}, client=Mock())
+        worker.current = task()
+        native = worker.open_backend()
+        native.rpc('turn/start', {'threadId': 'same-thread', 'input': []})
+        self.assertEqual('max', native.calls[-1][1]['effort'])
+        self.assertEqual('owner_role_profile', self.state.decision('original-task', 3)['selection_basis'])
+        profile.update(model='gpt-6-luna', reasoning_effort='max')
+        worker.current = task(); worker.current['epoch'] = 4
+        count = len(FakeCodex.instances)
+        with self.assertRaisesRegex(GovernanceError, 'role_profile_below_or_outside_floor'):
+            worker.open_backend()
+        self.assertEqual(count, len(FakeCodex.instances))
 
     def test_weekly_review_queue_is_idempotent_cancellable_and_never_execution_authority(self):
         value = {'project_id': 'project', 'task_id': 'original-task', 'kind': 'integration',

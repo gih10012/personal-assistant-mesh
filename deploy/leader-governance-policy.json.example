@@ -3,7 +3,7 @@
   "defaults": {"D1": "ordinary", "D2": "ordinary", "D3": "advanced"},
   "routes": [
     {"id": "ordinary", "model": "gpt-6-luna", "effort": "max", "harness": "codex", "quality": "standard", "cost_basis": "included_subscription", "difficulties": ["D1", "D2"]},
-    {"id": "advanced", "model": "gpt-6.1-sol", "effort": "high", "harness": "codex", "quality": "strong", "cost_basis": "included_subscription", "difficulties": ["D3"]},
-    {"id": "advanced-deep", "model": "gpt-6.1-sol", "effort": "max", "harness": "codex", "quality": "strong", "cost_basis": "included_subscription", "difficulties": ["D3"]}
+    {"id": "advanced", "model": "gpt-6.1-sol", "effort": "high", "harness": "codex", "quality": "strong", "cost_basis": "included_subscription", "difficulties": ["D1", "D2", "D3"]},
+    {"id": "advanced-deep", "model": "gpt-6.1-sol", "effort": "max", "harness": "codex", "quality": "strong", "cost_basis": "included_subscription", "difficulties": ["D1", "D2", "D3"]}
   ]
 }

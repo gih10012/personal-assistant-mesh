@@ -15,22 +15,44 @@ Codex SHA is `b32e2ba28c2c06ce1b1208a023de01ddd56081c012d9b5723e1158449bff1f98`.
 Root owns staged source checks, backups and serialized production cutover.
 
 In the existing profiled launcher, use the original Codex class, not an already
-profiled wrapper, and replace only Worker construction:
+profiled wrapper, and preserve the existing owner-profile loader. Opt in ONLY
+the new workspace project scope initially:
 
 ```python
 from assistant_mesh.leader_governance import Governance, private_json
 from assistant_mesh.governance_worker import make_worker
 governance = Governance('/PRIVATE/governance/state.sqlite',
                         private_json('/PRIVATE/governance/policy.json'))
-GovernedWorker = make_worker(Worker, Codex, governance)
+GovernedWorker = make_worker(Worker, Codex, governance,
+    scopes=['leader:project:personal-assistant-workspace'],
+    profile_loader=lambda agent: load_profile(PROFILE_PATH, 'leader'),
+    receipt_callback=receipt)  # Existing private per-turn selection receipt hook.
 GovernedWorker(config, config_path=config_path).run()
 ```
 
-For Claw's `EntranceWorker`, pass that class to `make_worker` instead. Root must
-preserve its role, channel and thread mapping. Governance picks an exact task
-route rather than allowing a lower role default to override a D3 floor. The
-same existing `reasoning.make_codex` seam validates native `model/list` and sends
-both effort fields; native acceptance/observed effort still need real evidence.
+`load_profile` is the existing `agent_manager.load_profile`; the owner loader
+must support `agent=None` for preflight and the actual agent at turn/start. A
+qualified explicit role model/effort is retained instead of silently replaced
+by the task default. A weak/out-of-policy selection waits with an explicit
+`governance_role_profile_below_or_outside_floor` reason, not a silent override.
+The policy example permits the stronger high/max routes for ordinary tasks as
+well. Profile changes between preflight and turn/start explicitly stop that
+attempt rather than misreporting its selection; ordinary configure-for-next-turn
+continues working. Native `model/list` still validates actual effort support.
+
+Other scopes bypass task grading and retain existing owner-profile/native
+backend behavior, including authorized candidate fallback. Empty `scopes`
+disables this consumer rather than treating every old task as ungraded. No
+old task is reclassified, resumed or silently moved to another model.
+
+**Do not globally enable this on Claw yet.** Current normal entrance tasks have
+no grading metadata; that would stall every new message. A separately explicit
+owner adapter may assign D1 to the fixed communication-only role without
+guessing business difficulty from keywords; the delegated business still needs
+Leader grading. When prepared, use `EntranceWorker` as the base class so its
+original closed-failure/history-preservation backend decorator remains intact.
+Root preserves role, channel, thread and scope mappings. The new wrapper's
+unit checks are not evidence that any production role has adopted it.
 
 ## Actual consumer, not instructions alone
 
@@ -95,7 +117,7 @@ cross-partition exclusivity is granted by a queue row or claimed Leader string**
 Actual execution must use Mesh's current authority/operation fence. No timer,
 integration test, model comparison or fault drill is started by these commands.
 
-The seven bounded local tests use fake native RPC and private synthetic SQLite.
+The nine bounded local tests use fake native RPC and private synthetic SQLite.
 They prove local consumer/decision behavior, not deployment, actual quota,
 observed inference, batch execution or owner acceptance. The original 43 task
 IDs/dependencies and all other coordination files are untouched.

@@ -5,32 +5,57 @@ from .leader_governance import GovernanceError
 from .reasoning import make_codex
 
 
-def make_worker(worker_class, codex_class, governance):
+def make_worker(worker_class, codex_class, governance, scopes=(), profile_loader=None,
+                receipt_callback=None):
     """Use the original Worker claim/restore/finish/effect guards unchanged.
 
 Pass the ORIGINAL frozen Codex class, not an already profiled class: governance
-selects a qualified per-task model/effort rather than letting a role default
-silently override a D3 quality floor. Its model/list validation is unchanged.
+    selects a qualified per-task model/effort while retaining an owner role
+    profile when it fits that floor. Empty scopes disables governance; old
+    scopes retain the profile/normal backend behavior and are not reclassified.
 """
+    if isinstance(scopes, str):
+        raise GovernanceError('governance_scope_allowlist_required')
+    scopes = frozenset(scopes)
+    if (not all(isinstance(scope, str) and scope for scope in scopes)
+            or (profile_loader is not None and not callable(profile_loader))
+            or (receipt_callback is not None and not callable(receipt_callback))):
+        raise GovernanceError('governance_scope_or_profile_loader_invalid')
+
     class GovernedWorker(worker_class):
         def __init__(self, config, **options):
             if 'backend' in options:
                 raise GovernanceError('governance_original_codex_class_required')
             worker = self
             self._governance_profile, self._governance_choice = None, None
+            self._governance_enabled = False
             self._quota_observed = []
-            profiled = make_codex(codex_class, lambda agent: worker._governance_profile)
+
+            def current_profile(agent):
+                role = profile_loader(agent) if profile_loader is not None else None
+                if not worker._governance_enabled:
+                    return role
+                route = governance.select_route(worker._governance_choice['rating'], role)
+                if (route['model'], route['effort']) != (worker._governance_profile['model'],
+                                                        worker._governance_profile['reasoning_effort']):
+                    raise GovernanceError('governance_profile_changed_after_preflight')
+                return worker._governance_profile
+
+            profiled = make_codex(codex_class, current_profile, receipt_callback)
 
             class QuotaObservedCodex(profiled):
                 def __init__(self, native_config, **kwargs):
                     # Account overrides cannot weaken this task's route.
-                    if worker._governance_choice is None:
+                    if worker._governance_enabled and worker._governance_choice is None:
                         raise GovernanceError('governance_preflight_choice_required')
-                    route = worker._governance_choice['route']
-                    native_config = dict(native_config, model=route['model'])
+                    if worker._governance_enabled:
+                        route = worker._governance_choice['route']
+                        native_config = dict(native_config, model=route['model'])
                     super(QuotaObservedCodex, self).__init__(native_config, **kwargs)
 
                 def rate_limits(self):
+                    if not worker._governance_enabled:
+                        return super(QuotaObservedCodex, self).rate_limits()
                     try:
                         raw = self.rpc('account/rateLimits/read', {})
                     except (OSError, ValueError):
@@ -47,10 +72,14 @@ silently override a D3 quality floor. Its model/list validation is unchanged.
 
         def open_backend(self):
             task = self.current
+            self._governance_enabled = task.get('scope') in scopes
+            if not self._governance_enabled:
+                self._governance_choice, self._governance_profile = None, None
+                return super(GovernedWorker, self).open_backend()
             self._quota_observed = []
             observed = self._quota_observed
             try:
-                choice = governance.choose(task)
+                choice = governance.choose(task, profile_loader(None) if profile_loader is not None else None)
             except GovernanceError as exc:
                 value = governance.record_decision(task, {'status': 'waiting_policy', 'reason': str(exc)})
                 self.client.request('/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
