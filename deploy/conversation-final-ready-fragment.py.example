@@ -1,0 +1,49 @@
+"""Compose the existing sole receiver ready hook; never construct a receiver.
+
+Owner-code inputs only. The exact frozen candidate already contains these pure
+modules; keep this composition in the existing private launcher, not a second
+listener or a modern Store/Worker overlay. No work occurs merely on import.
+"""
+from assistant_mesh import conversation_authority, conversation_emit, conversation_final
+from assistant_mesh.conversation_event_feed import attach as attach_event_feed, project_policies
+
+
+def compose_ready(previous, *, sources, reply_policies, event_projects=()):
+    """Retain original IPC/Claw/authority hooks and add the reviewed opt-ins.
+
+    Worker capability entries are checked, NEVER added here. Reply policy is
+    fixed to an existing source/subject/node; project grants are explicit and
+    apply only to the source-scoped PRIVATE feed. No public route is exposed.
+    """
+    if not callable(previous):
+        raise ValueError('conversation_final_existing_ready_required')
+    policies = conversation_final._policies(reply_policies)
+    if not isinstance(sources, (list, tuple)) or not sources or any(
+            source not in sources for source, unused_subject in policies):
+        raise ValueError('conversation_final_existing_sources_required')
+    sources = tuple(sources)
+    reply_policies = tuple({'source': source, 'subject': subject, 'node': node}
+                           for (source, subject), node in sorted(policies.items()))
+    if event_projects:
+        projects = project_policies(event_projects)
+        if not set(projects) <= set(policies):
+            raise ValueError('conversation_event_project_without_reply_policy')
+        event_projects = tuple({'source': source, 'subject': subject, 'projects': sorted(items)}
+                               for (source, subject), items in sorted(projects.items()))
+
+    def ready(http_server, api, channel):
+        # The API already loaded its original credential mapping. Do not read
+        # credential files, accept bearer values here or enlarge a worker role.
+        for node in set(policies.values()):
+            matches = [peer for unused_secret, peer in api.peers
+                       if peer.get('role') == 'worker' and peer.get('node') == node
+                       and conversation_final.CAPABILITY in peer.get('capabilities', [])]
+            if not matches:
+                raise PermissionError('conversation_final_original_worker_grant_required')
+        previous(http_server, api, channel)
+        conversation_authority.attach(api, sources=sources)
+        conversation_emit.attach(api, enabled=True, sources=sources)
+        finals = conversation_final.attach(api, enabled=True, policies=reply_policies)
+        if event_projects:
+            attach_event_feed(api, finals, enabled=True, policies=event_projects)
+    return ready
