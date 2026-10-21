@@ -1,0 +1,42 @@
+{
+  "format": "mesh-existing-capabilities/1",
+  "provider": "laptop",
+  "revision": 1,
+  "sources": [
+    {
+      "id": "ncut-web-api",
+      "root": "/ABSOLUTE/RESOLVED/REVIEWED/ncut-web-api",
+      "files": [
+        {"path": "SKILL.md"},
+        {"path": "scripts/ncut.py"},
+        {"path": "scripts/knowledge.py"},
+        {"path": "references/services.json"},
+        {"path": "references/capabilities/jwxtbk/personal-timetable.md"}
+      ]
+    },
+    {
+      "id": "xiumi-native-clipboard",
+      "root": "/ABSOLUTE/RESOLVED/REVIEWED/xiumi-native-clipboard",
+      "files": [
+        {"path": "SKILL.md"},
+        {"path": "scripts/xiumi_components.py"},
+        {"path": "scripts/xiumi_clipboard.py"},
+        {"path": "references/format.md"}
+      ]
+    },
+    {
+      "id": "niri-computer-use",
+      "root": "/ABSOLUTE/RESOLVED/REVIEWED/niri-computer-use/skills/niri-computer-use",
+      "files": [{"path": "SKILL.md"}]
+    }
+  ],
+  "dependencies": {
+    "ncut.account": {"ref": "private:existing-campus-session", "state": "configured_not_verified"},
+    "ncut.campus-route": {"ref": "private:existing-campus-egress", "state": "configured_not_verified"},
+    "xiumi.clipboard": {"ref": "private:owner-desktop-clipboard", "state": "configured_not_verified"},
+    "niri.backend": {"ref": "private:existing-niri-mcp", "state": "configured_not_verified"},
+    "niri.wayland-dbus-session": {"ref": "private:existing-desktop-session", "state": "configured_not_verified"},
+    "gui.single-operator": {"ref": "private:owner-desktop-coordination", "state": "configured_not_verified"},
+    "owner.business-scope": {"ref": "private:current-owner-request", "state": "configured_not_verified"}
+  }
+}
