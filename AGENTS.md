@@ -1,5 +1,36 @@
 # Personal Assistant Mesh working contract
 
+Latest approved implementation (2026-10-21): the owner cleared the previous
+native Goal and explicitly requested a NEW full Goal. It is active; old usage
+was not migrated. The effective stage is docs/STAGE-WORKSPACE-2026-10-21.md
+and docs/LEADER-GOVERNANCE-2026-10-21.md. These override historical paused
+development snapshots below. SCHOOL EVALUATION REMAINS PAUSED; Root does not
+resume, inspect or perform that business. Preserve the original 43 task IDs,
+dependencies, native histories, operation IDs and unknown-effect guards.
+
+Leader must grade task difficulty and record its model/effort/quota policy.
+Ordinary and bounded non-development work defaults to GPT-6 Luna max; advanced
+development/architecture/security requires a qualified stronger route and WAITS
+for quota rather than automatically falling back to a free/lower-quality model.
+Daily development, bounded local unit tests and self-debugging are authorized;
+unit-tested work may deploy before acceptance. Leader coordinates integration
+trials, model comparisons, fault drills and acceptance in one weekly queue,
+preferably before the actual weekly quota reset. Do not invent model trials or
+rerun completed work to consume quota. Production observations and real owner
+work are not synthetic acceptance tests.
+
+The actual network Leader owns development of the PUBLIC independent
+gih10012/personal-assistant-workspace repository. Root supplies contracts,
+coordination and serialized shared operations, never substitutes its own Web
+implementation and calls that a Leader delivery. Workspace data is decentralized:
+node-local durable replicas follow Mesh leadership/backup selection, partition
+locally and merge authenticated events on reunion. No permanent VPS/PC primary;
+keep conflicting versions for agent reconciliation, never replay effects from
+merged metadata. Source is public, tasks/documents/auth/native history are private.
+Develop the workspace as the main line, with the existing Chat/Events final-reply
+wiring and current-laptop capability adaptation in parallel. New-device automatic
+adaptation/Cloud/Harmony/Live remain on the full graph, not extra scope now.
+
 Latest separate authorization (2026-10-21): implement the existing laptop's
 skill/MCP capability adaptation; general NEW-node automatic inventory,
 portability judgement, migration and proxy enrollment are planned for later.

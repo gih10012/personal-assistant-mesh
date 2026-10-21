@@ -1,5 +1,21 @@
 # 持续执行计划
 
+## 10月21日最新批准：治理与去中心化工作空间主线
+
+本人清旧Goal后明确新建，当前active；只评教保持paused且Root不处理。
+按[新阶段](STAGE-WORKSPACE-2026-10-21.md)执行：先同步[Leader治理](LEADER-GOVERNANCE-2026-10-21.md)，
+再交真实网内Leader主导公开personal-assistant-workspace仓库；其后端/
+副本重汇合、前端可视化、API/skill可独立分支并行。Root串行共享生产。
+本地单测通过即可先部署，自我debug持续；集成实测/模型对比/故障演练/
+验收交Leader统一周窗口，不再作为所有后续开发的串行门槛。
+
+工作空间不能固定VPS主库，必须节点本地副本、Leader/备份交接、分区
+自治及agent有来源的冲突合并；不把目录同步冒称全局选举或原生会话
+迁移。稳定业务事项关联原运行账本/43ID，不多造失联待办。
+当前本机适配原分支48e2e07/7ec7c6d审合/安装与既有Chat自然final/
+Work Events部署并行；不重做既有注册/OAuth/诊断、不重放unknown。
+新设备自动化/Cloud/鸿蒙/Live留后续长期任务。以下旧paused实施为历史。
+
 ## 10月21日新增单独授权：现有本机能力适配
 
 整体Goal/评教仍paused；当前只实施[本机能力片](LOCAL-CAPABILITIES-2026-10-21.md)。

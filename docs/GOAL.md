@@ -1,5 +1,22 @@
 # 持续 owner goal
 
+2026-10-21 最新批准实施：本人清除旧Goal并明确要求重新设定，新完整
+原生Goal已建立且active（createdAt=1792576484），不迁移旧统计。整体
+通用个人助理目标和原43任务/依赖/历史不缩减；评教独立保持paused，
+Root不再处理，等本人直接与Leader沟通。以下paused开发快照由本节覆盖。
+
+本阶段主线是Leader治理与去中心化工作空间：任务先评级，非开发/明确
+一般任务默认Luna max，高级开发合格强模型额度不足等待，不自动免费
+降级。平时允许开发、本地单测、自我debug和先部署；集成实测/对比/
+故障演练/验收由Leader通常每周集中。真实网内Leader主导独立公开
+personal-assistant-workspace仓库，任务/子任务/依赖/各agent活动与
+plan/文档同源展示，通过mesh-workspace skill调用后端修改。节点各有
+持久副本，随Leader及候选备份选择交接，相遇由agent合并冲突，不设
+永久VPS/电脑主库，不因合并重跑业务。Chat/Events入口及本机已有能力
+并行收尾；开发/合入/部署/待验收/验收分开。当前只是新Goal/合同落盘，
+实际Leader核读、项目接收、运行策略和Web实现须另记真实证据。
+见[批准阶段](STAGE-WORKSPACE-2026-10-21.md)与[Leader治理](LEADER-GOVERNANCE-2026-10-21.md)。
+
 2026-10-21 新的单独授权：整体原生Goal/评教仍paused；当前先适配本机
 已有skill/MCP为Mesh能力。按动作区分可迁移逻辑、认证/网络依赖和
 设备绑定执行，必要时A2A交本机辅助agent。通用新设备自动化只列后续
