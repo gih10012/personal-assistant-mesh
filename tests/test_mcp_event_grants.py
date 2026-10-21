@@ -185,6 +185,51 @@ class GrantLedgerChecks(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Te
         for raw in (registered.refresh_token, registered.access_token, initial.access_token, 'UPSTREAM_REFRESH'):
             self.assertNotIn(raw.encode(), stored)
 
+    async def test_pending_revoke_survives_restart_and_reconciles_without_provider_replay(self):
+        provider = ProviderFixture(self.now, refresh=False)
+        gate, app, unused = self.install(provider)
+        async with app.router.lifespan_context(app):
+            tokens = await provider.exchange_authorization_code(None, None)
+            self.assertTrue(await self.active(gate))
+            with patch.object(gate, '_revoke_token', side_effect=OSError('synthetic metadata failure')):
+                with self.assertRaises(NotConfigured):
+                    await provider.revoke_token(NS(token=tokens.access_token))
+            self.assertEqual(1, provider.calls['revoke'])
+            self.assertFalse(await self.active(gate))
+        # The same original no-refresh grant is still in the original provider.
+        # Restart is not an authorization or a metadata reconciliation.
+        provider2 = ProviderFixture(self.now, provider.state, refresh=False)
+        restarted, app2, unused = self.install(provider2)
+        async with app2.router.lifespan_context(app2):
+            self.assertFalse(await self.active(restarted))
+            self.assertFalse(await restarted.observe_access(tokens.access_token))
+            with restarted.transaction() as db:
+                self.assertEqual(1, db.execute("SELECT COUNT(*) FROM revoke_intents WHERE state='pending'").fetchone()[0])
+                identifier = db.execute('SELECT id FROM grants WHERE revoked=0').fetchone()[0]
+            self.assertFalse(restarted._unrevoked(identifier, P['subject']))
+            # Owner-local recovery only commits the SAME subject's Events block;
+            # it never calls the provider again or repeats any business.
+            result = restarted.revoke_subject(P)
+            self.assertEqual(1, result['reconciled_pending'])
+            self.assertEqual(0, provider2.calls['revoke'])
+            self.assertFalse(await self.active(restarted))
+            self.assertFalse(await restarted.observe_access(tokens.access_token))
+            # Not a permanent global disable: a later ordinary explicit code
+            # authorization can establish its NEW grant, while the old stays out.
+            self.now[0] += 1
+            fresh = await provider2.exchange_authorization_code(None, None)
+            self.assertTrue(await self.active(restarted))
+            self.assertFalse(await restarted.observe_access(tokens.access_token))
+            # If even intent admission cannot commit, the irreversible provider
+            # call is NOT attempted and the caller gets a precise failure.
+            with patch.object(restarted, '_prepare_revoke', side_effect=OSError('synthetic intent failure')):
+                with self.assertRaisesRegex(NotConfigured, 'intent_unconfirmed_not_attempted'):
+                    await provider2.revoke_token(NS(token=fresh.access_token))
+            self.assertEqual(0, provider2.calls['revoke'])
+        stored = restarted.database.read_bytes()
+        self.assertNotIn(tokens.access_token.encode(), stored)
+        self.assertNotIn(fresh.access_token.encode(), stored)
+
 
 try:
     from tests import test_chat_github_oauth as oauth_fixture

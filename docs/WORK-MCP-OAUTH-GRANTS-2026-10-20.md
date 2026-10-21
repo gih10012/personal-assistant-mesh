@@ -79,11 +79,24 @@ ChatGPT Disconnect necessarily emits a visible RFC7009 callback. Unsubscribe,
 upstream GitHub revocation and explicit owner revocation are the real observable
 paths. UI disappearance alone is neither grant evidence nor a revoke signal.
 
-If writing the local revocation marker fails, the original revoke is STILL
-called once, but Events fails closed in process and reports
-`events_local_revoke_metadata_unconfirmed` rather than false success. Do not
-restart to erase that unknown; first reconcile the SAME subject using the local
-revoke and its durable marker. No completed business is repeated.
+Before calling the original revoke, a separate durable `revoke_intents` row
+records only token HASH, verified subject (or unknown owner-namespace scope),
+time and state. If this admission write fails, the original provider is NOT
+called and `events_revoke_intent_unconfirmed_not_attempted` reports that precise
+boundary. Once admitted, the original revoke is called ONCE even if the later
+local block/grant-row write fails; its intent remains pending on failure,
+exception or lost completion, and reports metadata unconfirmed rather than
+claiming the upstream effect is closed.
+
+Startup/current checks, registration/capture and cached authorization all consult
+pending intents. Recreating an instance, old JWTs, ordinary refresh, and even a
+new code hook cannot silently clear one. Owner-local `revoke_subject` can commit
+the SAME subject's Events block/revoke refs and mark its pending intents
+`locally_blocked`, without invoking the provider again. Unknown-subject intents
+require every configured subject's local block before resolution. No global
+re-login, new credential or business retry is needed to reconcile the metadata;
+later normal explicit authorization may establish a NEW grant, while old revoked
+refs stay revoked. `locally_blocked` is not proof of an upstream revoke outcome.
 
 ## Root executable wiring (all identities/paths stay private)
 

@@ -112,8 +112,11 @@ below claim an actual production3.6/3.12 execution or deployment.
 - Current GitHub factory has no public RFC7009 endpoint. Do not claim the
   ChatGPT Disconnect UI necessarily sends a revoke signal. Observable boundaries
   are unsubscribe, TTL/410, upstream revocation, and owner-local revoke. If
-  local revoke metadata is unconfirmed, retain its subject/checkpoint and
-  reconcile before restarting; do not restart to erase in-process uncertainty.
+  local revoke metadata is unconfirmed, its durable pending intent keeps Events
+  fail-closed across restart/capture/refresh. Owner-local same-subject block
+  reconciles only metadata, never repeats the original provider revoke. If even
+  the BEFORE-effect intent cannot persist, the provider is not called and the
+  caller receives the explicit `intent_unconfirmed_not_attempted` failure.
 - Roll back only owned source/config/lifespan, retaining all new tables,
   journals, refs and histories. Never restore a stale DB over the active one.
   Once new reply policies admitted tasks, arrange their original completion or
@@ -131,8 +134,18 @@ Events-only revocation. First new-fixture run had two setup errors (multi-subjec
 fixture and missing refresh key in a legitimate no-refresh response); fixed
 the fixture only, not runtime checks. No old final/full-suite/model trial ran.
 The three assembly checks also passed under the dependency-free system Python
-/0.004s. Plain-core import/discovery now loads exactly four optional grant checks
+/0.004s. At that checkpoint plain-core discovery loaded four optional grant checks
 without JWT/Starlette/FastMCP; those environments are NOT claimed grant-verified.
+
+Follow-up independent review reproduced a concrete P2: old no-refresh Events
+access could return after local revoke metadata failed and the process restarted.
+This continuation adds durable per-subject revoke intents and all authorization
+fences above. The ONE new offline regression passed /0.009s: same failure seam,
+one original provider call, rebuilt instance still denies, old JWT capture and
+cache fast path cannot clear pending, owner-local reconciliation does not replay
+the provider, later explicit new grant can work, and failed intent admission
+calls the provider zero times. This is not a new account/model/platform trial;
+independent re-review is pending until separately recorded by Root.
 
 The current [official MCP Events contract](https://developers.openai.com/plugins/build/mcp-events)
 was fetched in full. Work web / desktop Cloud / dots subscriptions are distinct

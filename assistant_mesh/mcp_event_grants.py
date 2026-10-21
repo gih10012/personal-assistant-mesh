@@ -41,6 +41,9 @@ class CurrentOAuthGrants:
             db.execute('CREATE TABLE IF NOT EXISTS token_refs(hash TEXT PRIMARY KEY,grant_id TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS subject_blocks(subject TEXT PRIMARY KEY,created REAL NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS revocations(sequence INTEGER PRIMARY KEY,grant_id TEXT NOT NULL,reason TEXT NOT NULL,created REAL NOT NULL)')
+            db.execute('''CREATE TABLE IF NOT EXISTS revoke_intents(
+                sequence INTEGER PRIMARY KEY,subject TEXT,token_hash TEXT NOT NULL,
+                created REAL NOT NULL,state TEXT NOT NULL)''')
             expected = {'format': FORMAT, 'owner': policy['owner_binding'],
                         'issuer': policy['issuer_url'], 'resource': policy['resource_url'], 'source': SOURCE}
             old = dict(db.execute('SELECT key,value FROM metadata'))
@@ -84,6 +87,13 @@ class CurrentOAuthGrants:
             raise PermissionError('events_oauth_verified_grant_required')
         return claims, entry
 
+    @staticmethod
+    def _pending_revoke(db, subject):
+        # A missing verified subject is an unresolved owner-namespace revoke,
+        # never permission to ignore the operation after a restart.
+        return db.execute("SELECT 1 FROM revoke_intents WHERE state='pending' "
+                          'AND (subject=? OR subject IS NULL) LIMIT 1', (subject,)).fetchone() is not None
+
     async def _register(self, access_token, refresh_token=None, *, fresh_code=False):
         claims, entry = self._claims(access_token)
         mapping = await self.provider._jti_mapping_store.get(key=claims['jti'])
@@ -97,6 +107,8 @@ class CurrentOAuthGrants:
         with self.transaction() as db:
             old = db.execute('SELECT body,revoked FROM grants WHERE id=?', (identifier,)).fetchone()
             blocked = db.execute('SELECT created FROM subject_blocks WHERE subject=?', (entry['mesh_subject'],)).fetchone()
+            if self._pending_revoke(db, entry['mesh_subject']):
+                return False
         if old and old['revoked']:
             return False  # An old still-valid JWT cannot undo explicit Events revocation.
         if blocked and not (fresh_code and upstream.created_at > blocked[0]):
@@ -135,7 +147,8 @@ class CurrentOAuthGrants:
             # Owner-private revocation can race an awaited identity request.
             blocked = db.execute('SELECT created FROM subject_blocks WHERE subject=?', (entry['mesh_subject'],)).fetchone()
             current = db.execute('SELECT revoked FROM grants WHERE id=?', (identifier,)).fetchone()
-            if ((current and current[0]) or (blocked and not (fresh_code and upstream.created_at > blocked[0]))):
+            if (self._pending_revoke(db, entry['mesh_subject']) or (current and current[0])
+                    or (blocked and not (fresh_code and upstream.created_at > blocked[0]))):
                 return False
             if blocked:
                 db.execute('DELETE FROM subject_blocks WHERE subject=?', (entry['mesh_subject'],))
@@ -172,7 +185,8 @@ class CurrentOAuthGrants:
         entry = self._entry(principal)
         async with self.lock:
             with self.transaction() as db:
-                if db.execute('SELECT 1 FROM subject_blocks WHERE subject=?', (entry['mesh_subject'],)).fetchone():
+                if (self._pending_revoke(db, entry['mesh_subject']) or db.execute(
+                        'SELECT 1 FROM subject_blocks WHERE subject=?', (entry['mesh_subject'],)).fetchone()):
                     return False
                 rows = [(row[0], json.loads(row[1])) for row in db.execute('SELECT id,body FROM grants WHERE revoked=0')]
             for identifier, ref in rows:
@@ -205,7 +219,7 @@ class CurrentOAuthGrants:
     def _unrevoked(self, identifier, subject):
         with self.transaction() as db:
             row = db.execute('SELECT revoked FROM grants WHERE id=?', (identifier,)).fetchone()
-            return row is not None and row[0] == 0 and not db.execute(
+            return row is not None and row[0] == 0 and not self._pending_revoke(db, subject) and not db.execute(
                 'SELECT 1 FROM subject_blocks WHERE subject=?', (subject,)).fetchone()
 
     def account_active(self, principal):
@@ -218,11 +232,11 @@ class CurrentOAuthGrants:
         except Exception:
             future.cancel(); return False
 
-    def revoke_subject(self, principal, *, reason='owner_revoked'):
+    def revoke_subject(self, principal, *, reason='owner_revoked', reconcile=True):
         """Owner-code-only local revocation; no HTTP/tool route or bearer needed."""
         if reason not in ('owner_revoked', 'oauth_revoke'):
             raise ValueError('events_oauth_revoke_reason_invalid')
-        entry = self._entry(principal); count = 0
+        entry = self._entry(principal); count = reconciled = 0
         with self.transaction() as db:
             db.execute('INSERT OR REPLACE INTO subject_blocks VALUES(?,?)', (entry['mesh_subject'], self.clock()))
             for row in db.execute('SELECT id,body FROM grants WHERE revoked=0').fetchall():
@@ -231,25 +245,55 @@ class CurrentOAuthGrants:
                     db.execute('UPDATE grants SET revoked=1 WHERE id=?', (row['id'],))
                     db.execute('INSERT INTO revocations(grant_id,reason,created) VALUES(?,?,?)',
                                (row['id'], reason, self.clock())); count += 1
-        self.cache.clear()
-        return {'revoked': count}
+            if reconcile:
+                # Owner-local reconciliation closes only Events metadata. It
+                # NEVER repeats the original provider's possibly applied revoke.
+                reconciled = db.execute("UPDATE revoke_intents SET state='locally_blocked' "
+                    "WHERE subject=? AND state='pending'", (entry['mesh_subject'],)).rowcount
+                subjects = {item['mesh_subject'] for item in self.policy['subjects']}
+                blocked = {row[0] for row in db.execute('SELECT subject FROM subject_blocks')}
+                if subjects <= blocked:
+                    reconciled += db.execute("UPDATE revoke_intents SET state='locally_blocked' "
+                                             "WHERE subject IS NULL AND state='pending'").rowcount
+        self.cache.clear(); self.uncertain = False
+        return {'revoked': count, 'reconciled_pending': reconciled}
 
-    def _revoke_token(self, token):
+    def _token_principal(self, token):
         with self.transaction() as db:
             row = db.execute('SELECT g.body FROM token_refs t JOIN grants g ON g.id=t.grant_id WHERE t.hash=?', (_hash(token),)).fetchone()
         if row:
             ref = json.loads(row[0])
-            self.revoke_subject({'owner_id': ref['owner_id'], 'source': ref['source'],
-                'subject': ref['subject'], 'scopes': ['tasks:read']}, reason='oauth_revoke')
-            return
+            return {'owner_id': ref['owner_id'], 'source': ref['source'],
+                    'subject': ref['subject'], 'scopes': ['tasks:read']}
         for use in ('access', 'refresh'):
             try:
                 unused_claims, entry = self._claims(token, use)
             except Exception:
                 continue
-            self.revoke_subject({'owner_id': self.policy['owner_binding'], 'source': SOURCE,
-                'subject': entry['mesh_subject'], 'scopes': ['tasks:read']}, reason='oauth_revoke')
-            return
+            return {'owner_id': self.policy['owner_binding'], 'source': SOURCE,
+                    'subject': entry['mesh_subject'], 'scopes': ['tasks:read']}
+        return None
+
+    def _prepare_revoke(self, token):
+        principal = self._token_principal(token)
+        subject = self._entry(principal)['mesh_subject'] if principal is not None else None
+        with self.transaction() as db:
+            row = db.execute("INSERT INTO revoke_intents(subject,token_hash,created,state) VALUES(?,?,?,'pending')",
+                             (subject, _hash(token), self.clock()))
+            sequence = row.lastrowid
+        self.cache.clear()
+        return sequence
+
+    def _revoke_token(self, token):
+        principal = self._token_principal(token)
+        if principal is None:
+            return False
+        self.revoke_subject(principal, reason='oauth_revoke', reconcile=False)
+        return True
+
+    def _finish_revoke(self, sequence):
+        with self.transaction() as db:
+            db.execute("UPDATE revoke_intents SET state='closed' WHERE sequence=? AND state='pending'", (sequence,))
 
     def install(self, provider, server, app):
         """AFTER original pinned build_app, BEFORE any ASGI startup/requests."""
@@ -281,16 +325,27 @@ class CurrentOAuthGrants:
                 return result
         async def revoke(token):
             async with self.lock:
-                error = None
+                # Durable BEFORE the original provider can change a credential.
+                # Failure here is NOT an attempted upstream revocation.
                 try:
-                    self._revoke_token(token.token)  # Immediate local Events boundary.
+                    intent = self._prepare_revoke(token.token)
                 except Exception:
-                    self.cache.clear(); self.uncertain = True; error = True
-                # Preserve the original call even if optional metadata failed;
-                # then report unknown rather than a false successful Events revoke.
+                    self.cache.clear(); self.uncertain = True
+                    raise NotConfigured('events_revoke_intent_unconfirmed_not_attempted') from None
+                confirmed = False
+                try:
+                    confirmed = self._revoke_token(token.token) is True
+                except Exception:
+                    self.cache.clear()  # Durable intent, not a memory-only fence.
+                # Once admitted, preserve ONE original call even if the later
+                # local metadata failed. Exceptions/unknown leave intent pending.
                 result = await original_revoke(token)
-                if error:
+                if not confirmed:
                     raise NotConfigured('events_local_revoke_metadata_unconfirmed')
+                try:
+                    self._finish_revoke(intent)
+                except Exception:
+                    raise NotConfigured('events_local_revoke_metadata_unconfirmed') from None
                 return result
         provider.exchange_authorization_code, provider.exchange_refresh_token, provider.revoke_token = code, refresh, revoke
         provider._mesh_events_grant_guard = self
