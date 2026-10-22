@@ -8,8 +8,12 @@
 源码48e2e07/7ec7c6d已独审并合入，五项有限unit由原作者/独审通过；
 真实包12个source pin、11个portable文件已私有准备并传VPS。首次安装
 在中间目录权限775处停下，无完成receipt，Root保留原部分目标/原SHA；
-定位为SSH umask0002与Path.mkdir(parents=True)中间模式差异，精确恢复
-修复4a05981待审合/部署，不换目录或覆盖凑成功。尚未注册/实际使用。
+定位为SSH umask0002与Path.mkdir(parents=True)中间模式差异。修复4a05981
+已审合，Root两个有限unit通过0.015s；首个类名拼写错误仅产生loader错误，
+不称产品回归。Root只收紧原安装新建的那一个775目录，再用原目标/
+原bundle SHA显式resume-exact：11文件和receipt完成，无覆盖/换目录。
+原bundle SHA91600fce20691488bb783a52cf216550695c09c56c0d68be97e158a94bc68ae5。
+没有认证/profile改变，runtime_verified仍false；尚未注册/实际使用。
 Root完整读过
 本机ncut-web-api、xiumi-native-clipboard与niri-computer-use的SKILL；
 实际技能包/配置/认证和用户成果均留私有位置，不收入公开仓库。
