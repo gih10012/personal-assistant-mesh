@@ -1,11 +1,16 @@
 import copy
+import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from assistant_mesh import existing_capabilities as adapter
+from assistant_mesh import existing_skill_entry as entry
 from assistant_mesh.networking import Network
 from assistant_mesh.remote import Remote
 from assistant_mesh.resources import Registry
@@ -74,7 +79,8 @@ class ExistingCapabilitiesTests(unittest.TestCase):
             self.assertEqual('declared', row['verification'])
             self.assertFalse(row['spec']['runtime_verified'])
             self.assertFalse(row['spec']['managed_use_authorized'])
-        self.assertEqual(3, len(registry.discover()['capabilities']))
+        self.assertEqual([], registry.discover()['capabilities'])
+        self.assertEqual(3, len(registry.discover(include_unavailable=True)['capabilities']))
 
     def test_private_bundle_install_preserves_code_but_no_account_or_device_backend(self):
         value = adapter.build_bundle(self.inventory)
@@ -162,6 +168,87 @@ class ExistingCapabilitiesTests(unittest.TestCase):
         owner.chmod(0o644)
         with self.assertRaises(adapter.CapabilityAdaptationError):
             adapter._private_json(owner)
+
+    def test_installed_entry_is_discoverable_exact_and_runs_only_its_source_verifier(self):
+        for item in self.selection['sources']:
+            for member in item['files']:
+                if member['path'].endswith('.py'):
+                    (Path(item['root']) / member['path']).write_text(
+                        "raise AssertionError('original skill must not execute during discovery')")
+        self.inventory = adapter.pin_selection(self.selection)
+        bundle = adapter.build_bundle(self.inventory)
+        installed = self.root / 'installed'
+        original = adapter.install_bundle(bundle, installed)
+        snapshot = {item['path']: (installed / item['path']).read_bytes() for item in original['files']}
+        discovery = entry.installed_discovery(bundle, installed, 'cloud')
+        self.assertEqual(3, len(discovery['actions']))
+        self.assertFalse(discovery['runtime_verified'])
+        self.assertFalse(discovery['native_discovery_verified'])
+        profile = self.root / 'current-profile-skills'
+        profile.mkdir(mode=0o700)
+        target = self.root / 'mesh-entry'
+        bundle_file, plan_file = self.root / 'bundle.json', self.root / 'entry-plan.json'
+        raw = adapter._encoded(bundle)
+        adapter._write_new(bundle_file, raw)
+        with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
+            result = adapter.main(['entry-plan', '--bundle', str(bundle_file),
+                '--bundle-sha256', adapter._sha(raw), '--installation', str(installed),
+                '--execution-provider', 'cloud', '--destination', str(target),
+                '--python-executable', sys.executable, '--profile-skills', str(profile),
+                '--output', str(plan_file)])
+        self.assertEqual(0, result, output.getvalue())
+        plan_sha = json.loads(output.getvalue())['sha256']
+        plan, unused = adapter._private_json(plan_file, expected_sha=plan_sha)
+        self.assertFalse(target.exists())  # Planning does not change the native profile.
+        self.assertFalse((profile / entry.NAME).exists())
+        receipt = entry.install_entry(plan)
+        self.assertTrue(receipt['profile_link_created'])
+        self.assertEqual(target, (profile / entry.NAME).resolve())
+        binding = json.loads((target / 'references/binding.json').read_text())
+        self.assertEqual({'ncut.knowledge', 'xiumi.compose', 'xiumi.validate'}, set(binding['actions']))
+        self.assertEqual('laptop', binding['source_provider'])
+        observed = (target / 'installation.json').stat().st_mtime_ns
+        again = entry.install_entry(plan, resume_exact=True)
+        self.assertFalse(again['profile_link_created'])
+        self.assertEqual(observed, (target / 'installation.json').stat().st_mtime_ns)
+        with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
+            result = adapter.main(['entry-install', '--plan', str(plan_file),
+                                   '--plan-sha256', plan_sha, '--resume-exact'])
+        self.assertEqual(0, result, output.getvalue())
+        self.assertFalse(json.loads(output.getvalue())['profile_link_created'])
+        actual = subprocess.run([sys.executable, '-B', str(target / 'scripts/verify.py')],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10)
+        self.assertEqual(0, actual.returncode, actual.stderr)
+        self.assertTrue(json.loads(actual.stdout)['source_integrity_checked'])
+        self.assertFalse(json.loads(actual.stdout)['runtime_verified'])
+        self.assertEqual(snapshot, {name: (installed / name).read_bytes() for name in snapshot})
+        self.assertTrue(all(item['arguments']['health'] == 'unavailable'
+                            for item in receipt['registration_requests']))
+        self.assertFalse(any('niri' in item['arguments']['id']
+                             for item in receipt['registration_requests']))
+
+    def test_entry_refuses_drift_or_an_existing_profile_target_before_writing(self):
+        bundle = adapter.build_bundle(self.inventory)
+        installed = self.root / 'installed'
+        adapter.install_bundle(bundle, installed)
+        profile = self.root / 'current-profile-skills'
+        profile.mkdir(mode=0o700)
+        target = self.root / 'mesh-entry'
+        plan = entry.entry_plan(bundle, installed, target, 'cloud', sys.executable, profile)
+        path = installed / bundle['files'][0]['path']
+        path.write_text('changed after the plan')
+        with self.assertRaises(adapter.CapabilityAdaptationError):
+            entry.install_entry(plan)
+        self.assertFalse(target.exists())
+        with self.assertRaises(adapter.CapabilityAdaptationError):
+            entry.installed_discovery(bundle, installed, 'cloud')
+        snapshot = adapter._bundle_members(bundle)[0][0][1]
+        path.write_bytes(snapshot)
+        (profile / entry.NAME).mkdir(mode=0o700)
+        with self.assertRaises(adapter.CapabilityAdaptationError):
+            entry.install_entry(plan)
+        self.assertFalse(target.exists())
+        self.assertEqual(snapshot, path.read_bytes())
 
     def test_install_nested_directories_private_with_umask_0002(self):
         bundle = adapter.build_bundle(self.inventory)
