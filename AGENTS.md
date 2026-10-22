@@ -1,5 +1,15 @@
 # Personal Assistant Mesh working contract
 
+Owner clarification (2026-10-22): Claw is a capable Luna-level self-service
+assistant, not a mandatory relay. If it already has all authorized inputs and
+needs no other Mesh node, it should directly handle simple searches, analysis
+or table edits and reply naturally. If source data/files live on the computer
+or another node, the owner requests saving there, or a canonical centralized
+file workspace already exists, delegate that work to Leader rather than making
+another independent copy. Existing task/channel receipts and communication
+management remain local entrance duties. Do not ask for confirmation merely
+to choose direct handling versus authorized delegation. Preserve native tools.
+
 Latest approved implementation (2026-10-21): the owner cleared the previous
 native Goal and explicitly requested a NEW full Goal. It is active; old usage
 was not migrated. The effective stage is docs/STAGE-WORKSPACE-2026-10-21.md

@@ -1,11 +1,16 @@
 # 现有本机能力适配；新节点自动化后续
 
-本人此次明确：先把新节点自动化列plan，当前先适配已有电脑。整体原生
-开发Goal与评教仍paused；本片不恢复其它实施或旧unknown，不改参考项目。
+本人此次明确：先把新节点自动化列plan，当前先适配已有电脑。最新
+新建原生开发Goal已active；评教独立paused，不改参考项目或重放unknown。
 
 ## 当前结果
 
-本片仅分配给独立实现专员，还未部署、注册或实测成功。Root完整读过
+源码48e2e07/7ec7c6d已独审并合入，五项有限unit由原作者/独审通过；
+真实包12个source pin、11个portable文件已私有准备并传VPS。首次安装
+在中间目录权限775处停下，无完成receipt，Root保留原部分目标/原SHA；
+定位为SSH umask0002与Path.mkdir(parents=True)中间模式差异，精确恢复
+修复4a05981待审合/部署，不换目录或覆盖凑成功。尚未注册/实际使用。
+Root完整读过
 本机ncut-web-api、xiumi-native-clipboard与niri-computer-use的SKILL；
 实际技能包/配置/认证和用户成果均留私有位置，不收入公开仓库。
 
@@ -28,7 +33,7 @@
 3. 复用现有能力目录和remote_delegate/A2A，为niri提供本机helper路径。
    代码存在、插件enabled或请求accepted不是实际执行证据。
 4. Root串行部署。GUI保持单操作者，遵守原熄屏/最低亮度/恢复约定；
-   最多一次只读窗口枚举等有限验收，不执行学校业务或修改用户应用。
+   真实A2A/只读窗口枚举交Leader周验收队列，不执行学校业务或修改应用。
 
 独立专员existing_node_capability_adapt_20261021，branch
 work/existing-node-capabilities-20261021，base423a8a6；Root是唯一共享
