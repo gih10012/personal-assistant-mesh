@@ -1,8 +1,10 @@
 # Private metadata diagnostics (opt-in source candidate)
 
 No deployment, model turn, task recovery, archive re-compression, database write
-or old-case replay was performed by this slice. Three bounded local units use
-fake RPC/save functions and temporary private logs, not platform acceptance.
+or old-case replay was performed by this slice. Three initial bounded local
+units and one added capacity unit use fake RPC/save functions and temporary
+private logs, not platform acceptance. The capacity change reran only its new
+unit, not the original group or a full suite.
 
 ## Frozen assembly
 
@@ -17,7 +19,8 @@ from assistant_mesh.metadata_diagnostics import (
     MetadataDiagnostics, install_save_observer, observe_worker)
 
 # Root prepares an owner-private 0700 parent. No implicit directory creation.
-diagnostics = MetadataDiagnostics('/PRIVATE/diagnostics/metadata.jsonl', enabled=True)
+diagnostics = MetadataDiagnostics('/PRIVATE/diagnostics/metadata.jsonl', enabled=True,
+                                  max_bytes=8 * 1024 * 1024)
 install_save_observer(sessions, enabled=True)
 
 # ExistingWorker is the ALREADY assembled governed/scoped Worker, or the
@@ -60,8 +63,22 @@ read and gzip: it cannot distinguish those without modifying the original save
 implementation. Client failures during ticks retain their own route/status.
 
 The log is an owner-owned regular single-link 0600 file in a private parent.
-Writes append one bounded JSON line and fsync. Missing/unsafe/full log storage
-only increments the recorder's in-memory `dropped` count; it never masks the
+Writes append one bounded JSON line and fsync. Total size defaults to a hard
+8 MiB maximum; the owner may set a smaller positive byte cap. Larger settings
+are clamped to 8 MiB; invalid/nonpositive settings allow no appended records.
+Cooperating writers use a nonblocking file lock to check size and append under
+one lock; configure them with the same cap. A busy lock, full cap or unavailable
+locking simply drops that record. There is no automatic deletion, rotation,
+truncation or overwrite, even if a preexisting file already exceeds the cap.
+Successful heartbeat and empty-claim polling is omitted by default, without
+incrementing `dropped`; failures and nonempty claims remain observable. Optional
+`successful_polls=True` retains those successes under the same finite cap.
+Successful per-64KiB save ticks are also omitted by default to avoid repeated
+fsync during local compression; failed ticks and upload/commit/save boundaries
+remain recorded. `successful_ticks=True` is available for bounded diagnosis.
+
+Missing/unsafe/full log storage only increments the recorder's in-memory
+`dropped` count; it never masks the
 original result/exception or stops native work. There is no fallback log to
 stdout/journal/public Git. This is best-effort telemetry, not a recovery journal,
 hard real-time guarantee or defense against another malicious same-UID process.

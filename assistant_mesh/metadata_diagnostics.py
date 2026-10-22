@@ -15,6 +15,11 @@ import threading
 import time
 import urllib.error
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 
 _LOCAL = threading.local()
 _RPC = frozenset(('initialize', 'account/read', 'account/rateLimits/read', 'model/list',
@@ -30,6 +35,7 @@ _ACTIONS = frozenset(('upload', 'commit', 'download', 'children', 'notify', 'del
 _KINDS = frozenset(('client_request', 'native_rpc', 'native_rollout', 'native_goal', 'native_finish', 'native_close',
                     'session_save', 'session_tick'))
 _IDENTITY = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$')
+MAX_LOG_BYTES = 8 * 1024 * 1024
 
 
 def _integer(value, maximum=2 ** 63 - 1):
@@ -87,9 +93,13 @@ def _native_error(record, value):
 
 
 class MetadataDiagnostics:
-    def __init__(self, path=None, enabled=False):
+    def __init__(self, path=None, enabled=False, max_bytes=MAX_LOG_BYTES, successful_polls=False,
+                 successful_ticks=False):
         self.enabled = enabled is True
         self.path, self.dropped = path, 0
+        self.max_bytes = min(max_bytes, MAX_LOG_BYTES) if type(max_bytes) is int and max_bytes > 0 else 0
+        self.successful_polls = successful_polls is True
+        self.successful_ticks = successful_ticks is True
 
     @contextlib.contextmanager
     def bind(self, task_provider):
@@ -126,11 +136,18 @@ class MetadataDiagnostics:
                 raise OSError(errno.EPERM, 'private_log_required')
             descriptor = os.open(str(path), os.O_APPEND | os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW |
                                  getattr(os, 'O_NONBLOCK', 0), 0o600)
+            if fcntl is None:
+                raise OSError(errno.ENOSYS, 'private_log_lock_unavailable')
+            # Cooperating writers share the same finite budget; no waiting on
+            # another diagnostic writer or check-then-append capacity race.
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             entry = os.fstat(descriptor)
             if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.getuid()
                     or entry.st_nlink != 1 or entry.st_mode & 0o077):
                 raise OSError(errno.EPERM, 'private_log_required')
             data = (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+            if entry.st_size + len(data) > min(self.max_bytes, MAX_LOG_BYTES):
+                raise OSError(errno.ENOSPC, 'private_log_capacity_reached')
             if os.write(descriptor, data) != len(data):
                 raise OSError(errno.ENOSPC, 'private_log_incomplete')
             os.fsync(descriptor)
@@ -163,6 +180,8 @@ class MetadataDiagnostics:
             raise  # Preserve the exact original exception object and traceback.
         finally:
             try:
+                quiet = record.pop('_omit_success', False) or (kind == 'session_tick' and not self.successful_ticks)
+                omit = quiet and record['outcome'] == 'returned'
                 frame = getattr(_LOCAL, 'frame', None)
                 session = frame.get('session') if frame and frame['recorder'] is self else None
                 if session is not None:
@@ -172,7 +191,8 @@ class MetadataDiagnostics:
                     record['substep'] = kind if kind in _KINDS else 'other'
                 record['elapsed_ms'] = round(max(0, time.monotonic() - started) * 1000, 3)
                 record['observed_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                self._write(record)
+                if not omit:
+                    self._write(record)
             except Exception:
                 self.dropped += 1
 
@@ -200,7 +220,12 @@ def observe_client(client, recorder):
             with recorder.span('client_request', method=_ROUTES.get(route), action=action, part=part,
                                payload_bytes=_bytes(body)) as record:
                 record['http_method'] = 'POST' if body is not None else 'GET'
-                return client.request(path, body)  # Exactly one original call.
+                result = client.request(path, body)  # Exactly one original call.
+                if not recorder.successful_polls and (route == '/v1/heartbeat' or
+                        (route == '/v1/claim' and isinstance(result, dict)
+                         and 'task' in result and result['task'] is None)):
+                    record['_omit_success'] = True
+                return result
 
     return ObservedClient()
 

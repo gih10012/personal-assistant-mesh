@@ -91,7 +91,7 @@ class MetadataDiagnosticsTests(unittest.TestCase):
         self.assertEqual('native_rpc', records[0]['kind'])
         self.assertEqual(errno.ENOSPC, records[0]['errno'])
         self.assertEqual((-32000, 503), (records[0]['native_error_code'], records[0]['http_status']))
-        self.assertEqual(['session_pack_tick', 'session_commit', 'session_commit'],
+        self.assertEqual(['session_commit', 'session_commit'],
                          [r['substep'] for r in records[1:]])
         self.assertNotIn('/private/', self.log.read_text())
         self.assertNotIn('PRIVATE_BODY', self.log.read_text())
@@ -124,6 +124,40 @@ class MetadataDiagnosticsTests(unittest.TestCase):
         self.assertEqual(1, worker.client.calls)
         self.assertEqual(1, recorder.dropped)
         self.assertFalse((self.log.parent / 'missing').exists())
+
+    def test_capacity_and_successful_polls_never_grow_existing_log(self):
+        failure = ValueError('PRIVATE original failure')
+        class Client:
+            calls = 0
+            def request(self, path, body):
+                self.calls += 1
+                if path == '/v1/heartbeat':
+                    return {'ok': True}
+                if path == '/v1/claim':
+                    return {'task': None}
+                raise failure
+        client = Client()
+        observed = observe_client(client, self.recorder)
+        self.assertEqual(8 * 1024 * 1024, self.recorder.max_bytes)
+        with self.recorder.bind(lambda: TASK):
+            with self.assertRaises(ValueError) as caught:
+                observed.request('/v1/session', {'action': 'commit'})
+            self.assertIs(failure, caught.exception)
+            original = self.log.read_bytes()
+            self.recorder.max_bytes = len(original)  # Owner reduces the finite cap.
+            for _ in range(10):
+                self.assertEqual({'ok': True}, observed.request('/v1/heartbeat', {}))
+                self.assertEqual({'task': None}, observed.request('/v1/claim', {}))
+                with self.recorder.span('session_tick'):
+                    pass
+            self.assertEqual(original, self.log.read_bytes())
+            self.assertEqual(0, self.recorder.dropped)
+            with self.assertRaises(ValueError) as caught:
+                observed.request('/v1/session', {'action': 'commit'})
+            self.assertIs(failure, caught.exception)
+        self.assertEqual(22, client.calls)
+        self.assertEqual(1, self.recorder.dropped)
+        self.assertEqual(original, self.log.read_bytes())
 
 
 if __name__ == '__main__':
