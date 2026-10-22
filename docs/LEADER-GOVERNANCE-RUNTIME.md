@@ -94,6 +94,17 @@ returning no task. Unrelated work must remain claimable. Native active-goal
 automatic turns, manager-created standalone processes and cross-harness memory
 are not covered by this explicit-turn wrapper.
 
+The Oct 23 owner clarification requires automatic/coordinator-led safe resume,
+not another manual owner "continue". Existing authority retries can revisit a
+pure preflight wait, and governance rechecks the actual qualified account chain;
+the opt-in consumer never clears an effect guard or owner pause. This is NOT a
+claim that all scopes, stopped external specialists, or active native Goal turns
+already have a production recovery coordinator. The original workspace children
+failed after native start, and the parent's extra automatic turn also needs its
+own closure review: quota recovery alone cannot safely requeue those cases.
+Keep authority reset-aware scheduling and native Goal lifecycle as explicit
+remaining implementation work, separate from the already installed contract.
+
 ## Leader weekly queue
 
 ```bash

@@ -1,5 +1,14 @@
 # Personal Assistant Mesh working contract
 
+Owner reaffirmation (2026-10-23): quota recovery should resume eligible work
+without another owner "continue". Recheck each executor's actual qualified
+route; a user report is a wake hint, not proof that every node/account recovered.
+The Leader/coordinator continues the SAME stopped specialist, branch, task,
+session and safe checkpoint, or records why that work must still wait/review.
+Never clear unknown effects or owner pauses, reset a native Goal, replay settled
+work, or downgrade advanced work to a free model. Routine development resumes
+independently of the weekly acceptance window. See the quota/resume contract.
+
 Owner clarification (2026-10-22): Claw is a capable Luna-level self-service
 assistant, not a mandatory relay. If it already has all authorized inputs and
 needs no other Mesh node, it should directly handle simple searches, analysis
