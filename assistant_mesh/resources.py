@@ -196,13 +196,17 @@ class Registry:
             raise Conflict('capability_lease_not_live')
 
     def advertise(self, actor, id, kind, spec=None, description='', lease_seconds=90,
-                  principal=None, expected_epoch=None):
+                  principal=None, expected_epoch=None, health=None):
+        # Source-only entries can start unavailable in the SAME INSERT. Omitted
+        # health preserves the original unknown/default visibility contract.
         actor, identity, kind = _name(actor, 'actor'), _name(id, 'capability_id'), _name(kind, 'kind')
         principal = actor if principal is None else _name(principal, 'principal')
         if principal != actor:
             raise PermissionError('capability_principal_mismatch')
         if not isinstance(description, str) or len(description.encode('utf8')) > 8000:
             raise ValueError('invalid_description')
+        if health is not None:
+            _name(health, 'health', 100)
         spec = {} if spec is None else spec
         if not isinstance(spec, dict):
             raise ValueError('invalid_capability_spec')
@@ -217,7 +221,8 @@ class Registry:
                     raise PermissionError('capability_principal_mismatch')
                 if row['revoked']:
                     raise Conflict('capability_revoked')
-                same = row['kind'] == kind and row['description'] == description and row['spec'] == encoded
+                same = (row['kind'] == kind and row['description'] == description and row['spec'] == encoded
+                        and (health is None or row['health'] == health))
                 # An identical advertisement is a retry, not a lease renewal.
                 if same and row['deadline'] > now:
                     if expected_epoch is not None and row['epoch'] != _epoch(expected_epoch):
@@ -226,12 +231,12 @@ class Registry:
                 if expected_epoch is None or row['epoch'] != _epoch(expected_epoch):
                     raise Conflict('stale_capability_epoch')
                 db.execute('UPDATE capabilities SET kind=?,description=?,spec=?,redacted=?,epoch=epoch+1,health=?,deadline=?,updated=? WHERE id=?',
-                           (kind, description, encoded, int(redacted), 'unknown', now + seconds, now, identity))
+                           (kind, description, encoded, int(redacted), health or 'unknown', now + seconds, now, identity))
             else:
                 if expected_epoch is not None:
                     raise Conflict('capability_not_registered')
                 db.execute('INSERT INTO capabilities VALUES(?,?,?,?,?,?,1,?,?,0,?,?)',
-                           (identity, actor, kind, description, encoded, int(redacted), 'unknown', now + seconds, now, now))
+                           (identity, actor, kind, description, encoded, int(redacted), health or 'unknown', now + seconds, now, now))
             result = self._view(self._find(db, identity))
             self._audit(db, actor, 'advertise', identity, {'epoch': result['epoch'], 'kind': kind})
             return result

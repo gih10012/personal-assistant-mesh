@@ -33,8 +33,11 @@ Linux 0700/0600 是本 CLI 的存储适配；合同不要求未来 Windows/手�
 ## 来源清单与私有便携包
 
 `python3 -m assistant_mesh.existing_capabilities` 可独立安装在新的源码目录，
-不需要加载新服务或原核心。所有命令只读源码/生成私有文件和现有 API
-负载，不执行技能、调用模型、访问业务 HTTP、修改原 profile 或注册能力。
+不需要加载新服务或原核心。原命令只读源码/生成私有文件和现有 API
+负载；新增 `entry-install` 仅供Root显式安装一份独立Mesh入口及精确
+profile skill链接，不改原skill/config.toml/认证。所有命令均不执行原
+技能、调用模型、访问业务HTTP或向Registry发请求。具体接线见
+[现有设备入口](EXISTING-CAPABILITY-ENTRY-2026-10-22.md)。
 
 先在仓库外本人 0700 目录保存 0600 选择清单，参照
 [选择格式](../deploy/existing-capabilities-selection.json.example)。示例绝对
@@ -99,7 +102,11 @@ python3 -m assistant_mesh.existing_capabilities advertisements --owner /PRIVATE/
 覆盖：实际提交还由原 `/v1/resource/action` 的认证主体决定，不能
 为另一主体注册授权。Root 在实际安装/必要检查后显式提交原负载；旧
 目录联邦自动转发声明，不转发 grant / 容量 / 认证。原 Registry 的
-`available` 仅说明租约/声明健康，不是实际调用验收。所有新 spec 都保留
+`available` 仅说明租约/声明健康，不是实际调用验收。本片为 `advertise`
+增加可选 `health`，省略时旧默认 `unknown` 和旧行为保持；本CLI的
+source-only负载明确携 `health=unavailable`，同次INSERT即从默认可用
+目录隐藏，不先广告为available再用第二次RPC补救。旧Registry未加载
+此可选参数时会拒绝负载，不能丢掉health重试。所有新 spec 都保留
 `source_pinned_not_executed/runtime_verified=false/managed_use_authorized=false`。
 真实结果通过原 owner 独立观测保存，不能把改这个 boolean 当作核验。
 

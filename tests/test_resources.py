@@ -45,6 +45,25 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual('exact_grant_required', result['reason'])
         self.assertTrue(self.registry.authorize('node:a', 'cap-a', 'own.native.tool', '/project')['allowed'])
 
+    def test_initial_unavailable_is_atomic_retryable_and_keeps_the_legacy_default(self):
+        with self.store.transaction() as db:
+            db.execute("CREATE TRIGGER source_only_initial_health AFTER INSERT ON capabilities "
+                       "WHEN NEW.id='not-ready' AND NEW.health!='unavailable' "
+                       "BEGIN SELECT RAISE(ABORT,'must start unavailable'); END")
+        first = self.advertise(id='not-ready', health='unavailable')
+        self.assertFalse(first['available'])
+        self.assertEqual([], self.registry.discover()['capabilities'])
+        self.assertEqual('declared', first['health_verification'])
+        self.now += 10
+        retry = self.advertise(id='not-ready', health='unavailable')
+        self.assertEqual(first['deadline'], retry['deadline'])
+        self.assertEqual(1, retry['epoch'])
+        self.assertEqual(1, len(self.registry.audit()['events']))
+        with self.assertRaises(Conflict):
+            self.advertise(id='not-ready', health='unknown')
+        self.assertEqual('unknown', self.advertise(id='legacy-default')['health'])
+        self.assertTrue(self.registry.describe('legacy-default')['available'])
+
     def test_principal_cannot_be_spoofed_even_by_provider(self):
         with self.assertRaises(PermissionError):
             self.registry.advertise('node:b', 'cap-a', 'new.tool', principal='node:a')

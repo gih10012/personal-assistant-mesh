@@ -1,8 +1,8 @@
 """Explicit adaptation of three existing owner skills, not a new-node installer.
 
-This optional CLI builds declarations and exact private source bundles. It never
-imports a skill, starts an agent, touches authentication state or calls a Mesh
-server. Registry and remote-delegation payloads use the existing APIs. Code
+This optional CLI builds declarations, exact private source bundles and an
+explicit existing-profile skill entry. It never imports a skill, starts an
+agent, touches authentication state or calls a Mesh server. Registry and remote-delegation payloads use the existing APIs. Code
 presence is not readiness, an advertisement is not a grant, and a copied skill
 does not acquire its source device's sessions or permissions.
 """
@@ -302,7 +302,7 @@ def advertisements(value, execution_provider=None, lease_seconds=90):
         output.append({'action': 'advertise', 'arguments': {
             'id': descriptor['instance'], 'kind': descriptor['class'],
             'description': 'Existing owner capability; source pinned, runtime unverified.',
-            'spec': descriptor, 'lease_seconds': lease_seconds}})
+            'spec': descriptor, 'lease_seconds': lease_seconds, 'health': 'unavailable'}})
     return {'format': 'mesh-existing-capability-advertisements/1', 'provider': provider,
             'requests': output, 'written': False, 'grants_created': False,
             'runtime_verified': False}
@@ -385,12 +385,8 @@ def _existing_members(destination, decoded, receipt):
     return present
 
 
-def install_bundle(value, destination, resume_exact=False):
-    """New private materialization, or explicit verified same-target completion.
-
-    No overwrite, profile activation, automatic retry or permission repair.
-    """
-    _check(type(resume_exact) is bool, 'capability_resume_mode_invalid')
+def _bundle_members(value):
+    """Shared pure validation for materialization and installed-entry binding."""
     _check(isinstance(value, dict) and set(value) == {'format', 'source_provider', 'revision',
            'sources', 'files', 'contains_authentication', 'enables_plugins_or_mcp', 'runtime_verified'}
            and value['format'] == BUNDLE_FORMAT and value['contains_authentication'] is False
@@ -437,6 +433,16 @@ def install_bundle(value, destination, resume_exact=False):
                'files': [{'path': name, 'sha256': _sha(raw)} for name, raw in decoded],
                'authentication_copied': False, 'profile_changed': False,
                'runtime_verified': False}
+    return decoded, receipt
+
+
+def install_bundle(value, destination, resume_exact=False):
+    """New private materialization, or explicit verified same-target completion.
+
+    No overwrite, profile activation, automatic retry or permission repair.
+    """
+    _check(type(resume_exact) is bool, 'capability_resume_mode_invalid')
+    decoded, receipt = _bundle_members(value)
     destination = _private_parent(destination)
     if resume_exact:
         # Require the original target to exist; do not silently turn a typo into
@@ -530,6 +536,22 @@ def main(argv=None):
     install.add_argument('--destination', required=True)
     install.add_argument('--resume-exact', action='store_true',
                          help='explicitly complete only the original exact partial target; no overwrite')
+    for name in ('installed-discovery', 'entry-plan'):
+        command = commands.add_parser(name)
+        command.add_argument('--bundle', required=True)
+        command.add_argument('--bundle-sha256', required=True)
+        command.add_argument('--installation', required=True)
+        command.add_argument('--execution-provider', required=True)
+        if name == 'entry-plan':
+            command.add_argument('--destination', required=True)
+            command.add_argument('--python-executable', required=True)
+            command.add_argument('--profile-skills', required=True)
+            command.add_argument('--template-root')
+            command.add_argument('--output', required=True)
+    entry = commands.add_parser('entry-install')
+    entry.add_argument('--plan', required=True)
+    entry.add_argument('--plan-sha256', required=True)
+    entry.add_argument('--resume-exact', action='store_true')
     args = parser.parse_args(argv)
     try:
         if args.command == 'pin':
@@ -540,6 +562,22 @@ def main(argv=None):
         elif args.command == 'install':
             bundle, _ = _private_json(args.bundle, expected_sha=args.bundle_sha256)
             result = install_bundle(bundle, args.destination, resume_exact=args.resume_exact)
+        elif args.command in ('installed-discovery', 'entry-plan'):
+            from .existing_skill_entry import installed_discovery, entry_plan
+            bundle, _ = _private_json(args.bundle, expected_sha=args.bundle_sha256)
+            if args.command == 'installed-discovery':
+                result = installed_discovery(bundle, args.installation, args.execution_provider)
+            else:
+                plan = entry_plan(bundle, args.installation, args.destination, args.execution_provider,
+                                  args.python_executable, args.profile_skills, args.template_root)
+                raw = _encoded(plan)
+                _write_new(args.output, raw)
+                result = {'planned': True, 'sha256': _sha(raw), 'rpc_attempted': False,
+                          'runtime_verified': False, 'profile_changed': False}
+        elif args.command == 'entry-install':
+            from .existing_skill_entry import install_entry
+            plan, _ = _private_json(args.plan, expected_sha=args.plan_sha256)
+            result = install_entry(plan, args.resume_exact)
         else:
             _check(args.command is not None, 'capability_command_required')
             value, _ = _private_json(args.owner, 262144, args.owner_sha256)
@@ -557,7 +595,7 @@ def main(argv=None):
                                           args.operation_id, args.action_id, arguments)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
-    except (CapabilityAdaptationError, OSError, ValueError, TypeError):
+    except (CapabilityAdaptationError, OSError, ValueError, TypeError, KeyError):
         print(json.dumps({'error': 'existing_capability_adaptation_failed',
                           'automatic_retry': False, 'native_features_restricted': False}))
         return 1
