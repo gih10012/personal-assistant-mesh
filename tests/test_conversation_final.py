@@ -1,4 +1,4 @@
-"""Four focused boundaries on actual original3198 + exact tiny source patches.
+"""Focused boundaries on actual original3198 + exact tiny source patches.
 
 No SDK, model, network, production state, frozen Worker replacement or skips.
 """
@@ -59,6 +59,9 @@ class ConversationFinalTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='mesh-conversation-final.')
         self.addCleanup(self.temp.cleanup)
         self.root, self.now = Path(self.temp.name), 1000
+        self.open_api()
+
+    def open_api(self):
         # Match serve_entrance's unchanged passive constructor explicitly.
         self.store = self.Store(self.root / 'original.sqlite', clock=lambda: self.now, recover_inflight=False)
         self.ingress = Ingress(self.store, 'original-authority', {'owner_id': OWNER})
@@ -72,16 +75,17 @@ class ConversationFinalTests(unittest.TestCase):
         attach_bridge(self.api, sources=('chatgpt-chat', 'openai-codex-cloud'))
         emit.attach(self.api, enabled=True, sources=('chatgpt-chat', 'openai-codex-cloud'))
 
-    def install(self):
+    def install(self, policies=None):
         return final.attach(self.api, enabled=True,
-            policies=({'source': PRINCIPAL['source'], 'subject': PRINCIPAL['subject'], 'node': NODE},))
+            policies=policies if policies is not None else
+                ({'source': PRINCIPAL['source'], 'subject': PRINCIPAL['subject'], 'node': NODE},))
 
     def submit(self, identity, peer=PEER):
         return self.ingress.submit(peer, {'request_id': identity, 'input': 'owner task', 'project_id': 'original-project'})
 
-    def claim(self):
-        self.store.heartbeat(NODE, ['leader'], 10)
-        return self.store.claim(NODE)
+    def claim(self, node=NODE):
+        self.store.heartbeat(node, ['leader'], 10)
+        return self.store.claim(node)
 
     def complete(self, task, text='原任务代理的自然最终答复', peer=WORKER):
         return self.api.dispatch('POST', '/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
@@ -204,6 +208,91 @@ class ConversationFinalTests(unittest.TestCase):
             {'task_id': task['id'], 'epoch': task['epoch']}, WORKER)
         self.assertFalse(missing['found'])
         self.assertFalse(missing['retry_authorized'])
+
+    def test_finite_executors_still_fence_actual_node_epoch_grant_and_receipt(self):
+        alternate = 'alternate-leader'
+        policies = ({'source': PRINCIPAL['source'], 'subject': PRINCIPAL['subject'],
+                     'nodes': [alternate, NODE]},)
+        authority = self.install(policies)
+        self.submit('switching-leader')
+        original = self.claim()
+        other = dict(WORKER, node=alternate)
+        with self.assertRaises(self.LegacyConflict):
+            self.complete(original, peer=other)  # Membership does not transfer a live claim.
+        with self.assertRaises(PermissionError):
+            self.complete(original, peer=dict(WORKER, capabilities=['leader']))
+        self.now += 100
+        current = self.claim(alternate)
+        self.assertEqual(original['id'], current['id'])
+        self.assertEqual(original['epoch'] + 1, current['epoch'])
+        with self.assertRaises(self.LegacyConflict):
+            self.complete(original)
+        with self.assertRaises(self.LegacyConflict):
+            self.complete(original, peer=other)
+        self.complete(current, peer=other)
+        payload = {'task_id': current['id'], 'epoch': current['epoch']}
+        receipt = authority.receipt(other, payload)
+        self.assertTrue(receipt['found'])
+        self.assertFalse(authority.receipt(WORKER, payload)['found'])
+        self.assertEqual(alternate, self.scalar('SELECT node FROM conversation_task_finals'))
+        self.assertEqual(alternate, self.scalar('SELECT node FROM conversation_emits'))
+        self.assertEqual(self.api._conversation_emits._operation(alternate, receipt['message']),
+                         receipt['message']['operation_id'])
+        self.assertNotEqual(self.api._conversation_emits._operation(NODE, receipt['message']),
+                            receipt['message']['operation_id'])
+        self.assertEqual('original-project', receipt['event']['project_id'])
+        with self.assertRaises(PermissionError):
+            self.api._conversation_emits.read(dict(PEER, ingress=dict(PRINCIPAL, subject='other-chat')),
+                {'request_id': 'switching-leader', 'after': 0, 'limit': 20})
+        with self.store.transaction() as db:
+            row = dict(db.execute('SELECT * FROM conversation_task_finals').fetchone())
+            with self.assertRaisesRegex(Conflict, 'original_receipt_changed'):
+                authority._record(db, dict(row, project_id='other-project'))
+
+    def test_restart_with_wider_policy_preserves_legacy_bytes_and_inflight_membership(self):
+        self.submit('before-policy')
+        self.complete(self.claim())
+        self.install()
+        self.submit('legacy-completed')
+        completed = self.claim()
+        self.complete(completed)
+        payload = {'task_id': completed['id'], 'epoch': completed['epoch']}
+        original_receipt = self.api._conversation_finals.receipt(WORKER, payload)
+        accepted = self.submit('legacy-inflight')
+        original = self.claim()
+        with self.store.transaction() as db:
+            before = [tuple(row) for row in db.execute('SELECT * FROM conversation_reply_policies ORDER BY task_id')]
+            binding = self.api._conversation_emits._binding(db, original['id'])
+            policy_id = db.execute('SELECT policy_id FROM conversation_reply_policies WHERE task_id=?',
+                                  (original['id'],)).fetchone()[0]
+        self.assertEqual(final.digest([final.FORMAT, self.ingress.authority, OWNER,
+            binding['request_key'], original['id'], NODE]), policy_id)
+        self.open_api()  # Fresh passive objects over the original synthetic ledger.
+        alternate = 'alternate-leader'
+        authority = self.install(({'source': PRINCIPAL['source'], 'subject': PRINCIPAL['subject'],
+                                   'nodes': [NODE, alternate]},))
+        self.assertEqual(original_receipt, authority.receipt(WORKER, payload))
+        self.submit('before-policy')
+        replay = self.submit('legacy-inflight')
+        self.assertEqual(accepted['task_id'], replay['task_id'])
+        self.assertFalse(replay['task_created'])
+        with self.store.transaction() as db:
+            self.assertEqual(before, [tuple(row) for row in db.execute(
+                'SELECT * FROM conversation_reply_policies ORDER BY task_id')])
+        self.now += 100
+        current = self.claim(alternate)
+        self.assertEqual(original['id'], current['id'])
+        with self.assertRaises(PermissionError):
+            self.complete(current, peer=dict(WORKER, node=alternate))
+        self.assertEqual('running', self.scalar('SELECT status FROM tasks WHERE id=?', (current['id'],)))
+        self.now += 100
+        current = self.claim()
+        self.complete(current)
+        new = self.submit('new-finite-policy')
+        stored = self.scalar('SELECT node FROM conversation_reply_policies WHERE task_id=?', (new['task_id'],))
+        self.assertEqual(tuple(sorted((NODE, alternate))), final._policy_nodes(stored))
+        self.assertEqual(NODE, self.scalar('SELECT node FROM conversation_reply_policies WHERE task_id=?',
+                                          (original['id'],)))
 
     def test_projected_authored_reply_retains_original_epoch_after_task_reclaim(self):
         self.submit('new-chat')

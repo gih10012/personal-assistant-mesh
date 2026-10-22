@@ -19,6 +19,30 @@ CAPABILITY = 'owner.conversation.final'
 CALL_ID = 'automatic-task-final-v1'
 RECEIPT_ROUTE = '/v1/conversation/final/receipt'
 TERMINAL = frozenset(('completed', 'failed', 'needs_review'))
+# A control character cannot be a legacy _identifier node. Keep the original
+# node TEXT column/digest byte-for-byte for single-node policies.
+_NODES_PREFIX = '\x1ffinal-nodes/1:'
+
+
+def _node_set(nodes):
+    if not isinstance(nodes, (list, tuple)) or not 1 <= len(nodes) <= 20:
+        raise ValueError('conversation_final_explicit_nodes_required')
+    nodes = tuple(_identifier(node, 'final_node') for node in nodes)
+    if len(set(nodes)) != len(nodes) or '*' in nodes:
+        raise ValueError('conversation_final_explicit_nodes_required')
+    return tuple(sorted(nodes))
+
+
+def _policy_nodes(value):
+    if not value.startswith(_NODES_PREFIX):
+        return (value,)
+    try:
+        nodes = _node_set(json.loads(value[len(_NODES_PREFIX):]))
+        if value == _NODES_PREFIX + encoded(nodes).decode('utf8'):
+            return nodes
+    except (TypeError, ValueError):
+        pass
+    raise Conflict('conversation_final_original_reply_policy_changed')
 
 
 def _policies(policies):
@@ -26,14 +50,17 @@ def _policies(policies):
         raise ValueError('conversation_final_explicit_policy_required')
     result = {}
     for policy in policies:
-        if not isinstance(policy, dict) or set(policy) != {'source', 'subject', 'node'} or policy['source'] != SOURCE:
+        if (not isinstance(policy, dict) or set(policy) not in (
+                {'source', 'subject', 'node'}, {'source', 'subject', 'nodes'})
+                or policy['source'] != SOURCE):
             raise ValueError('conversation_final_new_chat_policy_required')
         value = {key: _identifier(policy[key], 'final_' + key, 1024 if key == 'subject' else 200)
-                 for key in ('source', 'subject', 'node')}
+                 for key in ('source', 'subject')}
         key = (value['source'], value['subject'])
         if key in result:
             raise ValueError('conversation_final_duplicate_policy')
-        result[key] = value['node']
+        result[key] = (_identifier(policy['node'], 'final_node') if 'node' in policy else
+                       _NODES_PREFIX + encoded(_node_set(policy['nodes'])).decode('utf8'))
     return result
 
 
@@ -87,10 +114,14 @@ class ConversationFinals:
         binding = self.emits._binding(db, task_id)
         expected = digest([FORMAT, self.ingress.authority, self.ingress.owner_id,
                            binding['request_key'], task_id, row['node']])
+        current = self.policies.get((row['source'], row['subject']))
         if (row['policy_id'] != expected or row['request_key'] != binding['request_key']
                 or any(row[key] != binding[key] for key in ('source', 'subject'))
-                or self.policies.get((row['source'], row['subject'])) != row['node']):
+                or current is None
+                or not set(_policy_nodes(row['node'])) <= set(_policy_nodes(current))):
             raise Conflict('conversation_final_original_reply_policy_changed')
+        # A wider owner policy applies only to NEW admissions. Existing rows
+        # retain their original finite membership, including legacy singletons.
         return row, binding
 
     @staticmethod
@@ -108,7 +139,7 @@ class ConversationFinals:
         if policy is None:
             return  # NEVER adopt/backfill a pre-policy or non-Chat task.
         context = getattr(self.local, 'completion', None)
-        if context is None or self._worker(context['peer']) != node or node != policy['node']:
+        if context is None or self._worker(context['peer']) != node or node not in _policy_nodes(policy['node']):
             raise PermissionError('conversation_final_authenticated_completion_required')
         if context['task_id'] != task['id'] or context['epoch'] != epoch:
             raise Conflict('conversation_final_original_completion_changed')
@@ -137,7 +168,7 @@ class ConversationFinals:
         value = self.emits._message(message)
         if (row['request_key'] != binding['request_key'] or message['request_key'] != row['request_key']
                 or any(row[key] != message[key] for key in ('task_id', 'epoch', 'node'))
-                or row['node'] != policy['node'] or value['call_id'] != CALL_ID or value['kind'] != 'final'
+                or row['node'] not in _policy_nodes(policy['node']) or value['call_id'] != CALL_ID or value['kind'] != 'final'
                 or row['status'] not in TERMINAL
                 or row['fingerprint'] != digest([FORMAT, row['status'],
                     {key: value[key] for key in ('task_id', 'epoch', 'call_id', 'message_id', 'kind', 'text')}])
@@ -160,7 +191,7 @@ class ConversationFinals:
         with self.store.transaction() as db:
             self.emits._namespace(db)
             policy, binding = self._policy(db, payload['task_id'])
-            if policy is None or policy['node'] != node:
+            if policy is None or node not in _policy_nodes(policy['node']):
                 raise PermissionError('conversation_final_original_worker_required')
             row = db.execute('SELECT * FROM conversation_task_finals WHERE task_id=? AND epoch=? AND node=?',
                 (payload['task_id'], payload['epoch'], node)).fetchone()

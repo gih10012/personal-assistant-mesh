@@ -15,7 +15,7 @@ Root owns production writes. School evaluation stays paused and out of this leaf
   so receive can read durable agent messages without reading raw task results,
   rerunning work, draining replies, or requiring owner approval for every final.
 - `conversation-final-ready-fragment.py.example` composes the EXISTING ready
-  hook and checks the original worker has its exact final capability before
+  hook and checks every explicitly selected existing worker has its exact final capability before
   attaching anything. It never adds a grant. It keeps original IPC/Claw setup,
   then attaches authority -> emits -> final -> optional private event feed on
   that SAME already-open API/Store. Project policies must be explicit subsets
@@ -39,7 +39,7 @@ Root owns production writes. School evaluation stays paused and out of this leaf
 1. Reuse the existing source-only frozen candidate and builder, not a new modern
    receiver. `deploy/entrance-finish-source.sha256` pins the 21 relevant source
    members; it is a MEMBER manifest, not a full image/runtime manifest. Verify
-   it with `sha256sum -c` from the exact source root. The unchanged final builder
+   it with `sha256sum -c` from the exact source root. The final builder
    still verifies its full actual base manifest, all ten pure-module hashes and
    the exact patch. Historical prepared full manifests were base
    `aff7d6e64d3092208a7683cd4db1ffa6259b555890732245701780e6360132df`
@@ -48,10 +48,17 @@ Root owns production writes. School evaluation stays paused and out of this leaf
    They are NOT a claim about a launcher/config edited later: record the actual
    final private launcher hash and installed source manifest separately.
 2. Keep the unchanged original worker/receiver identities and normal backups.
-   Add `owner.conversation.final` ONLY to the existing original Leader worker
-   peer; keep its existing node and capabilities. Install a bounded reply
-   policy for the existing `chatgpt-chat` subject/node, not a wildcard, operator,
-   Cloud or unverified new caller. Keep original `sources` exactly. Compose the
+   Add `owner.conversation.final` ONLY to the explicitly selected existing Leader
+   worker peers; keep their original nodes and capabilities. The original
+   `{source,subject,node}` policy remains supported byte-for-byte. For leadership
+   across existing nodes, owner code may instead specify the finite
+   `{source,subject,nodes:[...]}` policy (1–20 distinct enrolled nodes). The
+   ready hook checks every exact worker grant; no wildcard or new caller is
+   admitted. Each request freezes its membership at admission; enlarging the
+   current configuration never backfills old rows or widens an inflight task.
+   Completion still requires the original Leader lease; receipts bind the actual
+   producer's task/node/epoch. See [the policy contract](CONVERSATION-FINAL-2026-10-20.md).
+   Keep original `sources` exactly. Compose the
    existing private ready callable using the new pure template and explicit
    owner-approved project map, retaining `serve_entrance`'s passive constructor
    (`recover_inflight=False`). Do not launch a second receiver or poller.
@@ -78,7 +85,7 @@ Root owns production writes. School evaluation stays paused and out of this leaf
    Chat follow-up, Work subscribe/continuation/cancel go to the Leader's weekly
    acceptance queue with the exact installed versions and original identities.
 
-Frozen core pins remain those in the unchanged builder:
+Frozen core pins remain those in the builder:
 
 | Member | Expected SHA256 |
 | --- | --- |

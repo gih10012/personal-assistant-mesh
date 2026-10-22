@@ -1,4 +1,4 @@
-"""Three bounded assembly checks; no listener, private config, account or model.
+"""Bounded assembly checks; no listener, private config, account or model.
 
 Existing final/feed/transport semantics are not rerun here. These checks cover
 the previously missing projection opt-in and sole-receiver composition only.
@@ -83,6 +83,35 @@ class EntranceAssemblyTests(unittest.TestCase):
              'event_projects': [{'source': 'chatgpt-chat', 'subject': 'another-chat', 'projects': ['explicit-project']}]}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 assembly.compose_ready(lambda *args: None, **kwargs)
+
+    def test_finite_executor_membership_snapshots_and_requires_each_existing_worker_grant(self):
+        assembly = template('conversation-final-ready-fragment')
+        policy = {'source': 'chatgpt-chat', 'subject': 'fixed-chat',
+                  'nodes': ['original-leader', 'alternate-leader']}
+        for nodes in ([], ['original-leader', 'original-leader'], ['*'], ['n' + str(i) for i in range(21)]):
+            with self.subTest(nodes=nodes), self.assertRaises(ValueError):
+                assembly.compose_ready(lambda *args: None, sources=('chatgpt-chat',),
+                                       reply_policies=[dict(policy, nodes=nodes)])
+        calls = []
+        ready = assembly.compose_ready(lambda *args: calls.append('original'), sources=('chatgpt-chat',),
+                                       reply_policies=[policy])
+        policy['nodes'].append('not-in-the-snapshot')
+        api = NS(peers=[(b'SYNTHETIC', {'role': 'worker', 'node': 'original-leader',
+                         'capabilities': [assembly.conversation_final.CAPABILITY]}),
+                        (b'SYNTHETIC_ALTERNATE', {'role': 'worker', 'node': 'alternate-leader',
+                         'capabilities': assembly.conversation_final.CAPABILITY})])
+        with self.assertRaises(PermissionError):
+            ready(None, api, None)
+        self.assertEqual([], calls)
+        api.peers[1][1]['capabilities'] = [assembly.conversation_final.CAPABILITY]
+        with patch.object(assembly.conversation_authority, 'attach'), \
+             patch.object(assembly.conversation_emit, 'attach'), \
+             patch.object(assembly.conversation_final, 'attach') as attach:
+            ready(None, api, None)
+        self.assertEqual(['original'], calls)
+        self.assertEqual(({'source': 'chatgpt-chat', 'subject': 'fixed-chat',
+                           'nodes': ['alternate-leader', 'original-leader']},),
+                         attach.call_args[1]['policies'])
 
 
 if __name__ == '__main__':
