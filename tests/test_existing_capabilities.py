@@ -36,7 +36,10 @@ class ExistingCapabilitiesTests(unittest.TestCase):
             source.mkdir(mode=0o700)
             for relative, content in files.items():
                 path = source / relative
-                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                parent = source
+                for component in Path(relative).parts[:-1]:
+                    parent = parent / component
+                    parent.mkdir(mode=0o700, exist_ok=True)
                 path.write_text(content)
                 path.chmod(0o600)
             # Not selected: a source tree is not an export permission.
@@ -159,6 +162,90 @@ class ExistingCapabilitiesTests(unittest.TestCase):
         owner.chmod(0o644)
         with self.assertRaises(adapter.CapabilityAdaptationError):
             adapter._private_json(owner)
+
+    def test_install_nested_directories_private_with_umask_0002(self):
+        bundle = adapter.build_bundle(self.inventory)
+        destination = self.root / 'group-umask-install'
+        original_umask = os.umask(0o002)
+        try:
+            receipt = adapter.install_bundle(bundle, destination)
+        finally:
+            observed_umask = os.umask(original_umask)
+        self.assertEqual(0o002, observed_umask)  # Installer never changes umask.
+        for directory, directories, files in os.walk(destination):
+            self.assertEqual(0o700, Path(directory).stat().st_mode & 0o777)
+            for name in files:
+                self.assertEqual(0o600, (Path(directory) / name).stat().st_mode & 0o777)
+        self.assertEqual(9, len(receipt['files']))
+
+    def test_explicit_resume_checks_complete_partial_tree_before_adding_missing(self):
+        bundle = adapter.build_bundle(self.inventory)
+        completed = self.root / 'receipt-source'
+        receipt = adapter.install_bundle(bundle, completed)
+        expected = {item['path']: (completed / item['path']).read_bytes()
+                    for item in receipt['files']}
+        initial = list(expected)[:4]
+
+        def partial(name):
+            destination = self.root / name
+            destination.mkdir(mode=0o700)
+            for relative in initial:
+                path = destination / relative
+                adapter._make_private_parents(destination, Path(relative).parent)
+                adapter._write_new(path, expected[relative])
+            bad_directory = destination / 'ncut-web-api/references/capabilities'
+            bad_directory.mkdir(mode=0o775)
+            bad_directory.chmod(0o775)  # Exact legacy parents=True/umask0002 defect.
+            return destination, bad_directory
+
+        destination, bad_directory = partial('original-partial-target')
+        before = {name: ((destination / name).stat().st_ino,
+                         (destination / name).stat().st_mtime_ns)
+                  for name in initial}
+        with self.assertRaises(adapter.CapabilityAdaptationError):
+            adapter.install_bundle(bundle, destination, resume_exact=True)
+        self.assertFalse((destination / 'installation.json').exists())
+        self.assertFalse((destination / receipt['files'][4]['path']).exists())
+        # Only the owner repairs its exact known partial-install directory;
+        # resume itself neither chmods nor accepts the broader old permission.
+        self.assertEqual(0o775, bad_directory.stat().st_mode & 0o777)
+        bad_directory.chmod(0o700)
+        original_umask = os.umask(0o002)
+        try:
+            self.assertEqual(receipt, adapter.install_bundle(bundle, destination, resume_exact=True))
+        finally:
+            self.assertEqual(0o002, os.umask(original_umask))
+        for name, observation in before.items():
+            path = destination / name
+            self.assertEqual(observation, (path.stat().st_ino, path.stat().st_mtime_ns))
+        receipt_path = destination / 'installation.json'
+        receipt_observation = (receipt_path.stat().st_ino, receipt_path.stat().st_mtime_ns)
+        self.assertEqual(receipt, adapter.install_bundle(bundle, destination, resume_exact=True))
+        self.assertEqual(receipt_observation, (receipt_path.stat().st_ino, receipt_path.stat().st_mtime_ns))
+
+        # Each refusal leaves all missing members missing: no prefix write is
+        # allowed before discovering a late extra/link/content/receipt problem.
+        for kind in ('extra', 'symlink', 'hardlink', 'mismatch', 'receipt', 'early-receipt'):
+            with self.subTest(kind=kind):
+                target, private_directory = partial('refused-' + kind)
+                private_directory.chmod(0o700)
+                path = target / initial[0]
+                if kind == 'extra':
+                    adapter._write_new(target / 'extra.json', b'not a bundle member')
+                elif kind in ('symlink', 'hardlink'):
+                    path.unlink()
+                    if kind == 'symlink':
+                        path.symlink_to(completed / initial[0])
+                    else:
+                        os.link(str(completed / initial[0]), str(path))
+                elif kind == 'mismatch':
+                    path.write_bytes(b'changed source must never be overwritten')
+                else:
+                    adapter._write_new(target / 'installation.json',
+                        adapter._encoded(receipt) if kind == 'early-receipt' else b'{}')
+                with self.assertRaises(ValueError):
+                    adapter.install_bundle(bundle, target, resume_exact=True)
+                self.assertFalse((target / receipt['files'][4]['path']).exists())
 
 
 if __name__ == '__main__':

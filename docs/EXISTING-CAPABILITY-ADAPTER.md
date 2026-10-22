@@ -71,9 +71,19 @@ python3 -m assistant_mesh.existing_capabilities install --bundle /PRIVATE/skill-
 
 目标必须是不存在的新目录；文件 0600、目录 0700，不覆盖既有安装。
 `installation.json` 保留完整来源/hash；中途失败保留部分目录，不假装已
-激活或自动换目录重试。此步不改 `CODEX_HOME`、原 skill、MCP、插件开关
+激活或自动换目录重试。目录逐层以0700创建，不借全局umask或放宽检查
+掩盖 `Path.mkdir(parents=True)` 的中间目录权限差异。此步不改 `CODEX_HOME`、原 skill、MCP、插件开关
 或认证。Root/本机适配 agent 选择适合目标 profile 的原生安装方式，再
 单独检查依赖与真实使用；目标无现代 Python 时报告缺项，不伪造可用。
+
+若原安装只写入部分成员，Root先保留原目标/原包SHA并检查原失败事实。
+`install --resume-exact` 是显式续接，不是自动重试：同一命令继续使用
+原 `--bundle/--bundle-sha256/--destination`，只补缺失成员及最后receipt。
+写入前完整遍历原目录，拒绝任何额外路径、symlink/hardlink、不同字节、
+非0700目录或非0600文件。旧错误创建的775目录由Root仅对已独立识别的
+确切路径显式收紧0700；安装器不会自动改权限、覆盖或删文件。已有匹配
+receipt要求所有成员完整匹配，随后只读返回；缺成员的早到receipt也拒绝。
+若原写入留下半截文件，保留并停下另行审核，不覆盖半截文件凑成功。
 
 ## 接回既有能力目录与 A2A
 

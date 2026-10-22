@@ -330,8 +330,67 @@ def build_bundle(value):
             'runtime_verified': False}
 
 
-def install_bundle(value, destination):
-    """Materialize into a NEW private directory; never overwrite or activate."""
+def _directory_private(path):
+    entry = path.lstat()
+    _check(stat.S_ISDIR(entry.st_mode) and entry.st_uid == os.getuid()
+           and stat.S_IMODE(entry.st_mode) == 0o700, 'capability_install_directory_not_private')
+
+
+def _make_private_parents(destination, relative_parent):
+    """mkdir parents one at a time: Path.mkdir(parents=True) ignores parent mode."""
+    current = destination
+    _directory_private(current)
+    for component in relative_parent.parts:
+        current = current / component
+        try:
+            current.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        _directory_private(current)
+
+
+def _existing_members(destination, decoded, receipt):
+    """Read-only full-tree preflight before any explicit resume write.
+
+    Existing permissions are never repaired here. An owner may tighten only
+    its independently identified partial-install directories first. Extra
+    members, links, mismatching bytes or a partial completed receipt refuse.
+    """
+    _directory_private(destination)
+    expected_files = dict(decoded)
+    expected_dirs = {str(parent) for name in expected_files
+                     for parent in PurePosixPath(name).parents if str(parent) != '.'}
+    _check(not set(expected_files) & expected_dirs, 'capability_bundle_path_collision')
+    present = set()
+    pending = [destination]
+    while pending:
+        directory = pending.pop()
+        _directory_private(directory)
+        for path in directory.iterdir():
+            relative = path.relative_to(destination).as_posix()
+            metadata = path.lstat()
+            if stat.S_ISDIR(metadata.st_mode):
+                _check(relative in expected_dirs, 'capability_install_extra_member')
+                _directory_private(path)
+                pending.append(path)
+            else:
+                _check(relative in expected_files or relative == 'installation.json',
+                       'capability_install_extra_member')
+                expected = _encoded(receipt) if relative == 'installation.json' else expected_files[relative]
+                actual = _owner_bytes(path, MAX_TOTAL, 'capability_install_member_unsafe')
+                _check(actual == expected, 'capability_install_member_mismatch')
+                present.add(relative)
+    if 'installation.json' in present:
+        _check(set(expected_files) <= present, 'capability_install_receipt_incomplete')
+    return present
+
+
+def install_bundle(value, destination, resume_exact=False):
+    """New private materialization, or explicit verified same-target completion.
+
+    No overwrite, profile activation, automatic retry or permission repair.
+    """
+    _check(type(resume_exact) is bool, 'capability_resume_mode_invalid')
     _check(isinstance(value, dict) and set(value) == {'format', 'source_provider', 'revision',
            'sources', 'files', 'contains_authentication', 'enables_plugins_or_mcp', 'runtime_verified'}
            and value['format'] == BUNDLE_FORMAT and value['contains_authentication'] is False
@@ -372,20 +431,31 @@ def install_bundle(value, destination):
                 {'path': name.partition('/')[2], 'sha256': _sha(raw)}
                 for name, raw in decoded if name.partition('/')[0] == source]}
             for source in value['sources']]})
-    destination = _private_parent(destination)
-    # Existing even-empty directories are not reused; failed partial installs
-    # remain diagnosable and cannot be mistaken for an atomic activation.
-    destination.mkdir(mode=0o700)
-    for name, raw in decoded:
-        path = destination.joinpath(*PurePosixPath(name).parts)
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _write_new(path, raw)
     receipt = {'format': 'mesh-private-skill-installation/1',
                'bundle_sha256': _sha(_encoded(value)), 'source_provider': value['source_provider'],
                'revision': value['revision'], 'sources': value['sources'],
                'files': [{'path': name, 'sha256': _sha(raw)} for name, raw in decoded],
                'authentication_copied': False, 'profile_changed': False,
                'runtime_verified': False}
+    destination = _private_parent(destination)
+    if resume_exact:
+        # Require the original target to exist; do not silently turn a typo into
+        # a new installation. Check every existing member before adding any.
+        present = _existing_members(destination, decoded, receipt)
+        if 'installation.json' in present:
+            return receipt
+    else:
+        # Default remains create-only, including for an existing empty target.
+        destination.mkdir(mode=0o700)
+        present = set()
+    for name, raw in decoded:
+        if name in present:
+            continue
+        relative = PurePosixPath(name)
+        _make_private_parents(destination, relative.parent)
+        _write_new(destination.joinpath(*relative.parts), raw)
+    # A failed partial write remains a mismatching member on the next explicit
+    # preflight. Do not overwrite it, delete it or issue a success receipt.
     _write_new(destination / 'installation.json', _encoded(receipt))
     return receipt
 
@@ -458,6 +528,8 @@ def main(argv=None):
     install.add_argument('--bundle', required=True)
     install.add_argument('--bundle-sha256', required=True)
     install.add_argument('--destination', required=True)
+    install.add_argument('--resume-exact', action='store_true',
+                         help='explicitly complete only the original exact partial target; no overwrite')
     args = parser.parse_args(argv)
     try:
         if args.command == 'pin':
@@ -467,7 +539,7 @@ def main(argv=None):
             result = {'pinned': True, 'sha256': _sha(raw), 'executed': False}
         elif args.command == 'install':
             bundle, _ = _private_json(args.bundle, expected_sha=args.bundle_sha256)
-            result = install_bundle(bundle, args.destination)
+            result = install_bundle(bundle, args.destination, resume_exact=args.resume_exact)
         else:
             _check(args.command is not None, 'capability_command_required')
             value, _ = _private_json(args.owner, 262144, args.owner_sha256)
