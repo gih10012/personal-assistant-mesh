@@ -7,6 +7,12 @@ AGENTS、批准阶段、角色 `owner-entrance-20261020-followup-events-v2` 及
 Goal/Plan/Tasks 最新有效段。Root 独占生产/SSH/账号/GUI/角色实际分发。
 本叶没有执行这些操作，也没有模型请求、凭据或新 App/插件创建。
 
+2026-10-22 有限执行节点扩展：负责人
+`/root/final_executor_membership_20261022`，独立分支/worktree
+`work/final-executor-membership-20261022` / `final-executor-membership-20261022`，
+base `67d20c9f44e3a981a88c1e3471738c828f02ec40`，合并依赖为该 base
+既有 final/emit/ready 源码；不改 Root 的 Goal/Plan/Tasks 或生产状态。
+
 ## 保证与明确不做的事
 
 已直接核原 git 对象 `3198c877234a8fd0c6912fdbe218f47185effedc`：
@@ -17,14 +23,29 @@ Worker `run_once` 在 `native_finish` 和原 session 保存后，已发精确
 仅在受信 ready hook 明确开启后，原 Ingress **新建**且匹配固定
 Chat source/subject 的请求，会在同一入站事务保存 reply policy。
 旧请求的 submit 重查、status、receive 或已完成历史都不补 admission。
-策略绑定实际 worker node；request/task/owner/source/subject/project
+策略冻结准许执行的 worker node；request/task/owner/source/subject/project
 从原 ingress 记录派生，模型/worker payload 不能选择收件者或自报批准。
+
+原 `{source, subject, node}` 保持原单节点存储字节、policy digest 和回执
+格式。可信 owner-code 也可改用互斥的 `{source, subject, nodes:[...]}`，
+明确列出 1–20 个既有入网节点；不接受重复、`*`、空集合或同时给
+`node/nodes`。顺序不影响新策略，入库前排序。集合以带版本、不能与合法
+旧 node 碰撞的控制字符前缀保存在原 `policy.node TEXT`；不迁移 schema。
+ready 逐一检查原认证 peer 的 `role=worker`、精确 node 和 list 类型的
+有限 final capability；不会补 grant、创建成员或要求离线候选此刻在线。
+
+每个请求 admission 固定自己的集合。以后扩大 owner 配置只影响新请求；
+原单节点和在途集合保持原字节，重查 submit/status 不回填。旧集合必须
+仍完全被当前配置允许，否则 fail closed；先完成原任务/交接，再撤去
+原成员，不能改旧 policy 或放宽旧任务来恢复回复。成员资格不转移 claim，
+实际完成还须是原 authority 上的真实 task.node/epoch/Leader lease。
+此扩展不建立跨 authority 共识，不改变 source/subject/project 收件边界。
 
 `legacy-store-conversation-final.patch` 在已审 extraction-patched Store
 加 class marker 两行和可选事务 hook 三行；原 lease/Leader fencing
 **之后**、原任务 UPDATE/COMMIT **之前**调用。默认无 hook 时仍走原路。
 新 facade 对精确 `/v1/task/update` 暂存当前线程已认证 peer；只有
-`role=worker`、原 node、有限 `owner.conversation.final` grant、原
+`role=worker`、admission 准许的真实 node、有限 `owner.conversation.final` grant、原
 task/epoch/live lease 都匹配才允许该策略任务的 terminal final。
 operator 文件、普通 ingress 和 caller 自报字段均不能替代这个授权。
 
@@ -46,6 +67,8 @@ tool stdout。沿8192 UTF-8字节会话上限，长答复有明确截断标记�
 node/task/epoch/call，客户端 ID `mesh-emit-<operation>`。这些自动身份
 不能通过普通 emit route 抢占。同原 final receipt 关闭租约后仍可读。
 `/v1/conversation/final/receipt` 只接受原 worker grant 与 `task_id,epoch`；
+查询和 operation digest 都绑定**实际完成节点**，集合中其它节点不能
+取得该节点的 final 回执；不是用任意成员代替原 producer。
 未找到只说 unconfirmed/retry_authorized=false，不授权重发/换 generation。
 
 agent final 与 human-reviewed result 分开；`IngressResults` 表、operator
@@ -96,7 +119,7 @@ human_reviewed=false；execution_verified 仍保守，不把 `live=false`
    Events 合并只需保留 `mcp_http` 的 backend reexport，其变动不改变
    此冻结纯库闭包/pins。
 
-3. Root 保留原 ready/IPC/Claw hooks，配置只给原 Leader peer 加有限
+3. Root 保留原 ready/IPC/Claw hooks，配置只给明确选定的既有 Leader worker peers 加有限
    `owner.conversation.final`（需要显式进度 CLI 时另给 emit grant）；
    不给 operator bearer，不改 frozen Worker 的 heartbeat/claim 能力。
    在原 `serve_entrance(..., ready=...)` 既有 ready 最后接以下可信代码，
@@ -109,6 +132,14 @@ human_reviewed=false；execution_verified 仍保守，不把 `live=false`
    finals = conversation_final.attach(api, enabled=True, policies=(
        {'source': 'chatgpt-chat', 'subject': fixed_chat_subject, 'node': original_leader_node},))
    ```
+
+   若 Leader 可在已核的两个原节点间接替，同一位置可显式改为
+   `{'source': 'chatgpt-chat', 'subject': fixed_chat_subject,
+   'nodes': [existing_cloud_node, existing_laptop_node]}`。复用
+   `deploy/conversation-final-ready-fragment.py.example` 的逐节点 grant
+   校验；两个变量必须来自已有认证 worker 配置。旧 admission 仍是原
+   单节点，不能把重启后更宽的配置写回旧行。不固定 VPS，也不以
+   `nodes` 绕过原 task/epoch/Leader lease。
 
    sources 与原 installed authority 保持，Cloud 未接通不自动加 grant。
    保留 `serve_entrance` 的 `recover_inflight=False` 被动构造；不新建第二
@@ -159,3 +190,15 @@ builder检查0.609s/0skip另核旧 import API class identity、receiver不import
 mcp_http；两类 AST 与82017cf原实现完全相同，没有重跑原7项。只属本地
 现代解释器，不冒称
 宿主3.6.8实跑、部署或真实 Chat/Leader 验收。原 Goal 未完成。
+
+2026-10-22 扩展在本机 Python3.14.7 的有限检查：
+`tests.test_conversation_final tests.test_entrance_assembly` 共10项通过
+（原7项加3项新边界），0.102s/零skip；新项覆盖真实 claim 的节点/epoch
+约束、原单节点策略/回执重启保留且在途不扩权、所有集合成员精确 grant
+与输入快照。首轮新测试把 submit 重查的动态 status/task_created 与首次
+回执整体比较而失败，已改成核原 task ID、未新建和完整旧 policy 行，
+没有放松 runtime 检查。
+原冻结 builder 单项0.649s/零skip通过，十纯库闭包、原五行 Store hook/
+五核心 pins 和无 DB/SDK import 保持。21成员 manifest 全部通过；
+仅 final、ready、builder 三个真实变更成员更新 hash。未运行真实Mesh/
+模型/GUI/故障演练或平台验收，生产接线仅由Root执行，验收留Leader周队列。

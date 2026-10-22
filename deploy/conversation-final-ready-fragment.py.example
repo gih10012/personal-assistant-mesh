@@ -12,7 +12,7 @@ def compose_ready(previous, *, sources, reply_policies, event_projects=()):
     """Retain original IPC/Claw/authority hooks and add the reviewed opt-ins.
 
     Worker capability entries are checked, NEVER added here. Reply policy is
-    fixed to an existing source/subject/node; project grants are explicit and
+    fixed to an existing source/subject and finite enrolled nodes; project grants are explicit and
     apply only to the source-scoped PRIVATE feed. No public route is exposed.
     """
     if not callable(previous):
@@ -22,7 +22,9 @@ def compose_ready(previous, *, sources, reply_policies, event_projects=()):
             source not in sources for source, unused_subject in policies):
         raise ValueError('conversation_final_existing_sources_required')
     sources = tuple(sources)
-    reply_policies = tuple({'source': source, 'subject': subject, 'node': node}
+    reply_policies = tuple(dict({'source': source, 'subject': subject}, **(
+                               {'node': node} if not node.startswith(conversation_final._NODES_PREFIX) else
+                               {'nodes': list(conversation_final._policy_nodes(node))}))
                            for (source, subject), node in sorted(policies.items()))
     if event_projects:
         projects = project_policies(event_projects)
@@ -34,9 +36,10 @@ def compose_ready(previous, *, sources, reply_policies, event_projects=()):
     def ready(http_server, api, channel):
         # The API already loaded its original credential mapping. Do not read
         # credential files, accept bearer values here or enlarge a worker role.
-        for node in set(policies.values()):
+        for node in {node for policy in policies.values() for node in conversation_final._policy_nodes(policy)}:
             matches = [peer for unused_secret, peer in api.peers
                        if peer.get('role') == 'worker' and peer.get('node') == node
+                       and isinstance(peer.get('capabilities'), list)
                        and conversation_final.CAPABILITY in peer.get('capabilities', [])]
             if not matches:
                 raise PermissionError('conversation_final_original_worker_grant_required')
