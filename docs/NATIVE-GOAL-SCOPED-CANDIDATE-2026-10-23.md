@@ -11,6 +11,12 @@ serialized operations. School evaluation remains paused. This implements the
 [approved contract](NATIVE-GOAL-SCOPED-ADAPTER-CONTRACT-2026-10-23.md), not a new
 Goal, new business attempt or replacement task system.
 
+The original checkpoint is `5c221c9`. Its independent D3 review found one P1
+and three P2 boundaries; follow-up source fixes live separately on
+`work/native-goal-scoped-fixes-20261024`, based on that exact checkpoint. The
+original author branch is unchanged. This source follow-up is not installation
+or native acceptance; Root owns independent review and serialized deployment.
+
 ## Implemented boundary
 
 - One actual claim enters a narrow `Worker.run_claimed(task)` seam. Its legacy
@@ -26,7 +32,9 @@ Goal, new business attempt or replacement task system.
 - Every started automatic turn must naturally complete. An interrupted or
   failed turn retains the guard. Goal identity/createdAt/budget stay fixed and
   accounting is checked against the previous actual snapshot, including late
-  Goal updates. Plain turns receive the same idle/event/close boundary.
+  Goal updates. A yielded resume also validates the saved actual Goal against
+  the current actual Goal, including budget and updatedAt, before input can be
+  submitted. Plain turns receive the same idle/event/close boundary.
 - Active-Goal child yield reuses the owned Unix admission-drain, independent
   unloaded observer and original-history fingerprint algorithms. There is no
   fake pause, fixed grace sleep or unsubscribe-as-drain substitute.
@@ -36,13 +44,28 @@ Goal, new business attempt or replacement task system.
   update ACK; a lost response never triggers another native attempt/upload.
 - Same-ledger authority methods retain epoch/Leader lease checks, the original
   final-reply transaction hook, original child wakeup, and active-yield scope
-  reservation. `waiting_children` cannot manufacture a cleared effect guard.
+  reservation through owner pause and its saved paused_status. Another task
+  cannot consume the paused parent's still-active Goal. `waiting_children`
+  cannot manufacture a cleared effect guard.
+- An already terminal Goal may resume with zero new turns. This requires the
+  actual non-active Goal and idle read/event barrier, no adopted/started turn,
+  verified owned runtime close, no late work/completion and the complete sealed
+  history fingerprint. Only that path records `zero_turn_terminal`; interrupted
+  or forced cleanup does not qualify.
 
 `make_store_class` adds only scope metadata/binding tables to the original
 ledger. It extracts selected claim/update/delegate/wait methods rather than
 installing the complete modern Store. Saved native session state intentionally
-remains guarded; successful final task proof, not an optimistic artifact state,
-permits later coordination. Session state alone is never a replay permit.
+remains guarded. The original owner `/v1/task/continue` protocol is extracted
+from the pinned incumbent Store with only its guarded-session predicate
+extended. Its original transaction, task/result/epoch checks, managed-effect
+checks and immutable acceptance receipt remain. The narrow exception requires
+the original completed task/epoch, matching sealed lifecycle and settled intent
+in task and session, the same scope/node/thread, the exact original promoted
+artifact ID and its nonempty contiguous chunks. Missing artifact, stale epoch
+or missing final proof is rejected; no session guard or history is rewritten.
+Session state alone is never a replay permit. Disabled policy rejects this
+exception rather than admitting a legacy continuation of a bound scope.
 
 ## Source closure and new pins
 
@@ -65,6 +88,14 @@ change. The exact original `codex.py`, `sessions.py`, `server.py`, `channel.py`
 and final-hook `store.py` bytes remain; Store still has SHA-256
 `be2df48e03021f48c382efc4690fa7a8ee5e67da8bd93497e725566532e30c0b`.
 Their selected-scope semantics are intentionally extended by explicit facades.
+
+The follow-up scoped assembly pin is
+`abfd11279155244085ee517fe1e82513f5faddb87613c811278b15645472d4e4`.
+The ten modern algorithm input pins and the three changed incumbent output
+pins above remain unchanged. Generated authority now additionally imports only
+standard-library `uuid` for the incumbent continuation method. The twelve-module
+closure and its `config`/`store` incumbent boundaries remain the same; the
+builder continues recording every actual generated file hash in the manifest.
 
 There are twelve generated optional `.py` modules: package init, config bridge,
 Codex, WorkerStrategy, AuthorityMethods, native Goal observer, native history,
@@ -182,11 +213,24 @@ and active-yield reservation, governance MRO and guarded failed save, generated
 controller auto-turn/abort/accounting plus synthetic history seal, and real
 fingerprinted gzip/chunk/commit with both confirmed and lost ACK outcomes.
 
-Latest complete run before this documentation: **5 passed in 0.650s**. One
+Original checkpoint author's reported run: **5 passed in 0.650s**. One
 new history-seal fixture initially omitted its own native `turn/started`
 notification and was correctly rejected; adding that synthetic event made
 the targeted case pass, then all five passed. No old test suite, native
 app-server/model/RPC, production/SSH/GUI, or original business case was run.
+
+The independent follow-up adds four local fixture methods for the four review
+findings: owner pause retains the yielded parent's scope through child finish
+and original parent resume; guarded-session continuation requires the original
+final proof/epoch/committed artifact and preserves its receipt and guard;
+zero-new-turn terminal closure accepts the sealed path but rejects late work;
+yielded resume rejects changed budget or regressed updatedAt before input and
+accepts the unchanged Goal once. Existing fixtures/algorithms are reused.
+One bounded run of this module passed **9 tests in 0.886s**. After adding the
+missing-final-proof rejection assertion, only that changed continuation method
+was rerun: **1 passed in 0.636s**; the other eight results remain applicable.
+No broader suite, production or real native/model trial was added. All process
+closure and notification boundaries in these fixtures remain synthetic.
 
 Root should independently review the scoped assembly/facade and exact built
 diff, then may perform the already-authorized serialized installation. Any

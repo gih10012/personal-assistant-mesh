@@ -3,6 +3,7 @@
 No actual native RPC, model, HTTP listener, production state or original case.
 """
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -378,6 +379,170 @@ print('pure source import only')
                     self.assertEqual(1, row['epoch'])
                 self.assertTrue(agent.closed)
                 self.assertEqual(1, sum(route == '/v1/claim' for route, unused in client.calls))
+
+    def test_paused_yielded_parent_keeps_scope_until_its_original_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api, peer = self.api(directory)
+            store = api.store
+            parent = store.create_task('owned parent', context={'session_scope': 'project:future-goal'})
+            task = api.dispatch('POST', '/v1/claim', {}, peer)['task']
+            child = api.dispatch('POST', '/v1/agent/action', {'task_id': parent, 'epoch': task['epoch'],
+                'call_id': 'pause-child', 'action': 'delegate', 'arguments': {'input': 'bounded child'}}, peer)
+            goal = {'threadId': 'same-thread', 'objective': 'same goal', 'status': 'active'}
+            checkpoint = {'native_goal_profile': task['native_goal_profile'], 'side_effect_started': False,
+                'harness': 'codex', 'thread_id': 'same-thread', 'goal': goal,
+                'native_lifecycle': {'controller_enabled': True, 'goal_managed': True, 'settled': True,
+                    'runtime_closed': True, 'outcome': 'yielded', 'thread_id': 'same-thread',
+                    'goal': goal, 'expected_goal_objective': goal['objective']}}
+            api.dispatch('POST', '/v1/task/update', {'id': parent, 'epoch': task['epoch'],
+                'checkpoint': checkpoint, 'status': 'waiting_children'}, peer)
+            with store.transaction() as db:
+                store._control_task(db, parent, 'pause')
+                self.assertEqual('waiting_children', db.execute('SELECT paused_status FROM tasks WHERE id=?', (parent,)).fetchone()[0])
+            store.clock = lambda: 1001
+            competing = store.create_task('cannot take paused Goal', context={'session_scope': task['scope']})
+            claimed_child = api.dispatch('POST', '/v1/claim', {}, peer)['task']
+            self.assertEqual(child['id'], claimed_child['id'])
+            api.dispatch('POST', '/v1/task/update', {'id': child['id'], 'epoch': claimed_child['epoch'],
+                'checkpoint': {'side_effect_started': False}, 'status': 'completed'}, peer)
+            self.assertIsNone(api.dispatch('POST', '/v1/claim', {}, peer)['task'])
+            with store.transaction() as db:
+                self.assertEqual('pending', store._control_task(db, parent, 'resume')['status'])
+            resumed = api.dispatch('POST', '/v1/claim', {}, peer)['task']
+            self.assertEqual(parent, resumed['id'])
+            self.assertNotEqual(competing, resumed['id'])
+            self.assertEqual(goal, resumed['checkpoint']['goal'])
+
+    def test_guarded_session_continuation_requires_original_final_proof_and_committed_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            api, peer = self.api(directory)
+            store = api.store
+            identity = store.create_task('settled original', context={'session_scope': 'project:future-goal'})
+            task = api.dispatch('POST', '/v1/claim', {}, peer)['task']
+            thread = '00000000-0000-0000-0000-000000000123'
+            raw = b'SYNTHETIC SEALED HISTORY FOR ORIGINAL CONTINUATION\n'
+            rollout = Path(directory) / 'original.jsonl'
+            rollout.write_bytes(raw); rollout.chmod(0o600)
+            fingerprint = dict(self.strategy_module.sessions._fingerprint_metadata(rollout.stat()),
+                               sha256=hashlib.sha256(raw).hexdigest())
+            goal = {'threadId': thread, 'objective': 'original outcome', 'status': 'complete',
+                    'createdAt': 100, 'updatedAt': 101, 'tokensUsed': 12, 'timeUsedSeconds': 3, 'tokenBudget': None}
+            lifecycle = {'controller_enabled': True, 'goal_managed': True, 'settled': True,
+                'runtime_closed': True, 'quiescent': True, 'thread_id': thread, 'turn_id': 'finished',
+                'turn_ids': ['finished'], 'completed_turn_ids': ['finished'],
+                'completion_statuses': {'finished': 'completed'}, 'goal': goal,
+                'history_fingerprint': fingerprint, 'thread_status': {'type': 'idle'}}
+            intent = {'task_id': identity, 'task_epoch': task['epoch'], 'harness': 'codex',
+                      'thread_id': thread, 'settled': True}
+            state = {'native_goal_profile': task['native_goal_profile'], 'side_effect_started': True,
+                'harness': 'codex', 'codex_node': 'node', 'thread_id': thread, 'goal': goal,
+                'native_lifecycle': lifecycle, 'native_execution_intent': intent}
+            class Client:
+                def request(self, route, body):
+                    return api.dispatch('POST', route, body, peer)
+            saved = self.strategy_module.sessions.save(Client(), task, 'node', 'codex', state, rollout,
+                                                        expected_fingerprint=fingerprint)
+            self.assertTrue(saved['artifact_saved'])
+            result = 'original verified result'
+            api.dispatch('POST', '/v1/task/update', {'id': identity, 'epoch': task['epoch'],
+                'checkpoint': dict(state, side_effect_started=False), 'result': result, 'status': 'completed'}, peer)
+            payload = {'continuation_id': 'owner-new-input', 'task_id': identity, 'expected_epoch': task['epoch'],
+                'task_result_sha256': hashlib.sha256(result.encode()).hexdigest(), 'instruction': 'new authorized work'}
+            with store.transaction() as db:
+                native = dict(db.execute('SELECT * FROM native_sessions WHERE scope=?', (task['scope'],)).fetchone())
+                db.execute('UPDATE native_sessions SET artifact=NULL WHERE scope=?', (task['scope'],))
+            with self.assertRaisesRegex(ValueError, 'continuation_native_source_changed'):
+                store.continue_task(payload)  # A metadata-only session is insufficient.
+            stale = copy.deepcopy(state)
+            stale['native_execution_intent']['task_epoch'] += 1
+            with store.transaction() as db:
+                db.execute('UPDATE native_sessions SET artifact=?,state=? WHERE scope=?',
+                           (native['artifact'], json.dumps(stale), task['scope']))
+            with self.assertRaisesRegex(ValueError, 'continuation_native_source_changed'):
+                store.continue_task(payload)
+            with store.transaction() as db:
+                db.execute('UPDATE native_sessions SET state=? WHERE scope=?', (native['state'], task['scope']))
+                final_checkpoint = db.execute('SELECT checkpoint FROM tasks WHERE id=?', (identity,)).fetchone()[0]
+                missing_proof = json.loads(final_checkpoint)
+                missing_proof['native_lifecycle']['settled'] = False
+                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(missing_proof), identity))
+            with self.assertRaisesRegex(ValueError, 'continuation_native_source_changed'):
+                store.continue_task(payload)
+            with store.transaction() as db:
+                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (final_checkpoint, identity))
+            accepted = store.continue_task(payload)
+            self.assertTrue(accepted['accepted'])
+            self.assertEqual(identity, accepted['task_id'])
+            self.assertEqual(accepted, store.continue_task(payload))  # Original acceptance receipt only.
+            with store.transaction() as db:
+                self.assertTrue(json.loads(db.execute('SELECT state FROM native_sessions WHERE scope=?',
+                                                     (task['scope'],)).fetchone()[0])['side_effect_started'])
+                self.assertEqual('pending', db.execute('SELECT status FROM tasks WHERE id=?', (identity,)).fetchone()[0])
+
+    def test_zero_new_turn_terminal_resume_seals_but_late_work_does_not(self):
+        from tests.test_native_goal_lifecycle import NativeGoalLifecycleTests
+        fixture = NativeGoalLifecycleTests()
+        actual = fixture.goal('paused', createdAt=100, updatedAt=102)
+        prior = {'outcome': 'yielded', 'thread_id': fixture.thread, 'settled': True, 'runtime_closed': True,
+                 'goal': fixture.goal('active', createdAt=100, updatedAt=101)}
+        def runtime():
+            agent = fixture.runtime(requested=False, actual=actual)
+            agent.__class__ = self.runtime.Codex
+            agent.config.update(native_goal_drain=True, native_goal_yield=True, native_transport='unix')
+            agent.transport_name, agent._native_cleanup_forced, agent._reader_forced_close = 'unix', False, False
+            agent.start('must preserve owner pause', {'thread_id': fixture.thread, 'native_lifecycle': prior})
+            agent.finish(timeout=1)
+            return agent
+        with tempfile.TemporaryDirectory() as directory:
+            agent = runtime()
+            rollout = Path(directory) / 'closed-original.jsonl'
+            raw = (json.dumps({'type': 'session_meta', 'payload': {'id': fixture.thread}}) + '\n').encode()
+            rollout.write_bytes(raw); rollout.chmod(0o600)
+            agent.rollout_path = str(rollout)
+            calls = len(agent.calls)
+            seal = agent.seal_native_lifecycle()
+            self.assertTrue(seal['zero_turn_terminal'])
+            self.assertTrue(seal['settled'])
+            self.assertEqual([], seal['turn_ids'])
+            self.assertEqual({}, seal['completion_statuses'])
+            self.assertEqual(len(raw), seal['history_fingerprint']['size'])
+            self.assertEqual(calls, len(agent.calls))
+            self.assertFalse(any(method in ('turn/start', 'turn/steer', 'thread/goal/set') for method, unused in agent.calls))
+            api, peer = self.api(directory)
+            identity = api.store.create_task('paused before wake', context={'session_scope': 'project:future-goal'})
+            task = api.dispatch('POST', '/v1/claim', {}, peer)['task']
+            checkpoint = {'native_goal_profile': task['native_goal_profile'], 'side_effect_started': False,
+                'harness': 'codex', 'thread_id': fixture.thread, 'goal': actual, 'native_lifecycle': seal,
+                'native_execution_intent': {'task_id': identity, 'task_epoch': task['epoch'], 'harness': 'codex',
+                                          'thread_id': fixture.thread, 'settled': True}}
+            self.assertTrue(api.dispatch('POST', '/v1/task/update', {'id': identity, 'epoch': task['epoch'],
+                'checkpoint': checkpoint, 'status': 'needs_review'}, peer)['ok'])
+            late = runtime()
+            late.rollout_path = str(rollout)
+            late.deferred = [fixture.started('late-unadmitted-turn')]
+            with self.assertRaisesRegex(ValueError, 'codex_native_late_work'):
+                late.seal_native_lifecycle()
+            self.assertFalse(late.native_lifecycle['settled'])
+            self.assertNotIn('zero_turn_terminal', late.native_lifecycle)
+
+    def test_yielded_resume_validates_budget_and_updated_time_before_input(self):
+        from tests.test_native_goal_lifecycle import NativeGoalLifecycleTests
+        fixture = NativeGoalLifecycleTests()
+        original = fixture.goal('active', createdAt=100, updatedAt=110, tokenBudget=1000)
+        prior = {'outcome': 'yielded', 'thread_id': fixture.thread, 'settled': True,
+                 'runtime_closed': True, 'goal': original}
+        for changes in ({'tokenBudget': 2000}, {'updatedAt': 109}):
+            with self.subTest(changes=changes):
+                agent = fixture.runtime(requested=False, actual=dict(original, **changes))
+                agent.__class__ = self.runtime.Codex
+                with self.assertRaisesRegex(ValueError, 'codex_native_goal_continuity_unverified'):
+                    agent.start('new input must not be delivered', {'thread_id': fixture.thread, 'native_lifecycle': prior})
+                self.assertFalse(any(method in ('turn/steer', 'turn/start', 'thread/goal/set') for method, unused in agent.calls))
+        valid = fixture.runtime(requested=False, actual=dict(original, updatedAt=111))
+        valid.__class__ = self.runtime.Codex
+        valid.before_reply['thread/goal/get'] = [fixture.started('same-goal-auto-turn')]
+        valid.start('new owner input once', {'thread_id': fixture.thread, 'native_lifecycle': prior})
+        self.assertEqual(1, sum(method == 'turn/steer' for method, unused in valid.calls))
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ added to Worker. Existing governance/profile/failure wrappers stay outside the
 backend selector, and diagnostics may wrap the resulting Worker last.
 """
 import copy
+import hashlib
 import json
 import math
 import threading
@@ -305,17 +306,72 @@ def make_store_class(original, methods, policy):
                 return  # Preflight metadata is not a started native lifecycle.
             if self._yielded_active_goal_checkpoint(checkpoint):
                 return  # The extracted update checks the permitted waiting states.
+            zero_turn = (isinstance(lifecycle, dict)
+                         and lifecycle.get('zero_turn_terminal') is True
+                         and lifecycle.get('goal_managed') is True
+                         and lifecycle.get('turn_id') is None
+                         and lifecycle.get('thread_status') == {'type': 'idle'}
+                         and isinstance(lifecycle.get('goal'), dict)
+                         and isinstance(lifecycle.get('history_fingerprint'), dict))
             if (not isinstance(lifecycle, dict)
                     or any(lifecycle.get(key) is not True for key in ('controller_enabled', 'settled', 'runtime_closed', 'quiescent'))
                     or type(lifecycle.get('goal_managed')) is not bool
                     or lifecycle.get('thread_id') != checkpoint.get('thread_id')
-                    or not isinstance(lifecycle.get('turn_ids'), list) or not lifecycle['turn_ids']
+                    or not isinstance(lifecycle.get('turn_ids'), list)
+                    or (not lifecycle['turn_ids'] and not zero_turn)
                     or set(lifecycle.get('completed_turn_ids', [])) != set(lifecycle['turn_ids'])
                     or lifecycle.get('completion_statuses') != {turn: 'completed' for turn in lifecycle['turn_ids']}
                     or (lifecycle.get('goal') is not None and lifecycle['goal'].get('status') not in ('complete', 'paused', 'blocked', 'budgetLimited', 'usageLimited'))
                     or checkpoint.get('goal') != lifecycle.get('goal')
                     or checkpoint.get('native_execution_intent', {}).get('settled') is not True):
                 raise Conflict('native_goal_scope_lifecycle_unsettled')
+
+        def _native_goal_continuation_source_settled(self, db, row, native, state):
+            """Narrow exception to the old session guard, in its owner transaction.
+
+            The session stays guarded. Only the original completed task/epoch's
+            matching sealed proof and original committed artifact permit NEW
+            owner input through the existing continuation protocol.
+            """
+            binding = self._native_goal_binding(db, row)
+            if (binding is None or not policy['enabled'] or row['scope'] not in policy['scopes']
+                    or row['created'] < binding['activated_at'] or row['status'] != 'completed'
+                    or not isinstance(state, dict) or state.get('side_effect_started') is not True
+                    or state.get('native_goal_profile') != binding
+                    or state.get('harness') != 'codex'):
+                return False
+            checkpoint = json.loads(row['checkpoint'])
+            intent = checkpoint.get('native_execution_intent')
+            lifecycle = checkpoint.get('native_lifecycle')
+            artifact = hashlib.sha256(json.dumps([row['id'], row['epoch'], 'codex'],
+                separators=(',', ':')).encode()).hexdigest()
+            if (not isinstance(intent, dict) or intent.get('task_id') != row['id']
+                    or intent.get('task_epoch') != row['epoch'] or intent.get('harness') != 'codex'
+                    or intent.get('thread_id') != checkpoint.get('thread_id')
+                    or intent.get('settled') is not True
+                    or state.get('native_execution_intent') != intent
+                    or not isinstance(lifecycle, dict) or state.get('native_lifecycle') != lifecycle
+                    or not isinstance(lifecycle.get('history_fingerprint'), dict)
+                    or state.get('goal') != checkpoint.get('goal')
+                    or state.get('thread_id') != checkpoint.get('thread_id')
+                    or native['scope'] != row['scope'] or native['harness'] != 'codex'
+                    or native['node'] != row['node'] or state.get('codex_node') != native['node']
+                    or checkpoint.get('codex_node') != native['node'] or native['artifact'] != artifact):
+                return False
+            try:
+                self._native_goal_validate_checkpoint(db, row, copy.deepcopy(checkpoint), 'completed')
+                from .native_goal_runtime.sessions import _expected_fingerprint
+                _expected_fingerprint(lifecycle['history_fingerprint'])
+            except (ValueError, TypeError, KeyError, AttributeError):
+                return False
+            chunks = db.execute('SELECT COUNT(*),MIN(part),MAX(part) FROM session_chunks WHERE id=?',
+                               (artifact,)).fetchone()
+            return bool(chunks[0] and chunks[1] == 0 and chunks[2] == chunks[0] - 1)
+
+        def continue_task(self, payload):
+            if not self._native_goal_store_bound:
+                return super(GoalScopeStore, self).continue_task(payload)
+            return methods.continue_task(self, payload)
 
         def update_task(self, task_id, node, epoch, checkpoint=None, result=None, status=None):
             if self._managed(task_id, node) is None:

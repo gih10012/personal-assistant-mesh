@@ -31,7 +31,7 @@ PINS = {
 }
 WORKER_PIN = '816a8eb2f6bc5a24a22ae345b1b7b94b0dd5d0ce52f99a6658688e683ce9cbf0'
 STORE_PIN = 'be2df48e03021f48c382efc4690fa7a8ee5e67da8bd93497e725566532e30c0b'
-SCOPE_SHA256 = '9f93cd76fdd8a426e6f4b277f507a97c74a86c0b9a194d311ad511efe5863130'
+SCOPE_SHA256 = 'abfd11279155244085ee517fe1e82513f5faddb87613c811278b15645472d4e4'
 
 
 def sha(data):
@@ -102,10 +102,17 @@ def scoped_worker_source(text):
     return _module(imports, 'WorkerStrategy', methods, (constants,))
 
 
-def authority_source(text):
+def authority_source(text, legacy_text):
     names = ('_yielded_active_goal_checkpoint', '_yielded_goal_reserves_scope',
              'claim', 'update_task', 'agent_action')
     methods = [_function(text, 'Store', name) for name in names]
+    # A paused yielded owner still owns its active Goal; a new task must not
+    # consume that native conversation while the original task is paused.
+    reserve = next(method for method in methods if method.name == '_yielded_goal_reserves_scope')
+    reserve_text = replace_once(ast.unparse(reserve),
+        "('waiting_children', 'pending', 'waiting_backend', 'waiting_auth')",
+        "('waiting_children', 'pending', 'waiting_backend', 'waiting_auth', 'paused')")
+    methods[methods.index(reserve)] = ast.parse(reserve_text).body[0]
     for index, method in enumerate(methods):
         if method.name == 'claim':
             loop = next(node for node in ast.walk(method) if isinstance(node, ast.For)
@@ -127,7 +134,15 @@ def authority_source(text):
                           and ast.unparse(node).startswith("db.execute('UPDATE tasks SET checkpoint=?,deadline=?,result=?,status=? WHERE id=?',"))
             block[update:update] = ast.parse("hook = getattr(self, '_conversation_final_in_db', None)\nif hook is not None:\n    hook(db, row, node, epoch, checkpoint, result, status)").body
         methods[index] = ast.fix_missing_locations(method)
-    return _module('import hashlib, json\nfrom ..store import Conflict\n', 'AuthorityMethods', methods)
+    # Keep the existing owner continuation protocol and all of its same-ledger
+    # checks. Only a matching scoped final proof can replace the old false
+    # session guard prerequisite; no session row/guard is rewritten here.
+    continuation = ast.unparse(_function(legacy_text, 'Store', 'continue_task'))
+    continuation = replace_once(continuation,
+        "'side_effect_started' in native_state and native_state['side_effect_started'] is not False",
+        "'side_effect_started' in native_state and native_state['side_effect_started'] is not False and not self._native_goal_continuation_source_settled(db, row, native, native_state)")
+    methods.append(ast.parse(continuation).body[0])
+    return _module('import hashlib, json, uuid\nfrom ..store import Conflict\n', 'AuthorityMethods', methods)
 
 
 def backend_source(text):
@@ -144,6 +159,9 @@ def backend_source(text):
                 self.native_lifecycle['goal_baseline'] = copy.deepcopy(goal)
         expected =""")
     text = replace_once(text,
+        "            self.native_lifecycle['expected_goal_objective'] = prior['objective']",
+        "            from .native_goal_observer import validate_goal_continuity\n            validate_goal_continuity(prior, goal, self.thread_id)\n            self.native_lifecycle['expected_goal_objective'] = prior['objective']")
+    text = replace_once(text,
         "                if status != 'interrupted' or not self.native_lifecycle.get('goal_managed'):\n                    raise CodexError('codex_turn_failed')",
         "                raise CodexError('codex_turn_failed')")
     text = replace_once(text,
@@ -155,16 +173,26 @@ def backend_source(text):
                         '    def seal_native_lifecycle(self, tick=None):')
     text = replace_once(text, "                lifecycle['goal'] = copy.deepcopy(goal)\n            elif method == 'thread/goal/cleared':",
                         "                self._store_goal_snapshot(goal)\n            elif method == 'thread/goal/cleared':")
-    text = replace_once(text, "        lifecycle['settled'] = False\n        self.close()", """        if (not self._native_started_turns or set(self._native_completion_statuses) != self._native_started_turns
+    text = replace_once(text, "        lifecycle['settled'] = False\n        self.close()", """        zero_turn = not self._native_started_turns
+        if (set(self._native_completion_statuses) != self._native_started_turns
                 or any(status != 'completed' for status in self._native_completion_statuses.values())):
+            raise CodexError('codex_native_drain_turn_unsettled')
+        if zero_turn and (self.turn_id is not None or lifecycle['turn_ids'] or lifecycle['completed_turn_ids']
+                or not lifecycle.get('goal_managed') or not isinstance(lifecycle.get('goal'), dict)
+                or lifecycle['goal'].get('status') not in GOAL_STATUSES - {'active'}
+                or lifecycle.get('thread_status') != {'type': 'idle'}):
             raise CodexError('codex_native_drain_turn_unsettled')
         lifecycle['settled'] = False
         self.close()""")
+    text = replace_once(text, "            if method in ('turn/started', 'item/started'):",
+                        "            if method in ('turn/started', 'item/started', 'turn/completed'):")
     text = replace_once(text, "        lifecycle['settled'] = True\n        return copy.deepcopy(lifecycle)", """        from .native_history import capture_prefix, verify_history
         prefix = capture_prefix(self.rollout_path, self.thread_id, tick=tick)
         frozen = verify_history(self.rollout_path, self.thread_id, prefix, self._native_started_turns, tick=tick)
         lifecycle['history_fingerprint'] = frozen['fingerprint']
         lifecycle['completion_statuses'] = copy.deepcopy(self._native_completion_statuses)
+        if zero_turn:
+            lifecycle['zero_turn_terminal'] = True
         lifecycle['settled'] = True
         return copy.deepcopy(lifecycle)""")
     return text
@@ -263,7 +291,7 @@ def build(base_root, destination, expected_base_manifest_sha256, support_root=RO
         'config.py': 'from ..config import discover_codex_auth, private_json\n',
         'codex.py': backend_source(sources['codex.py']),
         'worker_strategy.py': scoped_worker_source(sources['worker.py']),
-        'authority.py': authority_source(sources['store.py']),
+        'authority.py': authority_source(sources['store.py'], original['assistant_mesh/store.py'].decode('utf8')),
     }
     for name in ('native_goal_observer.py', 'native_history.py', 'native_ws.py',
                  'codex_provider.py', 'model_provider_policy.py', 'reasoning.py'):
