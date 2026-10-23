@@ -127,3 +127,22 @@ Skill Creator的quick_validate使用既有隔离环境通过；第一次系统Py
 官方文档用于确认原生skill/symlink/skills-list接线；Skill Creator用于
 保持入口窄作用域、引用原skill并验证格式。未修改原bundle或私有审阅内容，
 没有真实native发现、业务执行、平台或GUI验收结论。
+
+## 首次部署前的P2关联修复
+
+独审发现c811的verifier只核原receipt原始SHA，却没有比较完整
+`receipt.files` 与 `binding.files`；将后者清空仍可能得到
+`source_integrity_checked=true`。现先用入口receipt固定binding精确字节，
+再解析原receipt并核source_provider/revision/bundle、完整非空无重复文件
+清单与binding一致。三个action的skill/script/module/references必须仍是
+原安装的对应路径，并全部包含于本次必核source pins，不能绕过文件读取。
+结果仍为 `runtime_verified=false`，没有import原源码或读取认证。
+
+只新增并运行一个最小遗漏漂移拒绝unit：1项/0.075s、零skip。它先核
+有效入口，再验证空binding.files在入口pin未变、以及入口binding重新
+pin过两种情况下都拒绝；原receipt/原bundle成员不改。未重跑旧5项或
+额外矩阵。五成员source manifest仅更新verifier实际变化的SHA。
+
+Root首次profile部署须使用新模板重新生成一份新私有plan/SHA，保留
+旧plan作为原检查点；不要用旧plan安装旧verifier。原91600fce私有包和
+11文件安装完全不变，无覆盖原skill、profile、认证或生产操作。

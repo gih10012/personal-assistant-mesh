@@ -250,6 +250,42 @@ class ExistingCapabilitiesTests(unittest.TestCase):
         self.assertFalse(target.exists())
         self.assertEqual(snapshot, path.read_bytes())
 
+    def test_verifier_rejects_omitted_binding_members_even_if_entry_binding_is_re_pinned(self):
+        bundle = adapter.build_bundle(self.inventory)
+        installed = self.root / 'installed'
+        original = adapter.install_bundle(bundle, installed)
+        profile = self.root / 'current-profile-skills'
+        profile.mkdir(mode=0o700)
+        target = self.root / 'mesh-entry'
+        plan = entry.entry_plan(bundle, installed, target, 'cloud', sys.executable, profile)
+        entry.install_entry(plan)
+        command = [sys.executable, '-B', str(target / 'scripts/verify.py')]
+        def check():
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    universal_newlines=True, timeout=10)
+            return result.returncode, json.loads(result.stdout)
+        status, report = check()
+        self.assertEqual(0, status)
+        self.assertTrue(report['source_integrity_checked'])
+        binding_path = target / 'references/binding.json'
+        binding = json.loads(binding_path.read_text())
+        binding['files'] = []  # Actions still point at original source scripts.
+        raw = adapter._encoded(binding)
+        binding_path.write_bytes(raw)
+        status, report = check()
+        self.assertEqual(1, status)  # Entry receipt still pins the original binding bytes.
+        self.assertNotIn('source_integrity_checked', report)
+        receipt_path = target / 'installation.json'
+        receipt = json.loads(receipt_path.read_text())
+        for item in receipt['files']:
+            if item['path'] == 'references/binding.json':
+                item['sha256'] = adapter._sha(raw)
+        receipt_path.write_bytes(adapter._encoded(receipt))
+        status, report = check()
+        self.assertEqual(1, status)  # Original receipt's complete nonempty list is authoritative.
+        self.assertFalse(report['runtime_verified'])
+        self.assertEqual(original['files'], json.loads((installed / 'installation.json').read_text())['files'])
+
     def test_install_nested_directories_private_with_umask_0002(self):
         bundle = adapter.build_bundle(self.inventory)
         destination = self.root / 'group-umask-install'
