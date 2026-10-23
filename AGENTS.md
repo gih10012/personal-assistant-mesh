@@ -1,5 +1,12 @@
 # Personal Assistant Mesh working contract
 
+Owner delivery rule (2026-10-24): finish with a user-visible capability, deploy
+promptly when authorized, and prefer ONE real upper-entry check (CLI/Web/GUI).
+Reuse applicable evidence; no new verification framework or repeated broad
+audits. Add checks only for a concrete fault or material data/security risk.
+The weekly batch remains for broader model comparisons/fault drills; it must
+not block an ordinary completed feature's practical deployment/check/handoff.
+
 Owner reaffirmation (2026-10-23): quota recovery should resume eligible work
 without another owner "continue". Recheck each executor's actual qualified
 route; a user report is a wake hint, not proof that every node/account recovered.
