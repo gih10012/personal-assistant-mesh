@@ -1,5 +1,10 @@
 # 持续执行计划
 
+2026-10-25：本人已要求先Claw汇报，单条报告服务accepted。两向A2A
+当前connected、服务在线，原owner/工作空间任务尚未恢复；源候选d6a7990b
+已构建但启动器接线未部署。按[当天续接](STATUS-2026-10-25.md)继续
+薄接线与原case恢复并行，不把默认profile/当前PID当原任务恢复证据。
+
 2026-10-24新增即时事项：先将Click/CQO/RTK及niri0.3.0约定适配到现有
 Leader/Claw/项目agent实际加载位置，保留节点角色与认证、不传播本机
 7890。接着继续原Native Goal scoped候选及原owner case的具体修复，
