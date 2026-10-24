@@ -1,5 +1,14 @@
 # Personal Assistant Mesh working contract
 
+Owner workflow synchronization (2026-10-24): apply
+`docs/AGENT-WORKFLOW-2026-10-24.md` to the existing actual role workspaces.
+Click Evidence, CQO and RTK reduce repeated work without overriding the owner's
+model/effort, parallelism or native-tool policies. niri computer-use is now
+0.3.0; share its semantic/OCR/cropped-observation and pending-owner-approval
+workflow, keep the GUI backend on its provider. The owner's 127.0.0.1:7890
+proxy is laptop-local and MUST NOT be copied to other nodes. Preserve role
+additions, auth, native histories, unknowns and the independent school pause.
+
 Owner delivery rule (2026-10-24): finish with a user-visible capability, deploy
 promptly when authorized, and prefer ONE real upper-entry check (CLI/Web/GUI).
 Reuse applicable evidence; no new verification framework or repeated broad

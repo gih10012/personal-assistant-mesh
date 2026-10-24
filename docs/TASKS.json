@@ -9,6 +9,16 @@
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
   "latest_continuation_at": "2026-10-24",
   "delivery_rule_20261024": "user-visible feature, prompt authorized deployment, one real upper-entry check; reuse evidence, no new audit/test framework; expand only for concrete faults or material data/security risk",
+  "workflow_sync_20261024": {
+    "contract": "docs/AGENT-WORKFLOW-2026-10-24.md",
+    "source_thread_topic": "调查长目标执行缓慢问题",
+    "components": ["Click 1.3.0 Evidence", "CQO 0.2.2", "RTK 1.0.1", "niri computer-use 0.3.0 instructions"],
+    "laptop_role": "installed additive reference and shared workflow/niri documents; existing profile plugins retained",
+    "vps_roles": "private runtime and plugin transfer in progress; not yet claimed installed or trusted",
+    "proxy_scope": "127.0.0.1:7890 is laptop-local only; no propagation or remote proxy change",
+    "preserved": "role additions, model/effort, auth, native histories, original task/operation IDs, unknowns and school pause",
+    "model_read_acknowledgement": false
+  },
   "quota_resume_reaffirmed_20261023": {
     "owner_intent": "resume eligible same-thread/checkpoint work automatically or by Leader judgement after actual quota recovery, no repeated owner continue needed",
     "three_development_specialists": "terminal quota states checked, original agents continued; capability entry and Goal lifecycle contract delivered, lifecycle implementation and original case audit continuing",
