@@ -1,7 +1,7 @@
 # Scoped native Goal source candidate
 
-Status: implemented source candidate and bounded local units; not installed,
-enabled, independently reviewed or accepted against a native process/model.
+Status: source candidate and four boundary fixes independently reviewed and
+merged on 2026-10-24; not installed, enabled or accepted against a native process/model.
 The original failed/unknown cases were not opened, resumed or rewritten.
 
 Owner: `mobius_task_design_audit_20261021`; branch
@@ -16,6 +16,10 @@ and three P2 boundaries; follow-up source fixes live separately on
 `work/native-goal-scoped-fixes-20261024`, based on that exact checkpoint. The
 original author branch is unchanged. This source follow-up is not installation
 or native acceptance; Root owns independent review and serialized deployment.
+The final focused review accepted all four fixes without further changes,
+reusing the nine existing local units and the final targeted regression rather
+than rerunning them. Main contains the checkpoint as `a59ebbe` and fixes as
+`fc4d1b1`. Existing owner/workspace unknown cases remain separate and guarded.
 
 ## Implemented boundary
 

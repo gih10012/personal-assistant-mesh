@@ -14,10 +14,21 @@
     "source_thread_topic": "调查长目标执行缓慢问题",
     "components": ["Click 1.3.0 Evidence", "CQO 0.2.2", "RTK 1.0.1", "niri computer-use 0.3.0 instructions"],
     "laptop_role": "installed additive reference and shared workflow/niri documents; existing profile plugins retained",
-    "vps_roles": "private runtime and plugin transfer in progress; not yet claimed installed or trusted",
+    "vps_roles": "installed to original Leader and Claw profiles/workspaces; actual native discovery found enabled Click/CQO and eight enabled trusted workflow hooks in each profile",
+    "vps_runtime": "private CPython3.12.15 plus previously missing musl1.2.5 loader; no system Python replacement; private interpreter completed actual receipt finalization",
+    "niri_distribution": "0.3.0 instructions installed with additive role references in VPS Leader, VPS Claw and laptop workspaces; desktop backend and credentials remain laptop-bound",
+    "actual_platform_or_model_trial": false,
     "proxy_scope": "127.0.0.1:7890 is laptop-local only; no propagation or remote proxy change",
     "preserved": "role additions, model/effort, auth, native histories, original task/operation IDs, unknowns and school pause",
     "model_read_acknowledgement": false
+  },
+  "native_goal_scoped_source_20261024": {
+    "checkpoint_merged": "a59ebbe",
+    "four_boundary_fixes_merged": "fc4d1b1",
+    "focused_independent_review": "accepted; reused nine existing local units plus the final targeted regression; no repeated suite",
+    "deployed_or_native_accepted": false,
+    "existing_unknowns_or_school_pause_changed": false,
+    "next": "private assembly of the existing authority and workers; original-case recovery remains separate, no old-scope admission bypass"
   },
   "quota_resume_reaffirmed_20261023": {
     "owner_intent": "resume eligible same-thread/checkpoint work automatically or by Leader judgement after actual quota recovery, no repeated owner continue needed",
