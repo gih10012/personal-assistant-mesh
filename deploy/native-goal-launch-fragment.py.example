@@ -1,0 +1,93 @@
+"""Drop-in composition points for the EXISTING private owner launchers.
+
+Keep their argument/config/profile/receipt/instructions code and runtime roots.
+Add --native-goal-policy (no default path), then load_policy(args.native_goal_policy).
+No example identity, scope, capability or governance policy is an owner grant.
+Retain separately pinned existing governance/profile/metadata support modules.
+"""
+from assistant_mesh.native_goal_launch import (
+    compose_worker, load_policy, serve_entrance)
+
+
+def governed_class(Worker, Codex, make_worker, governance, scopes, config, policy,
+                   diagnostics, install_save_observer, observe_worker,
+                   profile_loader=None, receipt_callback=None):
+    """Replace the old make_worker + observer block in cloud/laptop launchers.
+
+    Pass their ORIGINAL Worker/Codex, existing Governance, scopes, profile loader
+    and receipt callback. Do not pass an already profiled/governed Codex.
+    """
+    def legacy():
+        return make_worker(Worker, Codex, governance, scopes=scopes,
+            profile_loader=profile_loader, receipt_callback=receipt_callback)
+
+    return compose_worker(Worker, Codex, legacy, policy=policy,
+        node=config['node_id'], governance_factory=make_worker,
+        governance=governance, governance_scopes=scopes,
+        profile_loader=profile_loader, receipt_callback=receipt_callback,
+        diagnostics=diagnostics, save_observer=install_save_observer,
+        worker_observer=observe_worker)
+
+
+def claw_run(entrance_runtime, Codex, profile_backend, config, config_path,
+             policy, diagnostics, install_save_observer, observe_worker, *,
+             governance_factory=None, governance=None, governance_scopes=(),
+             profile_loader=None, receipt_callback=None):
+    """Replace ONLY the Claw class/observer block; retain its original runner.
+
+    profile_backend is its existing make_codex(Codex, loader, receipt) result.
+    Existing Claw is not an executor in a Leader-only policy. Selecting it in
+    future requires an independently configured Governance and governed scope;
+    no such grant, new entrance scope or historical adoption is added here.
+    """
+    original = entrance_runtime.EntranceWorker
+
+    def legacy():
+        class ProfiledEntrance(original):
+            def __init__(self, cfg, config_path=None):
+                super(ProfiledEntrance, self).__init__(cfg,
+                    backend=profile_backend, config_path=config_path)
+        return ProfiledEntrance
+
+    selected = compose_worker(original, Codex, legacy, policy=policy,
+        node=config['node_id'], governance_factory=governance_factory,
+        governance=governance, governance_scopes=governance_scopes,
+        profile_loader=profile_loader, receipt_callback=receipt_callback,
+        diagnostics=diagnostics, save_observer=install_save_observer,
+        worker_observer=observe_worker)
+    try:
+        entrance_runtime.EntranceWorker = selected
+        return entrance_runtime.run_entrance_worker(config, config_path=config_path)
+    finally:
+        if entrance_runtime.EntranceWorker is selected:
+            entrance_runtime.EntranceWorker = original
+
+
+def receiver_run(config, socket_path, policy, composed_ready):
+    """Use the existing final-ready composition, SAME receiver/socket/config.
+
+    Pass launch_final_receiver.py's `composed` callable (original ingress +
+    final/emit/feed). Close stays owned by the original server. This starts no
+    additional Store or service and adds no premature readiness marker.
+    """
+    def ready(http_server, api, channel):
+        composed_ready(http_server, api, channel)
+
+    return serve_entrance(config, socket_path, policy=policy, ready=ready)
+
+
+# Existing main() replacements, after its original parser/config setup:
+#
+# parser.add_argument('--native-goal-policy')
+# policy = load_policy(args.native_goal_policy)
+#
+# cloud Leader / laptop: cls = governed_class(...); keep cls(config,...).run()
+# or the original --once branch. Move the existing metadata calls into this
+# composition; do not call a second run_once or replace the receipt callback.
+#
+# cloud Claw: return claw_run(...existing profile_backend..., policy,...)
+#
+# receiver: use the existing `composed` (not the old marker-printing ready).
+# A marker printed by the previous ready hook would precede the new capability
+# check; it cannot be used as proof that the complete scoped entry is ready.
+# return receiver_run(config, args.socket, policy, composed)

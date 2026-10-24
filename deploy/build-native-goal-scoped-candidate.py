@@ -32,6 +32,7 @@ PINS = {
 WORKER_PIN = '816a8eb2f6bc5a24a22ae345b1b7b94b0dd5d0ce52f99a6658688e683ce9cbf0'
 STORE_PIN = 'be2df48e03021f48c382efc4690fa7a8ee5e67da8bd93497e725566532e30c0b'
 SCOPE_SHA256 = 'abfd11279155244085ee517fe1e82513f5faddb87613c811278b15645472d4e4'
+LAUNCH_SHA256 = '5ddfd0673827f9f446f9a8e9f03c5f2637431ea60345eee85ad7d6cd5e85e667'
 
 
 def sha(data):
@@ -275,6 +276,9 @@ def build(base_root, destination, expected_base_manifest_sha256, support_root=RO
     scope_bytes = base_builder._bytes(root / 'assistant_mesh/native_goal_scoped.py')
     if sha(scope_bytes) != SCOPE_SHA256:
         raise ValueError('native_goal_candidate_scope_pin_changed')
+    launch_bytes = base_builder._bytes(root / 'assistant_mesh/native_goal_launch.py')
+    if sha(launch_bytes) != LAUNCH_SHA256:
+        raise ValueError('native_goal_candidate_launch_pin_changed')
     files = dict(original)
     worker = original['assistant_mesh/worker.py'].decode('utf8')
     worker = replace_once(worker, 'class Worker:\n', 'class Worker:\n    _native_goal_claim_seam_version = 1\n')
@@ -286,6 +290,7 @@ def build(base_root, destination, expected_base_manifest_sha256, support_root=RO
         key = 'assistant_mesh/' + name
         files[key] = replace_once(original[key].decode('utf8'), WORKER_PIN, new_worker_pin).encode('utf8')
     files['assistant_mesh/native_goal_scoped.py'] = scope_bytes
+    files['assistant_mesh/native_goal_launch.py'] = launch_bytes
     pure = {
         '__init__.py': '"""Pinned optional native lifecycle components; no startup on import."""\n',
         'config.py': 'from ..config import discover_codex_auth, private_json\n',
@@ -308,6 +313,7 @@ def build(base_root, destination, expected_base_manifest_sha256, support_root=RO
         files['assistant_mesh/native_goal_runtime/' + name] = text.encode('utf8')
     graph = import_closure(pure)
     ast.parse(scope_bytes.decode('utf8'), feature_version=(3, 6))
+    ast.parse(launch_bytes.decode('utf8'), feature_version=(3, 6))
     target = Path(destination)
     if (not target.is_absolute() or target.exists() or target.is_symlink()
             or any(parent.is_symlink() for parent in target.parents)):
@@ -321,6 +327,7 @@ def build(base_root, destination, expected_base_manifest_sha256, support_root=RO
     report = {'format': FORMAT, 'base_manifest_sha256': expected_base_manifest_sha256,
         'candidate_manifest_sha256': base_builder._manifest(files),
         'algorithm_source_sha256': PINS, 'scope_source_sha256': sha(scope_bytes),
+        'launch_source_sha256': sha(launch_bytes),
         'changed_original_files': sorted(name for name in original if original[name] != files[name]),
         'source_sha256': {name: sha(data) for name, data in sorted(files.items())},
         'optional_runtime_modules': sorted(pure), 'optional_import_graph': graph,
