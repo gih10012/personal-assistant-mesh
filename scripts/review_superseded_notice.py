@@ -7,6 +7,7 @@ Python 3.6 compatible. All beforeimages stay in the private authority ledger.
 """
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -142,9 +143,18 @@ def source_snapshot(worker_config, server_config, rollout_path, selected):
          'codex_provider.py', 'native_ws.py', 'superseded_notice.py')]
     private_sources = [Path(worker_config), Path(server_config), home / 'auth.json', home / 'config.toml']
     files = {}
-    for source in public_sources + private_sources + [executable]:
+    for source in public_sources + private_sources:
         unused, metadata = review.read_checked(source, private=source in private_sources)
         files[str(source)] = metadata
+    metadata = review.file_metadata(executable)
+    require(metadata['size'] <= 512 * 1024 * 1024, 'native_executable_size_bound')
+    checksum = hashlib.sha256()
+    descriptor = os.open(str(executable), os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as source:
+        for chunk in iter(lambda: source.read(65536), b''):
+            checksum.update(chunk)
+    require(review.file_metadata(executable) == metadata, 'native_executable_generation_changed')
+    files[str(executable)] = dict(metadata, sha256=checksum.hexdigest())
     return {'files': files, 'rollout_path': str(path), 'rollout': rollout,
             'executable': str(executable)}
 
