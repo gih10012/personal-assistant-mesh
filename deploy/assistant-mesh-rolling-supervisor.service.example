@@ -1,0 +1,19 @@
+[Unit]
+Description=AMITA local worker rolling supervisor
+After=network-online.target
+
+[Service]
+Type=simple
+# Pin this small control release independently from candidate worker releases.
+# On VPS use its existing private Python 3.12 executable here, not system 3.6.
+WorkingDirectory=%h/.local/share/amita-control
+ExecStart=/usr/bin/python3 -m assistant_mesh.rolling_runtime --state %h/.local/state/amita-runtime serve
+Restart=on-failure
+RestartSec=2
+UMask=0077
+# Stopping/updating the supervisor must leave native work and receivers alive.
+KillMode=process
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

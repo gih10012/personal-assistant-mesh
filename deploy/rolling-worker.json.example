@@ -1,0 +1,15 @@
+{
+  "kind": "worker",
+  "component": "leader-worker",
+  "version": "owner-pinned-release",
+  "protocol_min": 1,
+  "protocol_max": 1,
+  "argv": [
+    "/absolute/path/to/python3.12",
+    "/absolute/path/to/existing-owner-launcher.py",
+    "--config",
+    "/absolute/path/to/unchanged-private-worker.json"
+  ],
+  "cwd": "/absolute/path/to/pinned-worker-release",
+  "env": {}
+}
