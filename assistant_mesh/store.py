@@ -402,54 +402,71 @@ class Store:
         return (status in ('waiting_children', 'pending', 'waiting_backend', 'waiting_auth')
                 and cls._yielded_active_goal_checkpoint(checkpoint))
 
-    def claim(self, node):
+    def claim(self, node, task_ids=None):
         self.elect()
         with self.transaction() as db:
-            now = self.clock()
-            n = db.execute('SELECT * FROM nodes WHERE id=? AND seen>?', (node, now - 60)).fetchone()
-            if not n:
-                raise Conflict('node_not_live')
-            caps = set(json.loads(n['capabilities']))
-            leader = db.execute('SELECT * FROM leader').fetchone()
-            rows = db.execute("SELECT * FROM tasks WHERE status='pending' OR (status IN ('running','waiting_backend','waiting_auth','continuing') AND deadline<=?) ORDER BY created", (now,)).fetchall()
-            for row in rows:
-                required = set(json.loads(row['required']))
-                if not required <= caps or ('leader' in required and (leader['node'] != node or leader['deadline'] <= now)):
-                    continue
-                if db.execute("SELECT 1 FROM tasks WHERE scope=? AND id<>? AND status='running' AND deadline>? LIMIT 1", (row['scope'], row['id'], now)).fetchone():
-                    continue  # one native thread has one active turn, across all nodes
-                # Native effects are not blindly replayed after losing a worker.
-                if json.loads(row['checkpoint']).get('side_effect_started'):
-                    db.execute("UPDATE tasks SET status='needs_review',node=NULL,deadline=NULL WHERE id=?", (row['id'],))
-                    self._enqueue(db, 'review-' + row['id'], '任务 ' + row['id'][:8] + ' 执行中断，可能已产生外部效果，等待核对后续接。')
-                    continue
-                unsettled = db.execute("SELECT status,checkpoint FROM tasks WHERE scope=? AND id<>? AND status<>'completed'", (row['scope'], row['id']))
-                if any((json.loads(other['checkpoint']).get('side_effect_started')
-                        or self._yielded_goal_reserves_scope(other['status'], json.loads(other['checkpoint'])))
-                       for other in unsettled):
-                    # A new task must not sidestep review by resuming the same
-                    # native conversation under a different task ID or node,
-                    # nor take a safely yielded parent's still-active goal.
-                    continue
-                db.execute("UPDATE tasks SET status='running',node=?,epoch=epoch+1,deadline=?,attempts=attempts+1,leader_epoch=? WHERE id=?",
-                           (node, now + 90, leader['epoch'] if 'leader' in required else None, row['id']))
-                checkpoint = json.loads(row['checkpoint'])
-                checkpoint['wait_children_requested'] = False
-                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(checkpoint), row['id']))
-                result = dict(db.execute('SELECT * FROM tasks WHERE id=?', (row['id'],)).fetchone())
-                result['checkpoint'] = json.loads(result['checkpoint'])
-                result['context'] = json.loads(result['context'])
-                result['sessions'] = {}
-                for session in db.execute('SELECT * FROM native_sessions WHERE scope=?', (row['scope'],)):
-                    native = dict(session)
-                    native['state'] = json.loads(native['state'])
-                    result['sessions'][native['harness']] = native
-                result['session'] = result['sessions'].get('codex') or result['sessions'].get('pi')
-                scopes = self.memory_scopes(result['context'])
-                result['memories'] = [dict(m) for m in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) ORDER BY updated DESC LIMIT 100', scopes)]
-                result['children'] = [dict(c) for c in db.execute('SELECT id,status,result FROM tasks WHERE parent_id=? ORDER BY created', (row['id'],))]
-                return result
+            return self._claim_in_db(db, node, task_ids=task_ids)
+
+    def _claim_in_db(self, db, node, task_ids=None):
+        """Claim inside the caller transaction; an explicit set cannot widen.
+
+        Caller-owned request receipts may be committed in this same
+        transaction. Election remains outside it; existing lease checks
+        still validate the current Leader/node when a row is selected.
+        """
+        if task_ids is not None:
+            if (not isinstance(task_ids, (list, tuple, set, frozenset))
+                    or any(not isinstance(value, str) or not value for value in task_ids)):
+                raise ValueError("invalid_claim_task_ids")
+            task_ids = frozenset(task_ids)
+        now = self.clock()
+        n = db.execute('SELECT * FROM nodes WHERE id=? AND seen>?', (node, now - 60)).fetchone()
+        if not n:
+            raise Conflict('node_not_live')
+        caps = set(json.loads(n['capabilities']))
+        leader = db.execute('SELECT * FROM leader').fetchone()
+        rows = db.execute("SELECT * FROM tasks WHERE status='pending' OR (status IN ('running','waiting_backend','waiting_auth','continuing') AND deadline<=?) ORDER BY created", (now,)).fetchall()
+        for row in rows:
+            if task_ids is not None and row['id'] not in task_ids:
+                continue
+            required = set(json.loads(row['required']))
+            if not required <= caps or ('leader' in required and (leader['node'] != node or leader['deadline'] <= now)):
+                continue
+            if db.execute("SELECT 1 FROM tasks WHERE scope=? AND id<>? AND status='running' AND deadline>? LIMIT 1", (row['scope'], row['id'], now)).fetchone():
+                continue  # one native thread has one active turn, across all nodes
+            # Native effects are not blindly replayed after losing a worker.
+            if json.loads(row['checkpoint']).get('side_effect_started'):
+                db.execute("UPDATE tasks SET status='needs_review',node=NULL,deadline=NULL WHERE id=?", (row['id'],))
+                self._enqueue(db, 'review-' + row['id'], '任务 ' + row['id'][:8] + ' 执行中断，可能已产生外部效果，等待核对后续接。')
+                continue
+            unsettled = db.execute("SELECT status,checkpoint FROM tasks WHERE scope=? AND id<>? AND status<>'completed'", (row['scope'], row['id']))
+            if any((json.loads(other['checkpoint']).get('side_effect_started')
+                    or self._yielded_goal_reserves_scope(other['status'], json.loads(other['checkpoint'])))
+                   for other in unsettled):
+                # A new task must not sidestep review by resuming the same
+                # native conversation under a different task ID or node,
+                # nor take a safely yielded parent's still-active goal.
+                continue
+            db.execute("UPDATE tasks SET status='running',node=?,epoch=epoch+1,deadline=?,attempts=attempts+1,leader_epoch=? WHERE id=?",
+                       (node, now + 90, leader['epoch'] if 'leader' in required else None, row['id']))
+            checkpoint = json.loads(row['checkpoint'])
+            checkpoint['wait_children_requested'] = False
+            db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(checkpoint), row['id']))
+            result = dict(db.execute('SELECT * FROM tasks WHERE id=?', (row['id'],)).fetchone())
+            result['checkpoint'] = json.loads(result['checkpoint'])
+            result['context'] = json.loads(result['context'])
+            result['sessions'] = {}
+            for session in db.execute('SELECT * FROM native_sessions WHERE scope=?', (row['scope'],)):
+                native = dict(session)
+                native['state'] = json.loads(native['state'])
+                result['sessions'][native['harness']] = native
+            result['session'] = result['sessions'].get('codex') or result['sessions'].get('pi')
+            scopes = self.memory_scopes(result['context'])
+            result['memories'] = [dict(m) for m in db.execute('SELECT id,text FROM memories WHERE scope IN (?,?) ORDER BY updated DESC LIMIT 100', scopes)]
+            result['children'] = [dict(c) for c in db.execute('SELECT id,status,result FROM tasks WHERE parent_id=? ORDER BY created', (row['id'],))]
+            return result
         return None
+
 
     def _task_is_live(self, db, task, node=_UNSPECIFIED, epoch=_UNSPECIFIED):
         """One authority transaction checks both task and Leader generations.
@@ -472,48 +489,58 @@ class Store:
                 return False
         return True
 
+    _conversation_final_hook_version = 1
+
     def update_task(self, task_id, node, epoch, checkpoint=None, result=None, status=None):
         with self.transaction() as db:
-            row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-            now = self.clock()
-            if not self._task_is_live(db, row, node, epoch):
-                raise Conflict('stale_task_lease')
-            if status is not None and status not in ('completed', 'failed', 'waiting_auth', 'waiting_backend', 'waiting_children', 'continuing', 'needs_review'):
-                raise ValueError('invalid_terminal_status')
-            next_checkpoint = json.loads(row['checkpoint'])
-            if checkpoint:
-                next_checkpoint.update(checkpoint)
-            lifecycle = next_checkpoint.get('native_lifecycle')
-            if (next_checkpoint.get('side_effect_started') is False
-                    and isinstance(lifecycle, dict) and lifecycle.get('outcome') == 'yielded'):
-                if not self._yielded_active_goal_checkpoint(next_checkpoint):
-                    # Reject a fake/partial seal before committing a false
-                    # guard. A status or truthy flag is never settlement.
-                    raise Conflict('native_goal_yield_unsettled')
-                if status not in (None, 'waiting_children', 'waiting_backend', 'waiting_auth'):
-                    # Preserve preflight backoff after a fresh claim, but do
-                    # not finalize a task whose actual goal remains active.
-                    raise Conflict('native_goal_yield_requires_child_wait')
-            delay = 300 if status == 'waiting_auth' else 60 if status == 'waiting_backend' else 30 if status == 'continuing' else 90
-            if status == 'waiting_children':
-                active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (task_id,)).fetchone()
-                if not active:
-                    status = 'pending'  # children may finish before the parent yields
-                # Coordination state cannot prove that native work settled.
-                # Only an explicit worker checkpoint after runtime teardown can
-                # clear this guard; waiting for children is not such evidence.
-            db.execute('UPDATE tasks SET checkpoint=?,deadline=?,result=?,status=? WHERE id=?',
-                       (json.dumps(next_checkpoint), now + delay, result, status or 'running', task_id))
-            if status and not row['parent_id'] and status not in ('waiting_children', 'continuing', 'pending') and (status not in ('waiting_auth', 'waiting_backend') or not json.loads(row['checkpoint']).get('backend_wait_notified')):
-                self._enqueue(db, 'result-' + task_id + '-' + str(epoch), result or '任务结束：' + status)
-            if status in ('waiting_auth', 'waiting_backend'):
-                next_checkpoint['backend_wait_notified'] = True
-                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(next_checkpoint), task_id))
-            if row['parent_id'] and status in ('completed', 'failed', 'needs_review'):
-                active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (row['parent_id'],)).fetchone()
-                if not active:
-                    db.execute("UPDATE tasks SET status='pending',node=NULL,deadline=NULL WHERE id=? AND status='waiting_children'", (row['parent_id'],))
-            return {'ok': True}
+            return self._update_task_in_db(db, task_id, node, epoch, checkpoint, result, status)
+
+    def _update_task_in_db(self, db, task_id, node, epoch, checkpoint=None, result=None, status=None):
+        """Apply the same fenced update and a caller receipt atomically."""
+        row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+        now = self.clock()
+        if not self._task_is_live(db, row, node, epoch):
+            raise Conflict('stale_task_lease')
+        if status is not None and status not in ('completed', 'failed', 'waiting_auth', 'waiting_backend', 'waiting_children', 'continuing', 'needs_review'):
+            raise ValueError('invalid_terminal_status')
+        next_checkpoint = json.loads(row['checkpoint'])
+        if checkpoint:
+            next_checkpoint.update(checkpoint)
+        lifecycle = next_checkpoint.get('native_lifecycle')
+        if (next_checkpoint.get('side_effect_started') is False
+                and isinstance(lifecycle, dict) and lifecycle.get('outcome') == 'yielded'):
+            if not self._yielded_active_goal_checkpoint(next_checkpoint):
+                # Reject a fake/partial seal before committing a false
+                # guard. A status or truthy flag is never settlement.
+                raise Conflict('native_goal_yield_unsettled')
+            if status not in (None, 'waiting_children', 'waiting_backend', 'waiting_auth'):
+                # Preserve preflight backoff after a fresh claim, but do
+                # not finalize a task whose actual goal remains active.
+                raise Conflict('native_goal_yield_requires_child_wait')
+        delay = 300 if status == 'waiting_auth' else 60 if status == 'waiting_backend' else 30 if status == 'continuing' else 90
+        if status == 'waiting_children':
+            active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (task_id,)).fetchone()
+            if not active:
+                status = 'pending'  # children may finish before the parent yields
+            # Coordination state cannot prove that native work settled.
+            # Only an explicit worker checkpoint after runtime teardown can
+            # clear this guard; waiting for children is not such evidence.
+        hook = getattr(self, '_conversation_final_in_db', None)
+        if hook is not None:
+            hook(db, row, node, epoch, checkpoint, result, status)
+        db.execute('UPDATE tasks SET checkpoint=?,deadline=?,result=?,status=? WHERE id=?',
+                   (json.dumps(next_checkpoint), now + delay, result, status or 'running', task_id))
+        if status and not row['parent_id'] and status not in ('waiting_children', 'continuing', 'pending') and (status not in ('waiting_auth', 'waiting_backend') or not json.loads(row['checkpoint']).get('backend_wait_notified')):
+            self._enqueue(db, 'result-' + task_id + '-' + str(epoch), result or '任务结束：' + status)
+        if status in ('waiting_auth', 'waiting_backend'):
+            next_checkpoint['backend_wait_notified'] = True
+            db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(next_checkpoint), task_id))
+        if row['parent_id'] and status in ('completed', 'failed', 'needs_review'):
+            active = db.execute("SELECT 1 FROM tasks WHERE parent_id=? AND status NOT IN ('completed','failed','needs_review') LIMIT 1", (row['parent_id'],)).fetchone()
+            if not active:
+                db.execute("UPDATE tasks SET status='pending',node=NULL,deadline=NULL WHERE id=? AND status='waiting_children'", (row['parent_id'],))
+        return {'ok': True}
+
 
     def agent_action(self, task_id, node, epoch, action_id, action, arguments):
         """Model-selected coordination tools; mutation and fencing are ONE transaction.
