@@ -2,12 +2,12 @@
   "schema": 1,
   "project": "personal-assistant-mesh",
   "goal_status": "active",
-  "updated_at": "2026-10-25",
+  "updated_at": "2026-10-26",
   "plan": "docs/PLAN.md",
   "effective_owner_goal": "docs/GOAL.md",
-  "latest_owner_status": "docs/STATUS-2026-10-25.md",
+  "latest_owner_status": "docs/STATUS-2026-10-26.md",
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
-  "latest_continuation_at": "2026-10-25",
+  "latest_continuation_at": "2026-10-26",
   "owner_report_20261025": {
     "channel": "existing bound-self ClawBot",
     "status": "accepted; same-ID lookup only, no duplicate send",
@@ -24,7 +24,12 @@
   "workflow_sync_20261024": {
     "contract": "docs/AGENT-WORKFLOW-2026-10-24.md",
     "source_thread_topic": "调查长目标执行缓慢问题",
-    "components": ["Click 1.3.0 Evidence", "CQO 0.2.2", "RTK 1.0.1", "niri computer-use 0.3.0 instructions"],
+    "components": [
+      "Click 1.3.0 Evidence",
+      "CQO 0.2.2",
+      "RTK 1.0.1",
+      "niri computer-use 0.3.0 instructions"
+    ],
     "laptop_role": "installed additive reference and shared workflow/niri documents; existing profile plugins retained",
     "vps_roles": "installed to original Leader and Claw profiles/workspaces; actual native discovery found enabled Click/CQO and eight enabled trusted workflow hooks in each profile",
     "vps_runtime": "private CPython3.12.15 plus previously missing musl1.2.5 loader; no system Python replacement; private interpreter completed actual receipt finalization",
@@ -45,7 +50,12 @@
   "quota_resume_reaffirmed_20261023": {
     "owner_intent": "resume eligible same-thread/checkpoint work automatically or by Leader judgement after actual quota recovery, no repeated owner continue needed",
     "three_development_specialists": "terminal quota states checked, original agents continued; capability entry and Goal lifecycle contract delivered, lifecycle implementation and original case audit continuing",
-    "contracts": ["AGENTS.md", "docs/PARALLEL-WORK.md", "docs/LEADER-GOVERNANCE-2026-10-21.md", "docs/LEADER-GOVERNANCE-RUNTIME.md"],
+    "contracts": [
+      "AGENTS.md",
+      "docs/PARALLEL-WORK.md",
+      "docs/LEADER-GOVERNANCE-2026-10-21.md",
+      "docs/LEADER-GOVERNANCE-RUNTIME.md"
+    ],
     "actual_distribution": "updated documents installed/read-back in actual VPS Leader, VPS Claw and laptop workspaces; not claimed new model acknowledgement",
     "runtime_boundary": "pure preflight wait is rechecked on existing authority schedule for opted-in scopes; reset-aware deadline/external specialist controller still incomplete; unknown/native automatic-turn effects and explicit owner pause never auto-cleared",
     "goal_reset_or_old_business_replay": false
@@ -74,10 +84,25 @@
     "main_line": "actual network Leader develops public gih10012/personal-assistant-workspace",
     "workspace_storage": "decentralized node-local replicas; follows Mesh leader/backup selection; partition/reunion agent merge; no permanent VPS or PC primary",
     "difficulty_and_quality_floor": "task rating; ordinary/bounded work Luna max; advanced development waits for qualified strong model quota, never automatic free downgrade",
-    "daily_authorized": ["development", "bounded local unit tests", "self-debugging", "unit-tested deployment before acceptance"],
-    "leader_batched": ["integration trials", "model comparison", "fault drills", "acceptance"],
+    "daily_authorized": [
+      "development",
+      "bounded local unit tests",
+      "self-debugging",
+      "unit-tested deployment before acceptance"
+    ],
+    "leader_batched": [
+      "integration trials",
+      "model comparison",
+      "fault drills",
+      "acceptance"
+    ],
     "default_batch_window": "once weekly, prefer actual weekly reset minus 24h; otherwise Sunday20:00 Asia/Shanghai; only pending relevant work",
-    "parallel_lines": ["workspace Leader handoff and development", "task governance/runtime policy", "existing laptop capability adaptation", "existing Chat/Events production wiring"],
+    "parallel_lines": [
+      "workspace Leader handoff and development",
+      "task governance/runtime policy",
+      "existing laptop capability adaptation",
+      "existing Chat/Events production wiring"
+    ],
     "leader_contract_installed_or_read": true,
     "leader_contract_evidence": "project Leader's correlated complete native tool output contained original governance/stage/runtime contracts; newer self-service revision installation is separate, not claimed read",
     "leader_workspace_task_received": true,
@@ -99,13 +124,21 @@
     "school_evaluation_status": "paused",
     "current_authorized_scope": "adapt existing laptop skills/MCP as portable action implementations or device-bound A2A helper capabilities",
     "deferred_scope": "automatic discovery, migration/proxy judgement and capability enrollment for newly joining nodes; plan only",
-    "coordinating_tasks": ["PAM-002", "PAM-004", "PAM-005"],
+    "coordinating_tasks": [
+      "PAM-002",
+      "PAM-004",
+      "PAM-005"
+    ],
     "contract": "docs/LOCAL-CAPABILITIES-2026-10-21.md",
     "owner": "existing_node_capability_adapt_20261021",
     "branch": "work/existing-node-capabilities-20261021",
     "base": "423a8a6",
     "status": "implementation assigned; not deployed or verified",
-    "audit_findings_only_not_implemented": ["AA data/advisor not in live autonomous selection", "no production free OpenCode fallback/recovery decision loop", "stable business-task center still absent"],
+    "audit_findings_only_not_implemented": [
+      "AA data/advisor not in live autonomous selection",
+      "no production free OpenCode fallback/recovery decision loop",
+      "stable business-task center still absent"
+    ],
     "old_unknown_tasks_replayed_or_guards_cleared": false,
     "original_43_ids_and_dependencies_preserved": true
   },
@@ -114,7 +147,10 @@
     "school_evaluation_status": "paused; explicit owner resume of that business required",
     "scope": "simple managed-agent create/configure/status/stop plus actual per-turn model and reasoning selection, including Leader; controlled tests explicitly authorized",
     "contract": "docs/AGENT-CONTROL-2026-10-21.md",
-    "coordinating_tasks": ["PAM-010", "PAM-004"],
+    "coordinating_tasks": [
+      "PAM-010",
+      "PAM-004"
+    ],
     "original_43_ids_and_dependencies_preserved": true,
     "reasoning_source": "33ded33; five focused checks passed; actual native effort metadata matched for same-session Luna low/max, original Leader high/self-configure/next-max, original Claw max",
     "lifecycle_source": "78e5010/ebd38e2/684830c integrated; independent review reproduced concurrent-resume P1, fixed with original request/session/completed/revision CAS; root four base checks and one new concurrent check passed",
@@ -134,24 +170,95 @@
     "previous_goal_last_observed_tokens_not_migrated": 13547582,
     "previous_goal_last_observed_seconds_not_migrated": 20015,
     "original_43_ids_dependencies_and_long_term_scope_preserved": true,
-    "owner_choices": {"routing": "automatic when needed; preserve native alternatives", "async": "ordinary Chat native schedule plus Work official MCP Events", "wechat_acceptance": "actual teaching evaluation completion, missing owner criteria/auth asked once"},
-    "current_verified_diagnostic": {"request_id": "chatgpt-mesh-health-20261019-2344-sg-01", "status": "completed", "epoch": 1, "original_leader_thread_preserved": true, "actual_correlated_readonly_exec_calls": 2, "native_task_complete": true, "sampled_at_shanghai": "2026-10-19T23:54:47+08:00", "online_node_count_at_that_snapshot": 3, "not_claimed_current_continuous_health": true, "result_return_to_chat": "pending; restore same original result, no new task"},
+    "owner_choices": {
+      "routing": "automatic when needed; preserve native alternatives",
+      "async": "ordinary Chat native schedule plus Work official MCP Events",
+      "wechat_acceptance": "actual teaching evaluation completion, missing owner criteria/auth asked once"
+    },
+    "current_verified_diagnostic": {
+      "request_id": "chatgpt-mesh-health-20261019-2344-sg-01",
+      "status": "completed",
+      "epoch": 1,
+      "original_leader_thread_preserved": true,
+      "actual_correlated_readonly_exec_calls": 2,
+      "native_task_complete": true,
+      "sampled_at_shanghai": "2026-10-19T23:54:47+08:00",
+      "online_node_count_at_that_snapshot": 3,
+      "not_claimed_current_continuous_health": true,
+      "result_return_to_chat": "pending; restore same original result, no new task"
+    },
     "role_revision": "owner-entrance-20261020-followup-events-v2",
     "actual_runtime_v2_role_read_acknowledgements": "v2 installed with v1 backups in Leader/Claw/laptop actual workspaces; original Leader completed same-thread read with complete 7938-byte role in correlated native tool output; implementation specialists also read v2; Claw/laptop complete-v2 tool-output acknowledgement still to correlate",
     "claw_original_unknown_case": "Root real complete off-host backup verified; same original case applied once after explicit stopped-writer/fresh audit/exact spec approval, original unknown/nonzero effects retained, old input never requeued, native state and old chunks unchanged; original entrance Worker restarted, receiver/Leader not restarted",
     "natural_message_leaf": "629a1c2+a526f8f integrated; original-epoch P1 fixed and independently reviewed; authenticated task completion atomically saves natural final; pure frozen ten-module candidate prepared, production attach/grant/projection still pending",
     "work_events_leaf": "e342fa3+906be49 integrated and independently reviewed, including scoped private cross-process feed and live-question refs; two actual SDK fixtures passed on Python3.12/MCP2.3 in isolated networkless container (0.198s); current-grant factory/production lifecycle/real Work continuation still pending",
-    "plugin_skill_and_native_schedule": {"existing_app_backed_private_plugin_version": "1.0.1", "saved_and_read_back": true, "skill": "mesh-assistant", "implicit_invocation": true, "existing_app_binding_oauth_scope_and_presentation_preserved": true, "ordinary_chat_and_native_schedule_actual_acceptance": "pending", "work_event_actual_acceptance": "pending", "local_skill_validator": "passed using existing skill-validation venv; no dependency installed"},
+    "plugin_skill_and_native_schedule": {
+      "existing_app_backed_private_plugin_version": "1.0.1",
+      "saved_and_read_back": true,
+      "skill": "mesh-assistant",
+      "implicit_invocation": true,
+      "existing_app_binding_oauth_scope_and_presentation_preserved": true,
+      "ordinary_chat_and_native_schedule_actual_acceptance": "pending",
+      "work_event_actual_acceptance": "pending",
+      "local_skill_validator": "passed using existing skill-validation venv; no dependency installed"
+    },
     "personal_wechat_task_send": "same retained request sent once using personal native WeChat CLI; one local row plus independently matching real iLink inbound archived; original entrance same thread handed it to original Leader same thread, completed native turns verified by task/session binding",
     "school_evaluation_business": "real Leader performed initial inspection and returned missing owner evaluation criteria/latest WeCom context; no scores submitted, business awaits owner input (framework native turn completed is not business completion)",
     "workstream_assignment": {
-      "root": {"owner": "Root", "branch": "main", "base": "153d51b", "files": "coordination docs; existing remote plugin skill/package; serial production/account/GUI/WeChat writes", "plugin_update_saved": true},
-      "natural_final": {"owner": "chat_discovery_review_20261019", "branch": "work/conversation-emit-20261019", "worktree": "personal-assistant-mesh-worktrees/conversation-emit-20261019", "base": "cd390cc4", "checkpoint": "82017cf", "merge_dependencies": "existing 82017cf then its opt-in frozen completion/epoch fix; no Events dependency"},
-      "offhost_recovery_and_review": {"owner": "chat_explicit_sync_20261019", "branch": "work/claw-abandon-offhost-verify-20261020", "worktree": "personal-assistant-mesh-worktrees/claw-abandon-offhost-verify-20261020", "base": "c18843f", "checkpoint": "same original specialist resumed successfully; old82017cf static review completed and P1 reported", "merge_dependencies": "a50fbe8 then c18843f then owner-off-host verifier; Root actual backup/audit/approval before same-case apply"},
-      "work_events": {"owner": "cloud_adoption_review_20261019", "branch": "work/work-mcp-events-20261020", "worktree": "personal-assistant-mesh-worktrees/work-mcp-events-20261020", "base": "153d51b", "merge_dependencies": "optional service/default-off SDK Extension; weak coupling to committed final receipt refs"}
+      "root": {
+        "owner": "Root",
+        "branch": "main",
+        "base": "153d51b",
+        "files": "coordination docs; existing remote plugin skill/package; serial production/account/GUI/WeChat writes",
+        "plugin_update_saved": true
+      },
+      "natural_final": {
+        "owner": "chat_discovery_review_20261019",
+        "branch": "work/conversation-emit-20261019",
+        "worktree": "personal-assistant-mesh-worktrees/conversation-emit-20261019",
+        "base": "cd390cc4",
+        "checkpoint": "82017cf",
+        "merge_dependencies": "existing 82017cf then its opt-in frozen completion/epoch fix; no Events dependency"
+      },
+      "offhost_recovery_and_review": {
+        "owner": "chat_explicit_sync_20261019",
+        "branch": "work/claw-abandon-offhost-verify-20261020",
+        "worktree": "personal-assistant-mesh-worktrees/claw-abandon-offhost-verify-20261020",
+        "base": "c18843f",
+        "checkpoint": "same original specialist resumed successfully; old82017cf static review completed and P1 reported",
+        "merge_dependencies": "a50fbe8 then c18843f then owner-off-host verifier; Root actual backup/audit/approval before same-case apply"
+      },
+      "work_events": {
+        "owner": "cloud_adoption_review_20261019",
+        "branch": "work/work-mcp-events-20261020",
+        "worktree": "personal-assistant-mesh-worktrees/work-mcp-events-20261020",
+        "base": "153d51b",
+        "merge_dependencies": "optional service/default-off SDK Extension; weak coupling to committed final receipt refs"
+      }
     },
-    "claw_current_space_preflight": {"sampled_free_bytes_before_export": 1408180224, "sampled_ledger_bytes_before_export": 329932800, "existing_host_restore_gate_fits": false, "complete_backup_verified_offhost": true, "gzip_bytes": 377312974, "sql_bytes": 669297882, "schema_objects": 146, "restore_page_cap_bytes": 339419136, "backup_verified_on_apply_host": false, "production_same_case_apply_and_readback": true, "history_pruned_or_space_floor_lowered": false, "next": "keep complete owner-host backup and original case receipts; do not restore it over the live ledger"},
-    "resumed_after_owner_pause_20261020": {"native_goal_status_rechecked": "active", "original_case_before_resume": "no intent/row, original task still needs_review; entrance maintenance-stopped", "approval_window_only_refreshed": true, "fresh_host_python36_audit_eligible": true, "owner_controlled_apply": "applied=true/outcome_unknown=false; native outcome remains unknown, effects_zero=false, original_input_requeued=false", "current_service_boundary": "original receiver and Leader active/NRestarts0 unchanged; original entrance unit started and active/NRestarts0", "whole_goal_completed": false},
+    "claw_current_space_preflight": {
+      "sampled_free_bytes_before_export": 1408180224,
+      "sampled_ledger_bytes_before_export": 329932800,
+      "existing_host_restore_gate_fits": false,
+      "complete_backup_verified_offhost": true,
+      "gzip_bytes": 377312974,
+      "sql_bytes": 669297882,
+      "schema_objects": 146,
+      "restore_page_cap_bytes": 339419136,
+      "backup_verified_on_apply_host": false,
+      "production_same_case_apply_and_readback": true,
+      "history_pruned_or_space_floor_lowered": false,
+      "next": "keep complete owner-host backup and original case receipts; do not restore it over the live ledger"
+    },
+    "resumed_after_owner_pause_20261020": {
+      "native_goal_status_rechecked": "active",
+      "original_case_before_resume": "no intent/row, original task still needs_review; entrance maintenance-stopped",
+      "approval_window_only_refreshed": true,
+      "fresh_host_python36_audit_eligible": true,
+      "owner_controlled_apply": "applied=true/outcome_unknown=false; native outcome remains unknown, effects_zero=false, original_input_requeued=false",
+      "current_service_boundary": "original receiver and Leader active/NRestarts0 unchanged; original entrance unit started and active/NRestarts0",
+      "whole_goal_completed": false
+    },
     "whole_goal_completed": false,
     "next": "continue same-thread school task after real missing owner criteria/context, deploy reviewed automatic final + scoped events/current-grant/lifecycle, verify new Chat implicit invocation/native followup and actual Work event continuation/cancel, publish and report through Claw; keep whole long-term Goal active"
   },
@@ -162,7 +269,10 @@
     "observed_failed_discovery": "23:26 POST415 at gateway followed by POST400 from MCP upstream",
     "installed_mcp_sdk_version": "2.3.0",
     "installed_modern_protocol_version": "2026-07-28",
-    "explicit_modern_routing_headers_added": ["Mcp-Method", "Mcp-Name"],
+    "explicit_modern_routing_headers_added": [
+      "Mcp-Method",
+      "Mcp-Name"
+    ],
     "normal_json_utf8_charset_forms_accepted_only_on_oauth_mcp_route": true,
     "arbitrary_request_headers_forwarded_or_auth_checks_weakened": false,
     "unconfigured_legacy_renderer_golden_bytes_preserved": true,
@@ -179,7 +289,16 @@
     "actual_chat_request_protocol": "2026-07-28",
     "unsupported_binary_probe_then_json_fallback_observed": true,
     "owner_fresh_chat_reports_visible_tool_definitions": 8,
-    "owner_reported_tool_names": ["mesh_submit_task", "mesh_task_status", "mesh_approved_result", "mesh_conversation_open", "mesh_conversation_receive", "mesh_conversation_reply", "mesh_conversation_receipt", "mesh_conversation_sync"],
+    "owner_reported_tool_names": [
+      "mesh_submit_task",
+      "mesh_task_status",
+      "mesh_approved_result",
+      "mesh_conversation_open",
+      "mesh_conversation_receive",
+      "mesh_conversation_reply",
+      "mesh_conversation_receipt",
+      "mesh_conversation_sync"
+    ],
     "catalog_evidence_scope": "owner supplied fresh Chat listing matching deployed eight tools, plus real tools/list HTTP200; no RPC body captured",
     "actual_business_tool_call_or_leader_roundtrip_verified": false,
     "mesh_business_task_created_modified_deleted_or_unknown_replayed": false,
@@ -291,7 +410,10 @@
       "original_ip_discovery_failure_root_cause_proven": false
     },
     "standalone_portable_mcp_package_not_treated_as_chat_connection": true,
-    "old_deferred_chat_known_effect_review_and_held_lock_source_commits": ["4d1b26e", "69cde80"],
+    "old_deferred_chat_known_effect_review_and_held_lock_source_commits": [
+      "4d1b26e",
+      "69cde80"
+    ],
     "previous_old_deferred_chat_case_production_applied_or_requeued": false,
     "old_deferred_chat_case_production_applied_once": true,
     "old_deferred_chat_case_status": "failed/deferred, original epoch 1 closed to epoch 2; not zero-effect",
@@ -311,7 +433,10 @@
     "cloud_owner_runtime_independent_review": "passed; no new P1; grammar check is not host 3.6.8 execution",
     "cloud_owner_runtime_author_targeted_tests_passed": 13,
     "cloud_candidate_merged": true,
-    "cloud_frozen_candidate_builder_integrated_commits": ["c54662f", "443ad99"],
+    "cloud_frozen_candidate_builder_integrated_commits": [
+      "c54662f",
+      "443ad99"
+    ],
     "cloud_frozen_candidate_actual_base_modules": 50,
     "cloud_frozen_candidate_modules": 60,
     "cloud_frozen_candidate_original_modules_byte_unchanged": 48,
@@ -331,9 +456,32 @@
     "cloud_minimal_receiver_candidate_archive_sha256": "e5469d240df90ebc6a19fb7451e2dfdd3c6c4f34fdc53b984029ecbb90d195da",
     "cloud_minimal_receiver_candidate_actual_host_verified_or_loaded": false,
     "parallel_specialist_leaves": [
-      {"agent": "cloud_adoption_review_20261019", "branch": "work/cloud-idle-entrance-20261019", "base": "c46ef1e", "ownership": "Cloud idle entrance and shared original-message sync helper", "checkpoint": "independently reviewed/merged2675895+b33fd4a; trusted source CLI e165f36 also merged", "merge_dependencies": []},
-      {"agent": "chat_explicit_sync_20261019", "branch": "work/chat-explicit-sync-20261019", "base": "443ad99", "ownership": "eighth MCP write-sync tool and targeted adapter checks", "checkpoint": "independently reviewed/merged24052f0; pinned SDK3 passed; minimal receiver candidate separately prepared", "merge_dependencies": ["shared conversation_sync helper 9e3d8f4"]},
-      {"agent": "chat_discovery_review_20261019", "branch": "work/hostname-tls-compat-20261019", "base": "443ad99", "ownership": "optional hostname TLS addon preserving current IP deployment", "checkpoint": "independently reviewed/merged982b299; Root issued/renewal-dry-ran/deployed DNS path and native Chat discovery succeeded", "merge_dependencies": []}
+      {
+        "agent": "cloud_adoption_review_20261019",
+        "branch": "work/cloud-idle-entrance-20261019",
+        "base": "c46ef1e",
+        "ownership": "Cloud idle entrance and shared original-message sync helper",
+        "checkpoint": "independently reviewed/merged2675895+b33fd4a; trusted source CLI e165f36 also merged",
+        "merge_dependencies": []
+      },
+      {
+        "agent": "chat_explicit_sync_20261019",
+        "branch": "work/chat-explicit-sync-20261019",
+        "base": "443ad99",
+        "ownership": "eighth MCP write-sync tool and targeted adapter checks",
+        "checkpoint": "independently reviewed/merged24052f0; pinned SDK3 passed; minimal receiver candidate separately prepared",
+        "merge_dependencies": [
+          "shared conversation_sync helper 9e3d8f4"
+        ]
+      },
+      {
+        "agent": "chat_discovery_review_20261019",
+        "branch": "work/hostname-tls-compat-20261019",
+        "base": "443ad99",
+        "ownership": "optional hostname TLS addon preserving current IP deployment",
+        "checkpoint": "independently reviewed/merged982b299; Root issued/renewal-dry-ran/deployed DNS path and native Chat discovery succeeded",
+        "merge_dependencies": []
+      }
     ],
     "actual_official_cloud_enrollment_and_provider_verified": false,
     "mesh_initiated_chat_cloud_activation_still_deferred": true,
@@ -350,13 +498,20 @@
     "role_revision": "owner-entrance-20261016-duplex-v1",
     "role_document_sha256": "931ea1ee0f51216092766604d6e91c4f5c3d648c6facab92f5572532bb890401",
     "role_files_installed_and_readback_verified_workspace_count": 3,
-    "role_installation_targets": ["laptop-local-agent-workspace", "laptop-global-worker-workspace", "vps-runtime-agent-workspace"],
+    "role_installation_targets": [
+      "laptop-local-agent-workspace",
+      "laptop-global-worker-workspace",
+      "vps-runtime-agent-workspace"
+    ],
     "development_specialists_read_role_contract": true,
     "actual_original_leader_and_new_entrance_model_read_acknowledgements": "pending",
     "integrated_source_before_coordination_commit": "8dc15bc",
     "integrated_source_pushed_at_this_checkpoint": true,
     "actual_published_goal_checkpoint": "5047e4c",
-    "media_source_commits": ["2474450", "39f1c9"],
+    "media_source_commits": [
+      "2474450",
+      "39f1c9"
+    ],
     "media_hash_pinned_source_and_unknown_kind_fix_independently_reviewed": true,
     "media_actual_cdn_download_and_model_understanding_verified": false,
     "entrance_core_candidate_commit": "285021cafcab8bc6793d2896e3f0e9983e36c196",
@@ -378,7 +533,11 @@
   "owner_entrance_priority_and_duplex_20261016": {
     "native_goal_recreated_after_owner_cleared_previous": true,
     "goal_status": "active",
-    "priority_order": ["0_document_and_actual_agent_sync", "1_continuous_clawbot_entrance_agent", "2_chatgpt_internal_plugin_and_official_cloud_outbound_mesh_connection"],
+    "priority_order": [
+      "0_document_and_actual_agent_sync",
+      "1_continuous_clawbot_entrance_agent",
+      "2_chatgpt_internal_plugin_and_official_cloud_outbound_mesh_connection"
+    ],
     "role_contract": "docs/ENTRANCE-AGENT-CONTRACT.md",
     "role_revision": "owner-entrance-20261016-duplex-v1",
     "chat_and_official_cloud_require_owner_computer": false,
@@ -420,7 +579,10 @@
     "owner_completed_github_normal_ui_second_factor": true,
     "dedicated_secret_captured_in_private_0600_state": true,
     "github_repository_or_email_scope_requested": false,
-    "oauth_source_commits": ["2347304", "52e8e41"],
+    "oauth_source_commits": [
+      "2347304",
+      "52e8e41"
+    ],
     "root_real_component_mcp_related_tests": 63,
     "root_real_component_mcp_related_seconds": 3.964,
     "actual_vps_isolated_oauth_container_built_and_private_factory_constructed": true,
@@ -506,8 +668,16 @@
     "latest_local_full_suite_log_tests": 2388,
     "latest_local_full_suite_seconds": 199.499,
     "latest_local_full_suite_result": "OK; mutable-tree observation, not independently pinned exact-head acceptance",
-    "latest_verified_exact_head_ci": {"head":"8f546cddd87193acd23ce07b8110bd946a979d70","run":38712311486,"conclusion":"success"},
-    "later_ci_failure_retained": {"head":"51a47ac193e1a717cc7f5a3ae58926dd44159584","run":38713049911,"failure":"one real A2A node fixture start failed on Python3.12; independent bounded diagnosis underway"},
+    "latest_verified_exact_head_ci": {
+      "head": "8f546cddd87193acd23ce07b8110bd946a979d70",
+      "run": 38712311486,
+      "conclusion": "success"
+    },
+    "later_ci_failure_retained": {
+      "head": "51a47ac193e1a717cc7f5a3ae58926dd44159584",
+      "run": 38713049911,
+      "failure": "one real A2A node fixture start failed on Python3.12; independent bounded diagnosis underway"
+    },
     "whole_goal_completed": false
   },
   "owner_harmony_parallel_start_20261015": {
@@ -526,7 +696,7 @@
     "merged_source_before_coordination_commit": "d5e3e1f",
     "prior_integrated_source": "0b1c14625fa6e470c20c752c1fd4b11f87e50494",
     "prior_full_suite_log_tests": 2315,
-    "prior_full_suite_seconds": 189.780,
+    "prior_full_suite_seconds": 189.78,
     "prior_full_suite_log_result": "OK; original exec handle subsequently unavailable, independent returncode not asserted",
     "root_current_cloud_group_tests": 85,
     "root_current_cloud_group_seconds": 6.174,
@@ -711,7 +881,10 @@
   "latest_projection_cutover_20261012": {
     "recorded_at": "2026-10-12T23:20:00+08:00",
     "candidate_receiver_production_loaded": true,
-    "source_change_files": ["assistant_mesh/routing.py", "assistant_mesh/routing_context.py"],
+    "source_change_files": [
+      "assistant_mesh/routing.py",
+      "assistant_mesh/routing_context.py"
+    ],
     "original_store_worker_server_channel_source_unchanged": true,
     "original_worker_restarted": false,
     "unique_receiver_actual_cwd_unit_and_ipc_peer_independently_verified": true,
@@ -794,7 +967,12 @@
     "old_native_goal_tokens_used_archived": 33581556,
     "old_usage_migrated_into_new_native_goal": false,
     "original_leader_threads_task_ids_dependencies_and_unknowns_preserved": true,
-    "first_milestone": ["continuous Leader and unified actual Mesh capabilities", "ordinary Chat tools and on-demand dedicated Firefox conversation", "official OpenAI Codex Cloud actual temporary node/job", "environment-adaptive new-device enrollment"],
+    "first_milestone": [
+      "continuous Leader and unified actual Mesh capabilities",
+      "ordinary Chat tools and on-demand dedicated Firefox conversation",
+      "official OpenAI Codex Cloud actual temporary node/job",
+      "environment-adaptive new-device enrollment"
+    ],
     "real_project": "Mesh self-bootstrap and self-maintenance",
     "claw_milestone": "confirmed-stop safe takeover plus independent Chat/terminal entries; not arbitrary-partition seamless WeChat HA",
     "harmony_native_phone_and_system_xiaoyi": "next phase after generic enrollment",
@@ -934,7 +1112,11 @@
     "commit": "a701001a40ab06c163f62ce3d0b52a714367f320",
     "run": 38134520892,
     "conclusion": "success",
-    "python_versions": ["3.8", "3.12", "3.14"],
+    "python_versions": [
+      "3.8",
+      "3.12",
+      "3.14"
+    ],
     "new_uncommitted_slice_ci_claimed": false
   },
   "latest_1903_owner_notification": {
@@ -963,7 +1145,16 @@
     "synthetic_user_turns": 2,
     "actual_model_http_post_count": null,
     "actual_model_http_post_count_independently_instrumented": false,
-    "actual_native_tools_per_turn": [["read", "bash"], ["read", "bash"]],
+    "actual_native_tools_per_turn": [
+      [
+        "read",
+        "bash"
+      ],
+      [
+        "read",
+        "bash"
+      ]
+    ],
     "artifact_bytes": 11,
     "artifact_sha256": "c1dce1e288deb3a6650dce0248ad6bdd09cb5fe346b35368eaf1fd4a10bde299",
     "artifact_full_bytes_independently_verified": true,
@@ -972,7 +1163,13 @@
     "final_messages": 7,
     "native_export_matches_complete_final_messages": true,
     "native_message_canonical_sha256": "4c16ce1d6d2efee769e8ee87fe84bbb39b22bf5382a5233a9374a2d744e9c7c4",
-    "native_cost_fields": [0, 0, 0, 0, 0],
+    "native_cost_fields": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
     "session_errors": 0,
     "observed_retry_events": 0,
     "elapsed_seconds": 27.648,
@@ -1012,7 +1209,10 @@
     "regular_files": 195,
     "original_base_files": 189,
     "original_files_unchanged": 187,
-    "changed_original_files": ["assistant_mesh/channel.py", "assistant_mesh/server.py"],
+    "changed_original_files": [
+      "assistant_mesh/channel.py",
+      "assistant_mesh/server.py"
+    ],
     "original_store_and_worker_preserved": true,
     "local_related_tests_passed": 117,
     "local_seconds": 9.424,
@@ -1029,10 +1229,21 @@
     "original_unit_config_account_and_consistent_sqlite_backup_preserved": true,
     "actual_owned_poll_send_handles_and_socket_peer_verified": true,
     "actual_carrier_only_stop_local_closure_verified": true,
-    "actual_stop_callback_counts": {"poll": {"admitted": 8, "returned": 8}, "send": {"admitted": 275, "returned": 275}},
+    "actual_stop_callback_counts": {
+      "poll": {
+        "admitted": 8,
+        "returned": 8
+      },
+      "send": {
+        "admitted": 275,
+        "returned": 275
+      }
+    },
     "callback_count_is_wire_send_count": false,
     "carrier_stop_http_health_status": 200,
-    "original_outbox_at_stop": {"accepted": 102},
+    "original_outbox_at_stop": {
+      "accepted": 102
+    },
     "full_native_table_fingerprints_and_original_ledger_inode_preserved": true,
     "original_worker_pid_and_restart_count_unchanged": true,
     "actual_unique_receiver_carrier_resumed_new_socket_verified": true,
@@ -1046,13 +1257,17 @@
     "root_related_tests_passed": 174,
     "root_related_tests_seconds": 12.524,
     "frozen_local_full_suite_passed": 2002,
-    "frozen_local_full_suite_seconds": 168.940,
+    "frozen_local_full_suite_seconds": 168.94,
     "frozen_vps_full_suite_passed": 2002,
     "frozen_vps_full_suite_seconds": 177.832,
     "vps_python": "3.6.8",
     "ci_run": 38129270175,
     "ci_exact_head_success": true,
-    "ci_python_versions_success": ["3.8", "3.12", "3.14"],
+    "ci_python_versions_success": [
+      "3.8",
+      "3.12",
+      "3.14"
+    ],
     "actual_cost_adviser_source_implemented": true,
     "actual_cost_adviser_live_dispatch_wired": false,
     "legacy_owner_ipc_source_implemented": true,
@@ -1105,7 +1320,10 @@
   },
   "owner_model_frontier_policy": {
     "received_at": "2026-10-11",
-    "preferred_current_models": ["gpt-6-luna/max", "gpt-6.1-sol/task-appropriate-effort"],
+    "preferred_current_models": [
+      "gpt-6-luna/max",
+      "gpt-6.1-sol/task-appropriate-effort"
+    ],
     "permanent_model_whitelist": false,
     "comparison_unit": "physical model + reasoning effort/mode + accessible route",
     "cost_axis": "owner actual incremental cash cost for the matching route/scenario, not blindly AA first-party or median reference API cost",
@@ -1133,10 +1351,19 @@
     "authenticated_links_connected_both_directions": true,
     "actual_laptop_public_https_projection_available": true,
     "actual_vps_campus_projection_available": true,
-    "vps_task_counts": {"completed": 50, "failed": 5},
-    "vps_outbox_counts": {"accepted": 101},
+    "vps_task_counts": {
+      "completed": 50,
+      "failed": 5
+    },
+    "vps_outbox_counts": {
+      "accepted": 101
+    },
     "vps_channel_witness_tables": 0,
-    "laptop_task_counts": {"completed": 9, "needs_review": 1, "pending": 7},
+    "laptop_task_counts": {
+      "completed": 9,
+      "needs_review": 1,
+      "pending": 7
+    },
     "clawbot_remote_status_ok": true,
     "carrier_production_vps_only": true,
     "source_lifecycle_exact_697b98c_ci_verified_success": true,
@@ -1287,7 +1514,11 @@
       "observation_id": "PAM-002b-campus-probe-20261011-v1",
       "independent_actual_sample_time": 1791689495.7608168,
       "existing_owner_principal_observation_verified": true,
-      "propose_reserve_link": ["confirmed", "confirmed", "confirmed"],
+      "propose_reserve_link": [
+        "confirmed",
+        "confirmed",
+        "confirmed"
+      ],
       "managed_operation_state": "completed",
       "managed_settlement": "provider_reported",
       "ledger_execution_verified": false,
@@ -1330,7 +1561,11 @@
     "actual_trial_task_epoch": 1,
     "actual_trial_original_leader_native_thread_preserved": true,
     "actual_trial_native_plan_all_three_steps_completed": true,
-    "actual_trial_propose_reserve_link": ["confirmed", "confirmed", "confirmed"],
+    "actual_trial_propose_reserve_link": [
+      "confirmed",
+      "confirmed",
+      "confirmed"
+    ],
     "actual_trial_routing_candidate_count": 1,
     "actual_trial_request_fingerprint": "75f9d13349804d5c16ac05453e379ec704ad2384d9c4d1262b39cc4652843da6",
     "actual_trial_decision_fingerprint": "41676beab17358025a85156fc84e383489bade3f50f9678e62d36247b9d9fe2f",
@@ -1388,12 +1623,21 @@
     "original_generic_artifact_oracle_matches_again": true,
     "owner_managed_request_pool_held": 0,
     "owner_managed_request_pool_remaining": 1,
-    "laptop_local_runtime_task_counts": {"completed": 8, "needs_review": 1, "pending": 4},
+    "laptop_local_runtime_task_counts": {
+      "completed": 8,
+      "needs_review": 1,
+      "pending": 4
+    },
     "laptop_pending_same_old_effect_guard_scope": 4,
     "laptop_pending_all_unclaimed_epoch_zero": true,
-    "vps_runtime_task_counts": {"completed": 39, "failed": 5},
+    "vps_runtime_task_counts": {
+      "completed": 39,
+      "failed": 5
+    },
     "runtime_task_counts_are_coordination_task_completion": false,
-    "clawbot_production_carriers": ["ali-vps"],
+    "clawbot_production_carriers": [
+      "ali-vps"
+    ],
     "clawbot_channel_error_at_sample": null,
     "source_carrier_remote_error_reporting_can_exit_loops": true,
     "source_carrier_error_loop_fixed_or_deployed": false,
@@ -1419,9 +1663,26 @@
     }
   },
   "execution_priority_groups": [
-    ["PAM-009a", "PAM-009b", "PAM-002a", "PAM-002b", "PAM-010a"],
-    ["PAM-009c", "PAM-004d", "PAM-010b", "PAM-010c", "PAM-006d", "PAM-006e"],
-    ["PAM-007c-4", "PAM-007f", "PAM-007e"]
+    [
+      "PAM-009a",
+      "PAM-009b",
+      "PAM-002a",
+      "PAM-002b",
+      "PAM-010a"
+    ],
+    [
+      "PAM-009c",
+      "PAM-004d",
+      "PAM-010b",
+      "PAM-010c",
+      "PAM-006d",
+      "PAM-006e"
+    ],
+    [
+      "PAM-007c-4",
+      "PAM-007f",
+      "PAM-007e"
+    ]
   ],
   "priority_group_semantics": "parallel coordination priorities, not native execution receipts or a serialized gate; respect each task's actual dependencies",
   "status_source": "project coordination record; runtime evidence is separately identified, not invented",
@@ -1437,7 +1698,11 @@
     "vps_python36_full_suite_duration_seconds": 176.365,
     "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38114112689",
     "ci_verified_success": true,
-    "ci_python_versions": ["3.8", "3.12", "3.14"],
+    "ci_python_versions": [
+      "3.8",
+      "3.12",
+      "3.14"
+    ],
     "production_core_loaded": false,
     "production_core_commit_preserved": "3198c877234a8fd0c6912fdbe218f47185effedc",
     "production_receiver_switched": false,
@@ -1456,7 +1721,11 @@
     "vps_python36_full_suite_duration_seconds": 176.259,
     "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38112274853",
     "ci_verified_success": true,
-    "ci_python_versions": ["3.8", "3.12", "3.14"],
+    "ci_python_versions": [
+      "3.8",
+      "3.12",
+      "3.14"
+    ],
     "artifact_standalone_installed_regular_source_files_per_host": 256,
     "artifact_standalone_sources_match_frozen_archive": true,
     "production_core_loaded": false,
@@ -1477,7 +1746,11 @@
     "vps_python36_full_suite_duration_seconds": 165.288,
     "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38107720875",
     "ci_verified_success": true,
-    "ci_python_versions": ["3.8", "3.12", "3.14"],
+    "ci_python_versions": [
+      "3.8",
+      "3.12",
+      "3.14"
+    ],
     "campus_installed_regular_source_files_compared": 248,
     "campus_provider_registered_and_active": true,
     "campus_actual_managed_request_verified": true,
@@ -1501,7 +1774,11 @@
     "vps_python36_full_suite_duration_seconds": 159.196,
     "ci": "https://github.com/gih10012/personal-assistant-mesh/actions/runs/38099543232",
     "ci_verified_success": true,
-    "ci_python_versions": ["3.8", "3.12", "3.14"],
+    "ci_python_versions": [
+      "3.8",
+      "3.12",
+      "3.14"
+    ],
     "thin_call_vps_standalone_cli_installed": true,
     "thin_call_original_authority_authenticated_readiness_verified": true,
     "thin_call_new_managed_task_or_model_trial_verified": false,
@@ -1569,7 +1846,10 @@
     "local_full_suite_duration_seconds": 143.771,
     "vps_python36_full_suite_tests_passed": 1707,
     "vps_python36_full_suite_duration_seconds": 146.275,
-    "native_custom_provider_config_actual_versions": {"local": "0.162.1", "vps": "0.159.2"},
+    "native_custom_provider_config_actual_versions": {
+      "local": "0.162.1",
+      "vps": "0.159.2"
+    },
     "native_custom_provider_config_actual_readback_verified": true,
     "native_config_probe_model_calls": 0,
     "actual_owned_laptop_vps_public_https_transport_verified": true,
@@ -1657,7 +1937,10 @@
     "vps_python36_full_suite_tests_passed": 1591,
     "vps_python36_full_suite_duration_seconds": 144.798,
     "actual_opt_in_idle_verified": true,
-    "actual_idle_probe_versions": {"local": "0.162.0", "vps": "0.159.2"},
+    "actual_idle_probe_versions": {
+      "local": "0.162.0",
+      "vps": "0.159.2"
+    },
     "actual_private_active_goal_drain_and_seal_verified": true,
     "actual_private_seal_scope": "local native 0.162, same active goal and original history; natural runtime/observer exits, strict artifact ACK; first admission uses actual Codex plus Worker validator, not full Worker run_once",
     "actual_private_full_worker_wake_verified": true,
@@ -1681,7 +1964,10 @@
     "vps_python36_full_suite_tests_passed": 1510,
     "vps_python36_full_suite_duration_seconds": 142.777,
     "actual_opt_in_idle_verified": true,
-    "actual_idle_probe_versions": {"local": "0.162.0", "vps": "0.159.2"},
+    "actual_idle_probe_versions": {
+      "local": "0.162.0",
+      "vps": "0.159.2"
+    },
     "actual_idle_probe_scope": "same frozen source with native_goal_drain true: owned-peer initialize, loaded list empty, exit 0 and reader reaped; no model/thread/goal calls, no forced cleanup; this is not active drain execution",
     "active_drain_model_execution_verified": false,
     "independent_yielded_seal_implemented": false,
@@ -1728,7 +2014,10 @@
     "vps_python36_full_suite_tests_passed": 1449,
     "vps_python36_full_suite_duration_seconds": 142.501,
     "actual_idle_unix_adapter_verified": true,
-    "actual_idle_probe_versions": {"local": "0.162.0", "vps": "0.159.2"},
+    "actual_idle_probe_versions": {
+      "local": "0.162.0",
+      "vps": "0.159.2"
+    },
     "actual_idle_probe_scope": "same frozen source: owned-peer handshake, initialize, loaded thread list empty, exit 0 and reader reaped; no model/resume/goal calls",
     "actual_idle_probe_forced_pid_kill": false,
     "actual_idle_probe_forced_reader_close": false,
@@ -1744,7 +2033,7 @@
     "ci_verified_success": true,
     "source_public": true,
     "local_full_suite_tests_passed": 1424,
-    "local_full_suite_duration_seconds": 144.480,
+    "local_full_suite_duration_seconds": 144.48,
     "production_core_loaded": false,
     "vps_python36_full_suite_tests_passed": 1424,
     "vps_python36_full_suite_duration_seconds": 144.367,
@@ -1780,7 +2069,10 @@
     "production_loaded": true,
     "native_trial_state": "completed_native_plan_task_epoch_1_in_original_leader_thread",
     "tests_per_host": 1282,
-    "loaded_hosts": ["cloud", "laptop"],
+    "loaded_hosts": [
+      "cloud",
+      "laptop"
+    ],
     "configuration_bytes_preserved": true,
     "business_native_history_and_effect_tables_preserved": true,
     "laptop_guarded_unclaimed_maintenance_tasks_preserved": 2,
@@ -1883,19 +2175,28 @@
       },
       "subtasks": [
         {
-          "id": "PAM-002a", "title": "VPS受管通用公网出口",
-          "state": "owned_socks_transport_verified_standalone_public_https_capability_installed", "owner": "root+egress_path_impl+mesh-leader", "depends_on": [],
+          "id": "PAM-002a",
+          "title": "VPS受管通用公网出口",
+          "state": "owned_socks_transport_verified_standalone_public_https_capability_installed",
+          "owner": "root+egress_path_impl+mesh-leader",
+          "depends_on": [],
           "next_action": "owned SOCKS5h实际laptop→VPS公开GET、独立通用HTTPS服务与原Leader同thread自动调用/结算/产物已实证，09:05原结果与本机真实projection再次只读核对。继续便捷跨authority调用与认证模型路径，路径健康/容量和目标正文分开；自动维护已有授权证据，不逐URL让owner预探，不全局强制代理",
           "evidence": {
-            "contract": "docs/EGRESS-PATH.md", "focused_tests_per_host": 17,
-            "actual_laptop_vps_https_get_verified": true, "http_status": 200,
-            "tls_verify_result": 0, "response_bytes": 12327,
+            "contract": "docs/EGRESS-PATH.md",
+            "focused_tests_per_host": 17,
+            "actual_laptop_vps_https_get_verified": true,
+            "http_status": 200,
+            "tls_verify_result": 0,
+            "response_bytes": 12327,
             "response_sha256": "ad50b296f9d754827c0a96e37d467eab238d915c8e18eba5c490c04bcfbfbb27",
-            "independent_git_oracle_matches": true, "owned_ssh_exit_code": 0,
-            "owned_ssh_reaped": true, "global_proxy_changed": false,
+            "independent_git_oracle_matches": true,
+            "owned_ssh_exit_code": 0,
+            "owned_ssh_reaped": true,
+            "global_proxy_changed": false,
             "actual_authenticated_model_inference_verified": false,
             "second_execution_environment_real_request_verified": false,
-            "capability_registered": true, "standing_production_path_installed": true,
+            "capability_registered": true,
+            "standing_production_path_installed": true,
             "installed_capability_id": "ali-vps-public-https-v1",
             "installed_capability_epoch": 1,
             "standing_service_enabled_and_active": true,
@@ -1908,8 +2209,11 @@
           "acceptance": "laptop及另一个执行环境能实际使用VPS路径；范围/TTL/失败/回执明确，不全局强制代理"
         },
         {
-          "id": "PAM-002b", "title": "校园节点校内选择性网络出口",
-          "state": "actual_campus_a2a_local_thin_execution_and_original_parent_return_verified_partial", "owner": "root+mesh-leader", "depends_on": [],
+          "id": "PAM-002b",
+          "title": "校园节点校内选择性网络出口",
+          "state": "actual_campus_a2a_local_thin_execution_and_original_parent_return_verified_partial",
+          "owner": "root+mesh-leader",
+          "depends_on": [],
           "next_action": "校园真实A2A-child-local-thin-provider-parent-resume已验收，完整147270B原artifact/109356B正文已由Root回收VPS并与oracle逐字节核对，后续同Leader消费task completed epoch1/plan3 done/实际工具记录核验。首轮agent-owned传输失败保留，下一片明确空缓存只读自动成果任务及路径证据自动维护，不重GET/逐URL手配，不将HTTP当TLS/学校登录；ledger保持provider_reported。旧配置/一致DB/history备份保留，不清旧guard",
           "evidence": {
             "contract": "docs/CAMPUS-PATH.md",
@@ -2145,7 +2449,9 @@
           "title": "把日常受管执行交给Mesh及真实多候选调度",
           "state": "in_progress",
           "owner": "root+mesh-leader",
-          "depends_on": ["PAM-004b"],
+          "depends_on": [
+            "PAM-004b"
+          ],
           "next_action": "独立cloud provider service已enabled/active；新明确task在原Leader thread epoch1 completed，模型reserve/link与service自动执行/结算及Root独立artifact核验通过，Root无手动execute；原journal/canary行保留。继续真实多候选、跨主体/故障对账和租约更新策略；007原生plan已验收，继续goal多turn生命周期",
           "evidence": {
             "contract": "docs/MANAGED-EXECUTOR.md",
@@ -2175,9 +2481,14 @@
           "acceptance": "Mesh自行选择/触发已准入能力并等待真实结算；原journal跨重启保持未知不重放；不将单目标GET扩成通用联网/性能证明"
         },
         {
-          "id": "PAM-004d", "title": "统一能力入口和真实多候选出口调度",
-          "state": "implementation_in_progress", "owner": "root+egress_path_impl+mesh-leader",
-          "depends_on": ["PAM-002a", "PAM-003c"],
+          "id": "PAM-004d",
+          "title": "统一能力入口和真实多候选出口调度",
+          "state": "implementation_in_progress",
+          "owner": "root+egress_path_impl+mesh-leader",
+          "depends_on": [
+            "PAM-002a",
+            "PAM-003c"
+          ],
           "next_action": "20261013同原Leader/原校园专员真实新Workspace discover-call-delegate-status-fullartifact闭环完成，147280B完整自动回收、真实HTTP双指纹与独立源/VPS逐字节通过；原Leader作者恢复tool实际部署cap3/pool2/binding2续租已验，旧行/unknown保持。继续local artifact真实来源接线、多候选/共享瓶颈与认证模型出口，联合Chat/官方Cloud真实自举项目；不重放旧GET，不把一次跨节点回收当全部自治",
           "evidence": {
             "thin_call_contract": "docs/CAPABILITY-CALL.md",
@@ -2405,18 +2716,30 @@
           "title": "原生 Codex 的薄 MCP 与本地 plugin 入口",
           "state": "implementation_in_progress",
           "owner": "root+mesh_mcp_entrypoint",
-          "depends_on": ["PAM-006a"],
+          "depends_on": [
+            "PAM-006a"
+          ],
           "next_action": "源码已公开，实际本机一个既有profile配置/发现三工具/提交/原Leadercompleted/批准成果原MCP读回通过。未安装portable marketplace包，验证客户端没有模型turn；后续模型自主调用和其他host另验，不冒称Chat/Cloud已接通"
         },
         {
-          "id": "PAM-006d", "title": "主账号Chat原生Mesh工具与推理能力",
-          "state": "implementation_in_progress", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
+          "id": "PAM-006d",
+          "title": "主账号Chat原生Mesh工具与推理能力",
+          "state": "implementation_in_progress",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-006a"
+          ],
           "next_action": "同App/OAuth/八工具已真实连接，现plugin1.0.1含implicit mesh-assistant；原23:54诊断由原Leader真实执行且原答复已单独审查发布，不重跑/重OAuth。已审自动final/epoch修复与Work事件/私有feed源码已合main，下一原receiver有限grant/readyhook、同sidecar projection/current-grant/lifecycle接线，真实新Chat无@及原聊天原生日程、Work完成/提问/取消验收；旧浏览器queued/unknown保持，官方Cloud仍单列不扩本阶段",
           "acceptance": "ChatGPT内部远程插件从自身客户端主动连接；实际身份/任务/成果及连接内双向提问回复一致，原ID/游标重连接续；不依赖本人电脑、不声称客户端关闭仍可唤醒或无限额度"
         },
         {
-          "id": "PAM-006e", "title": "OpenAI官方Codex Cloud临时节点",
-          "state": "implementation_in_progress", "owner": "root+mesh-leader", "depends_on": ["PAM-006a"],
+          "id": "PAM-006e",
+          "title": "OpenAI官方Codex Cloud临时节点",
+          "state": "implementation_in_progress",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-006a"
+          ],
           "next_action": "复用本人published环境，不要求Root先submit。任务绑定runtime的50→60模块冻结候选及实际宿主3.6.8导入/8项已通过，仍非一般入口。并行完成独立owner有限期入网身份，零任务/Leader空闲也可hello/read/submit，真实执行仍校验原task/epoch；共用原message write-sync与443/cloud/node。尚未部署/真实官方入网，不自报attested、不改旧launch unknown，不复制auth或主动submit",
           "acceptance": "官方Cloud环境/任务自身主动连接受认证公网Mesh，实际job/临时身份/双向消息/完整成果及退出后持久状态分别核验；不给operator bearer或复制整个认证目录，不用Alibaba VPS或合成job冒充"
         }
@@ -2555,29 +2878,98 @@
       },
       "acceptance": "计划/任务可续接；目录驱动模型判断；升级有真实证据和回退；未创建定时任务不声称已运行",
       "subtasks": [
-        {"id": "PAM-007a", "title": "原生plan工具与真实事件", "state": "completed",
-         "owner": "root+mesh-leader", "next_action": "原任务/原thread已completed且实际checkpoint plan精确绑定当前turn；保留旧004c null-plan历史"},
-        {"id": "PAM-007b", "title": "同任务租约绑定的原生goal多turn控制器", "state": "source_candidate_validated",
-         "owner": "root+native_goal_adapter", "depends_on": ["PAM-007a"],
-         "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"},
-        {"id": "PAM-007c", "title": "active goal安全协同yield与原任务子工作续接", "state": "isolated_seal_wake_and_ready_marker_verified_native_goal_terminal_handoff_pending",
-         "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "a4c412a双端1612/CI通过且未部署；此前Luna父子marker/False与另一个sol原生get/update/complete只是局部成功，旧unknown保留。完整真实HTTP父子合同尚未启动；下片只验该合同，不用新ID修旧unknown或host强设complete/reset，不阻塞网络/沟通并行实现",
-         "implementation_slices": [
-           {"id": "PAM-007c-1", "title": "owned Unix传输与输入/scope交接前置", "state": "source_candidate_validated_not_production", "owner": "root+native_socket_transport", "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"},
-           {"id": "PAM-007c-2", "title": "一次TERM intent与admitted drain event pump", "state": "isolated_actual_active_drain_verified_not_production", "owner": "root+native_socket_transport", "depends_on": ["PAM-007c-1"], "next_action": "85f9611两端1591项/CI，新tool-field合同实际active drain自然0/EOF、一个admitted turn完成；默认false未部署。原e229651 idle失败、最早resume unknown及私有错误callback unknown均保留不重放"},
-           {"id": "PAM-007c-3", "title": "独立goal/history核验与yielded seal", "state": "isolated_actual_active_goal_seal_and_artifact_commit_verified_not_production", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-2"], "next_action": "85f9611双端1591项/CI通过；新隔离实际active goal/usage不reset，独立observer自然0且原thread前后notLoaded、turn自然完成/完整历史/strict artifact ACK通过。第一epoch不是full Worker；保留原unknown。正式默认false，跨节点及任意外部副作用另验"},
-           {"id": "PAM-007c-4", "title": "原父等待/唤醒/新epoch同goal输入真实往返", "state": "actual_ready_marker_and_separate_native_goal_control_verified_full_roundtrip_pending", "owner": "root+mesh-leader", "depends_on": ["PAM-007c-3"], "next_action": "a4c412a1612双端/CI已通过，真实HTTP完整合同未启动；先修正私有验收客户端读取真实history proof路径，再按完整API验新合同。旧epoch3和sol漏查询的unknown不resume/重放；必须一次完整父子goal交接证据，不拼局部成功"}
-         ]},
-        {"id": "PAM-007d", "title": "连续原生rollout的跨节点checkpoint", "state": "planned",
-         "owner": "root+mesh-leader", "depends_on": ["PAM-007b"],
-         "next_action": "按原生字节/稳定前缀和压缩保留途中新上下文，不用应用摘要或旧artifact冒充完整恢复"},
-        {"id": "PAM-007e", "title": "实际前沿周期检查与模型自主选型", "state": "actual_cost_adviser_source_validated_live_leader_and_schedule_pending",
-         "owner": "mesh-leader", "depends_on": [],
-         "next_action": "4860c17actual-cost adviser/手动对图已发布，同归档2002双端/精确CI成功，未接live选模。免费/订阅增量0按同物理variant能力重定价，额度/时延/privacy另记；结合真正可用Go/native route而非Zen403泛化。接原连续Leader上下文与实际dispatch观察；配置3–5天持久检查/记录，不等007c，不固定榜/造分/限制native；Chat定时仍等006d"},
-        {"id": "PAM-007f", "title": "源码候选与正式运行入口的版本边界", "state": "partially_verified",
-         "owner": "root", "depends_on": [],
-         "next_action": "laptop worker/node与新启动的Firefox/Codex MCP入口已固定到冻结3198；入口原request/task/publication/status/result及client/grant/manifest保留，没有新task/model。存活MCP进程未重启，native-recovery与其他入口/模板仍需逐项隔离，不把本机Linux路径固化成协议"}
+        {
+          "id": "PAM-007a",
+          "title": "原生plan工具与真实事件",
+          "state": "completed",
+          "owner": "root+mesh-leader",
+          "next_action": "原任务/原thread已completed且实际checkpoint plan精确绑定当前turn；保留旧004c null-plan历史"
+        },
+        {
+          "id": "PAM-007b",
+          "title": "同任务租约绑定的原生goal多turn控制器",
+          "state": "source_candidate_validated",
+          "owner": "root+native_goal_adapter",
+          "depends_on": [
+            "PAM-007a"
+          ],
+          "next_action": "ef647c8同一冻结代码两端1328项完整通过、CI38022301906成功；候选未正式加载，真实模型goal/进程协同yield和历史连续性另验"
+        },
+        {
+          "id": "PAM-007c",
+          "title": "active goal安全协同yield与原任务子工作续接",
+          "state": "isolated_seal_wake_and_ready_marker_verified_native_goal_terminal_handoff_pending",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-007b"
+          ],
+          "next_action": "a4c412a双端1612/CI通过且未部署；此前Luna父子marker/False与另一个sol原生get/update/complete只是局部成功，旧unknown保留。完整真实HTTP父子合同尚未启动；下片只验该合同，不用新ID修旧unknown或host强设complete/reset，不阻塞网络/沟通并行实现",
+          "implementation_slices": [
+            {
+              "id": "PAM-007c-1",
+              "title": "owned Unix传输与输入/scope交接前置",
+              "state": "source_candidate_validated_not_production",
+              "owner": "root+native_socket_transport",
+              "next_action": "保留1424旧失败idle与1449新成功证据；不把零模型连接当active yield"
+            },
+            {
+              "id": "PAM-007c-2",
+              "title": "一次TERM intent与admitted drain event pump",
+              "state": "isolated_actual_active_drain_verified_not_production",
+              "owner": "root+native_socket_transport",
+              "depends_on": [
+                "PAM-007c-1"
+              ],
+              "next_action": "85f9611两端1591项/CI，新tool-field合同实际active drain自然0/EOF、一个admitted turn完成；默认false未部署。原e229651 idle失败、最早resume unknown及私有错误callback unknown均保留不重放"
+            },
+            {
+              "id": "PAM-007c-3",
+              "title": "独立goal/history核验与yielded seal",
+              "state": "isolated_actual_active_goal_seal_and_artifact_commit_verified_not_production",
+              "owner": "root+mesh-leader",
+              "depends_on": [
+                "PAM-007c-2"
+              ],
+              "next_action": "85f9611双端1591项/CI通过；新隔离实际active goal/usage不reset，独立observer自然0且原thread前后notLoaded、turn自然完成/完整历史/strict artifact ACK通过。第一epoch不是full Worker；保留原unknown。正式默认false，跨节点及任意外部副作用另验"
+            },
+            {
+              "id": "PAM-007c-4",
+              "title": "原父等待/唤醒/新epoch同goal输入真实往返",
+              "state": "actual_ready_marker_and_separate_native_goal_control_verified_full_roundtrip_pending",
+              "owner": "root+mesh-leader",
+              "depends_on": [
+                "PAM-007c-3"
+              ],
+              "next_action": "a4c412a1612双端/CI已通过，真实HTTP完整合同未启动；先修正私有验收客户端读取真实history proof路径，再按完整API验新合同。旧epoch3和sol漏查询的unknown不resume/重放；必须一次完整父子goal交接证据，不拼局部成功"
+            }
+          ]
+        },
+        {
+          "id": "PAM-007d",
+          "title": "连续原生rollout的跨节点checkpoint",
+          "state": "planned",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-007b"
+          ],
+          "next_action": "按原生字节/稳定前缀和压缩保留途中新上下文，不用应用摘要或旧artifact冒充完整恢复"
+        },
+        {
+          "id": "PAM-007e",
+          "title": "实际前沿周期检查与模型自主选型",
+          "state": "actual_cost_adviser_source_validated_live_leader_and_schedule_pending",
+          "owner": "mesh-leader",
+          "depends_on": [],
+          "next_action": "4860c17actual-cost adviser/手动对图已发布，同归档2002双端/精确CI成功，未接live选模。免费/订阅增量0按同物理variant能力重定价，额度/时延/privacy另记；结合真正可用Go/native route而非Zen403泛化。接原连续Leader上下文与实际dispatch观察；配置3–5天持久检查/记录，不等007c，不固定榜/造分/限制native；Chat定时仍等006d"
+        },
+        {
+          "id": "PAM-007f",
+          "title": "源码候选与正式运行入口的版本边界",
+          "state": "partially_verified",
+          "owner": "root",
+          "depends_on": [],
+          "next_action": "laptop worker/node与新启动的Firefox/Codex MCP入口已固定到冻结3198；入口原request/task/publication/status/result及client/grant/manifest保留，没有新task/model。存活MCP进程未重启，native-recovery与其他入口/模板仍需逐项隔离，不把本机Linux路径固化成协议"
+        }
       ]
     },
     {
@@ -2594,8 +2986,10 @@
       "acceptance": "由 Mesh 持续推进与交付，上层入口不变成权限根或 Leader 工作区"
     },
     {
-      "id": "PAM-009", "title": "ClawBot沟通能力多节点承载与安全接管",
-      "state": "continuous_entrance_deployed_first_native_role_turn_verified_owner_media_handoff_and_partition_ha_pending", "owner": "root+mesh-leader",
+      "id": "PAM-009",
+      "title": "ClawBot沟通能力多节点承载与安全接管",
+      "state": "continuous_entrance_deployed_first_native_role_turn_verified_owner_media_handoff_and_partition_ha_pending",
+      "owner": "root+mesh-leader",
       "depends_on": [],
       "next_action": "唯一receiver和独立连续入口已部署，Luna首轮完整核读角色/Claw history-status-context并silent；原Worker不重启。原Leader旧case现已唯一合法结案/未重放，原线程实际核读完整角色、旧历史前缀保持。下一本人真实新消息/媒体/同thread后续及原IDhandoff，不能用内部同步伪造微信验收。authority仍同VPS故障域，原009a-d继续，不新开竞争poller",
       "evidence": {
@@ -2647,8 +3041,18 @@
         "checkpoint_explicit_max_bytes": 134217728,
         "checkpoint_actual_file_bytes": 246729,
         "checkpoint_actual_peak_rss_kib": 20128,
-        "checkpoint_actual_rows": {"meta": 7, "inbox": 18, "tasks": 42, "outbox": 73, "notification_relays": 0, "mesh_notify_receipts": 1},
-        "checkpoint_dependency_anchors": {"tables": 48, "rows": 1592},
+        "checkpoint_actual_rows": {
+          "meta": 7,
+          "inbox": 18,
+          "tasks": 42,
+          "outbox": 73,
+          "notification_relays": 0,
+          "mesh_notify_receipts": 1
+        },
+        "checkpoint_dependency_anchors": {
+          "tables": 48,
+          "rows": 1592
+        },
         "checkpoint_actual_payload_sha256": "a491af90f283f16076fdd3679248ca4072dbac7490f56cc17e8c6b8854c89d5a",
         "checkpoint_actual_file_sha256": "12906191a516a4a9e70607e0d95988dce0b2fe51d4a1572a40758376f718af82",
         "checkpoint_source_inode_and_selected_table_fingerprints_preserved": true,
@@ -2656,24 +3060,51 @@
         "checkpoint_migration_ready": false
       },
       "subtasks": [
-        {"id": "PAM-009a", "title": "任意节点沟通承载候选能力", "state": "partial_source_candidate_not_integrated",
-         "owner": "root+mesh-leader", "depends_on": [],
-         "next_action": "候选合同/指定witness源码已实现，与009c共34新/114相关fixtures；候选只是report，默认无verifier不grant。继续真实节点认证/API与私有运行能力核对，位置不绑定VPS/Leader，不自动启receiver"},
-        {"id": "PAM-009b", "title": "版本化私有通道checkpoint交接", "state": "partial_audit_checkpoint_source_candidate_not_migration_ready",
-         "owner": "root+clawbot_ha_capability_audit+mesh-leader", "depends_on": [],
-         "next_action": "d8bfeda1707双端/CI成功；实际VPS只读export/validate/0600新file/读回通过，默认64MiB不足事实保留，显式128MiB/RSS20MiB。继续原执行/history引用闭合及009c/d失权/受控handoff，不把audit artifact直接导入或另开poller"},
-        {"id": "PAM-009c", "title": "通道任期和旧承载失权排他", "state": "legacy_owner_loaded_actual_carrier_stop_resume_verified_fenced_handoff_pending",
-         "owner": "root+mesh-leader", "depends_on": ["PAM-009a", "PAM-009b"],
-         "next_action": "最小receiver归档117双端/实际RuntimeDirectory正常停止及SIGKILL清理通过，唯一production加载/同peer句柄/仅停carrier完整8poll+275send callback归还/HTTP200/受控恢复已验；原Store/Worker/native全行hash/账本inode不变。下一_ingest_in_db及fenced事务最小backport/真实原状态witnessproof，再一次carrier交接；不把local stop当grant，不停Leader/history。authority/state/arbitration故障域另解，不凭timeout复制token，不限制native"},
-        {"id": "PAM-009d", "title": "真实受控交接和故障回汇", "state": "planned",
-         "owner": "root+mesh-leader", "depends_on": ["PAM-009c"],
-         "next_action": "隔离ACKloss/crash/partition/rejoin后实际单次handoff；旧holder失权、单条合成消息原task/原发送身份/回执核对；再开启同合同自动接管，不损坏当前入口"}
+        {
+          "id": "PAM-009a",
+          "title": "任意节点沟通承载候选能力",
+          "state": "partial_source_candidate_not_integrated",
+          "owner": "root+mesh-leader",
+          "depends_on": [],
+          "next_action": "候选合同/指定witness源码已实现，与009c共34新/114相关fixtures；候选只是report，默认无verifier不grant。继续真实节点认证/API与私有运行能力核对，位置不绑定VPS/Leader，不自动启receiver"
+        },
+        {
+          "id": "PAM-009b",
+          "title": "版本化私有通道checkpoint交接",
+          "state": "partial_audit_checkpoint_source_candidate_not_migration_ready",
+          "owner": "root+clawbot_ha_capability_audit+mesh-leader",
+          "depends_on": [],
+          "next_action": "d8bfeda1707双端/CI成功；实际VPS只读export/validate/0600新file/读回通过，默认64MiB不足事实保留，显式128MiB/RSS20MiB。继续原执行/history引用闭合及009c/d失权/受控handoff，不把audit artifact直接导入或另开poller"
+        },
+        {
+          "id": "PAM-009c",
+          "title": "通道任期和旧承载失权排他",
+          "state": "legacy_owner_loaded_actual_carrier_stop_resume_verified_fenced_handoff_pending",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-009a",
+            "PAM-009b"
+          ],
+          "next_action": "最小receiver归档117双端/实际RuntimeDirectory正常停止及SIGKILL清理通过，唯一production加载/同peer句柄/仅停carrier完整8poll+275send callback归还/HTTP200/受控恢复已验；原Store/Worker/native全行hash/账本inode不变。下一_ingest_in_db及fenced事务最小backport/真实原状态witnessproof，再一次carrier交接；不把local stop当grant，不停Leader/history。authority/state/arbitration故障域另解，不凭timeout复制token，不限制native"
+        },
+        {
+          "id": "PAM-009d",
+          "title": "真实受控交接和故障回汇",
+          "state": "planned",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-009c"
+          ],
+          "next_action": "隔离ACKloss/crash/partition/rejoin后实际单次handoff；旧holder失权、单条合成消息原task/原发送身份/回执核对；再开启同合同自动接管，不损坏当前入口"
+        }
       ],
       "acceptance": "本机/VPS或其他候选可安全接管同一沟通能力；保留原账本与unknown，不限制native自主网络，不把两个独立本地lease叫共识"
     },
     {
-      "id": "PAM-010", "title": "Codex/Pi任意可接入模型能力",
-      "state": "provider_source_candidates_actual_inference_pending", "owner": "root+mesh-leader",
+      "id": "PAM-010",
+      "title": "Codex/Pi任意可接入模型能力",
+      "state": "provider_source_candidates_actual_inference_pending",
+      "owner": "root+mesh-leader",
       "depends_on": [],
       "next_action": "PiZen403/客户端限制、独立GoStep403/订阅required与匿名custom fixture403保留。真实匿名stock builtin/all工具新明确任务及同session只读followup已成功，完整旧消息/export/产物实际核，native cost0，无auth/新费用。下一临时外部执行能力的Mesh便捷入口与动态费用/effort/时效目录；Codex/Pi仍Leader，不回写长期history，Pi直接免费tool仍未通过。AA匹配假设/隐私分别核，SIWC不是无限Chat",
       "evidence": {
@@ -2727,69 +3158,76 @@
         "third_party_model_call_verified_scope": "genuine OpenCode anonymous stock builtin temporary external capability, not Codex/Pi direct free API or production Mesh callback"
       },
       "subtasks": [
-        {"id": "PAM-010a", "title": "模型协议/成本/隐私/时效目录", "state": "planned",
-         "owner": "root+mesh-leader", "depends_on": [],
-         "next_action": "登记harness/protocol/provider/model/context/tools/cost/privacy/availability及私有认证引用；动态目录供模型选择，不把限时免费或model alias当保证"},
-        {"id": "PAM-010b", "title": "Codex custom Responses provider", "state": "partial_source_candidate_native_config_readback_verified",
-         "owner": "root+mesh-leader", "depends_on": ["PAM-010a"],
-         "next_action": "d8bfeda双端1707/CI通过；默认openai不变，custom私有配置/strict selected auth和同provider续接，16fixtures、实际0.162.1/0.159.2配置读回/自然0均零模型通过。继续010a目录与010d实际SSE/tools/history；初始化非推理"},
-        {"id": "PAM-010c", "title": "Pi原生多协议provider配置与选择", "state": "isolated_native_bundle_request_terminal_rejection_verified_tools_pending",
-         "owner": "root+mesh-leader", "depends_on": ["PAM-010a"],
-         "next_action": "1.1.0incomplete安装/exit137及deferred依赖失败保留；同包bundle原生请求一次Zen403、原失败session前缀重开，tool/推理未验。核Go合法free route/本机codex-opencode后原生explicitprovider一份synthetic无秘密工具续接；诚实UA/native session，费用/privacy/physicalvariant另核，不造transcript/replayunknown或用免费alias转paid"},
-        {"id": "PAM-010d", "title": "合成无秘密工具任务与兜底边界", "state": "anonymous_stock_free_tool_and_same_session_verified_codex_pi_direct_paths_pending",
-         "owner": "root+mesh-leader", "depends_on": ["PAM-010b", "PAM-010c"],
-         "next_action": "现有授权下验证一个可用Responses和一个Pi协议路径，含实际工具结果/原会话续接/产物回读；新凭据/费用问owner，不上传完整记忆，不切模型重放unknown"}
+        {
+          "id": "PAM-010a",
+          "title": "模型协议/成本/隐私/时效目录",
+          "state": "planned",
+          "owner": "root+mesh-leader",
+          "depends_on": [],
+          "next_action": "登记harness/protocol/provider/model/context/tools/cost/privacy/availability及私有认证引用；动态目录供模型选择，不把限时免费或model alias当保证"
+        },
+        {
+          "id": "PAM-010b",
+          "title": "Codex custom Responses provider",
+          "state": "partial_source_candidate_native_config_readback_verified",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-010a"
+          ],
+          "next_action": "d8bfeda双端1707/CI通过；默认openai不变，custom私有配置/strict selected auth和同provider续接，16fixtures、实际0.162.1/0.159.2配置读回/自然0均零模型通过。继续010a目录与010d实际SSE/tools/history；初始化非推理"
+        },
+        {
+          "id": "PAM-010c",
+          "title": "Pi原生多协议provider配置与选择",
+          "state": "isolated_native_bundle_request_terminal_rejection_verified_tools_pending",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-010a"
+          ],
+          "next_action": "1.1.0incomplete安装/exit137及deferred依赖失败保留；同包bundle原生请求一次Zen403、原失败session前缀重开，tool/推理未验。核Go合法free route/本机codex-opencode后原生explicitprovider一份synthetic无秘密工具续接；诚实UA/native session，费用/privacy/physicalvariant另核，不造transcript/replayunknown或用免费alias转paid"
+        },
+        {
+          "id": "PAM-010d",
+          "title": "合成无秘密工具任务与兜底边界",
+          "state": "anonymous_stock_free_tool_and_same_session_verified_codex_pi_direct_paths_pending",
+          "owner": "root+mesh-leader",
+          "depends_on": [
+            "PAM-010b",
+            "PAM-010c"
+          ],
+          "next_action": "现有授权下验证一个可用Responses和一个Pi协议路径，含实际工具结果/原会话续接/产物回读；新凭据/费用问owner，不上传完整记忆，不切模型重放unknown"
+        }
       ],
       "acceptance": "模型能力目录与实际账户/协议/工具续接一致；零新增费用和隐私数据范围可核对；不是永久模型排名或无限免费承诺"
     }
   ],
   "current_work": {
-    "next_owner_requested_step": "Implement approved four parallel streams and real Mesh self-maintenance acceptance; native Goal active after owner-directed replacement; no overall completion claim",
-    "approved_replan_current_streams": {
-      "root": "unified capability/artifact integration, current runtime evidence and minimal authenticated Chat MCP sidecar",
-      "entrypoint_plan_review": "dedicated Firefox ordinary Chat event port, durable once-send queue and complete-result evidence",
-      "node_autonomy_plan_review": "environment-neutral enrollment/challenge/continuation and edge-device delegation",
-      "official_cloud_implementation": "current CLI/task-bound temporary node source plus actual official MCP SDK HTTP source completed; Root owns same-intent failed official setup recovery, no agent submits",
-      "production_changed_by_this_new_slice_yet": true
-    },
-    "latest_status_phase": "2026-10-13 actual same-Leader authored/reviewed maintenance tool and same-ID cap3/pool2/binding2 recovery/over123s lease extension; new real unified Workspace/A2A same project specialist/provider/originalLeader complete147280B artifact fetch/read and independentfull source/VPS byte oracle passed, realHTTP fingerprints exact. Old row/unknown/coreWorker/native freedom preserved. OfficialCloud ownerpublished/selectable, modelcatalog stillloading after quotasrestored; no realjob. OrdinaryChat actualDOM differs, delayedsend sourcefixed but profile/project/install/turn notverified; nativeMCP HTTPS/OAuth and independent-domainClaw safehandoff pending. Fullgoal4streamsactive",
-    "previous_2320_projection_phase_retained": "2026-10-12 23:20 original unique receiver two-readonly-projection candidate actually loaded after owned carrier drain and consistent backup; independent complete10 protected-table/schema/inode/native/steering equality, original Worker untouched. Historical HTTP has0remote links, newfingerprint actual receipt still pending. Current campus expired-lease deadlock identified under healthy authenticated A2A; explicit same-Leader staged recovery-tool task accepted once, not yet completed or production recovered. Prior real Workspace discover/full15347B inventory preserved. Cloud existingdraft stillunpublished, ordinary Chat OAuth and independent-domain Claw actual handoff pending. Full4stream Goal active, original43/unknown/native freedom preserved",
-    "previous_1404_source_phase_retained": "2026-10-12 four-stream source integrated; actual isolated SDK full2208/169.407s no skips and browser24controlled. Original authenticated A2A both directions connected14:04, original frozen core/Worker/receiver unchanged. Main163 normal UI selected; exact personal GitHub repo official Cloud setup once, explicit UI creation failure14:10 retained, no publish/job/membership. Chat HTTPS/real IdP OAuth/account install/DOM signing gates, original-Leader production workspace and independent-domain Claw handoff pending. Full Goal active, original43/unknown/native features preserved",
-    "previous_1903_status_phase_retained": "19:03 original3198 minimal receiver overlay117bothhosts and real systemd239 canary passed; unique backed-up production load/ownerIPC/carrier-only stop/fullcallback/HTTP200 and controlled resume verified, native full-rowhash/ledgerinode/Worker unchanged. PiGoStep onePOST403 subscriptionrequired and custom anonymous fixture403 retained; genuine stock/all-real-tools OS-isolated free task+same originalsession followup succeeded with full-message/export/artifact proof, native cost0/noauth/errors0; HTTP POSTcount/VPS route unknown. Temporary external capability not Leader or productionMesh registration. Wholegoalactive; Chat/officialCloud/fenced handoff/independent-fault-domain HA incomplete",
-    "latest_status_runtime_configuration_changed": true,
-    "latest_status_production_change_scope": "independent unique legacy receiver cwd/entry + private managed runtime ownerIPC only; original3198 Store/Worker/core/history/ledger unchanged, no new key/login/spend or second poller",
-    "previous_1321_artifact_slice_runtime_change_preserved": true,
-    "phase": "Actual new same-Leader fresh-cache native SSH artifact fetch and complete consumption verified, not Root transfer; first failed read task/plan retained. 697b98c owned legacy carrier Thread/full callback lifecycle source1954 both hosts/CI verified, no production receiver instrumentation/handoff. Thin universal capability composition, independent communication fault-domain HA, authenticated model VPS egress, third-party tools, native Chat/official Cloud still required",
-    "runtime_changed_this_status_turn": true,
-    "production_runtime_changed_this_implementation_slice": true,
-    "production_change_scope": "This continuation adds a fixed private diagnostics/stdin-isolated/45s owned SSH wrapper and independent initially empty cache, one new readonly task accepted once; original Leader itself transfers/reads same completed immutable file. Historical prior Root fetch/consume and backed-up stale-prefix repair retained. No formal core/receiver switch, service restart, second poller, new credential/spend, original GET/provider or unknown replay in this continuation",
-    "prior_production_change_scope_retained": "standalone HTTPS service/registration/pool/observations, backed-up newer same-account auth cache and strict-prefix full history refresh; earlier reports and authority remain intact",
-    "next_usability_slice": "Completed fresh-cache model-owned full transfer is not repeated; unify discover/delegate/call/status/result/artifact. Prioritize actual original carrier-only caller stop/in-flight/canonical state and controlled laptop handoff, then independent communication authority/state/arbitration fault domain; never stop unrelated Leader/history. Parallel isolate Pi using existing private OpenCode credential for no-secret free physical model tool/session validation, native Chat HTTPS/OAuth, official Cloud published environment and one task-bound job. Auditable completed-prefix native recovery still needed; original43 dependencies/unknown preserved",
-    "previous_owner_progress_notification": {
-      "request_id": "mesh-owner-progress-20261011-0001-v1",
-      "channel": "existing ClawBot remote channel to bound owner",
-      "status": "accepted",
-      "outcome_unknown": false,
-      "delivery_verified": false,
-      "automatic_retry": false,
-      "new_receiver_started": false
-    },
-    "owner_progress_notification": {
-      "request_id": "mesh-owner-carrier-progress-20261011-0855-v1",
-      "channel": "existing ClawBot remote channel to bound owner",
-      "initial_status": "rejected",
-      "initial_code": "business_-2",
-      "original_request_readback_status": "accepted",
-      "root_reenqueued_or_new_request_id_used": false,
-      "existing_native_recovery_bridge_active_verified": true,
-      "bounded_known_rejection_retry_count": 1,
-      "native_refresh_exact_original_reply_context_verified": true,
-      "outcome_unknown": false,
-      "delivery_verified": false,
-      "automatic_retry": false,
-      "new_receiver_started": false
-    },
+    "phase": "AMITA approved implementation",
     "goal_status": "active",
-    "whole_goal_completed": false
-  }
+    "whole_goal_completed": false,
+    "coordination": "Root owns current docs and serial shared operations; separate worktrees for independent leaves",
+    "streams": {
+      "rolling_runtime": "pending assignment",
+      "model_routes": "pending assignment",
+      "chat_nodes": "pending assignment",
+      "role_replication": "integrate after initial supervisor/control interfaces"
+    },
+    "current_production_changed_by_amita": false,
+    "next": "same-device rolling runtime first; qualified model recovery and interactive node tools in parallel"
+  },
+  "network_name": "AMITA",
+  "amita_approved_replan_20261026": {
+    "contract": "docs/AMITA-REPLAN-2026-10-26.md",
+    "native_goal_created_at": 1792949790,
+    "old_goal_explicitly_cleared": true,
+    "old_usage_migrated": false,
+    "main_harness": "Codex",
+    "rescue_harness": "Pi/other only for actual Codex framework failure, then return",
+    "model_policy": "all task classes may switch to actually available qualified models, including free and non-OpenAI routes; quality floor retained; no qualifying route waits only that task",
+    "first_delivery": "same-device process rolling upgrade at a safe checkpoint",
+    "free_public_relay": "Cloudflare Workers Free plus existing ingress compatibility; no unique authority/ledger",
+    "original_task_graph_preserved": true,
+    "school_evaluation": "paused"
+  },
+  "previous_current_work_reference": "git:b682e00:docs/TASKS.json#current_work"
 }

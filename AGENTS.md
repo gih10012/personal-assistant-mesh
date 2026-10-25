@@ -1,231 +1,104 @@
-# Personal Assistant Mesh working contract
+# AMITA working contract
 
-Owner workflow synchronization (2026-10-24): apply
-`docs/AGENT-WORKFLOW-2026-10-24.md` to the existing actual role workspaces.
-Click Evidence, CQO and RTK reduce repeated work without overriding the owner's
-model/effort, parallelism or native-tool policies. niri computer-use is now
-0.3.0; share its semantic/OCR/cropped-observation and pending-owner-approval
-workflow, keep the GUI backend on its provider. The owner's 127.0.0.1:7890
-proxy is laptop-local and MUST NOT be copied to other nodes. Preserve role
-additions, auth, native histories, unknowns and the independent school pause.
+Current owner-approved contract: 2026-10-26. Read docs/GOAL.md,
+docs/PLAN.md and docs/AMITA-REPLAN-2026-10-26.md before implementation.
+Historical instructions are preserved in Git; their former pauses, fixed-VPS
+assumptions and model-specific fallback bans do not override this contract.
 
-Owner delivery rule (2026-10-24): finish with a user-visible capability, deploy
-promptly when authorized, and prefer ONE real upper-entry check (CLI/Web/GUI).
-Reuse applicable evidence; no new verification framework or repeated broad
-audits. Add checks only for a concrete fault or material data/security risk.
-The weekly batch remains for broader model comparisons/fault drills; it must
-not block an ordinary completed feature's practical deployment/check/handoff.
+## Outcome and delivery
 
-Owner reaffirmation (2026-10-23): quota recovery should resume eligible work
-without another owner "continue". Recheck each executor's actual qualified
-route; a user report is a wake hint, not proof that every node/account recovered.
-The Leader/coordinator continues the SAME stopped specialist, branch, task,
-session and safe checkpoint, or records why that work must still wait/review.
-Never clear unknown effects or owner pauses, reset a native Goal, replay settled
-work, or downgrade advanced work to a free model. Routine development resumes
-independently of the weekly acceptance window. See the quota/resume contract.
+AMITA means Autonomous Mesh for Intelligence, Tools and Agents
+(阿米塔 / アミタ / amita). Preserve the complete general-assistant goal,
+original 43 coordinating task identities/dependencies, business tasks, operation
+IDs, worktrees, native sessions, histories and unknown results.
+The owner cleared the previous native Goal and requested a new one; its status
+is ACTIVE, createdAt 1792949790. Old accounting was not migrated.
+SCHOOL EVALUATION remains independently PAUSED; do not inspect or perform it.
 
-Owner clarification (2026-10-22): Claw is a capable Luna-level self-service
-assistant, not a mandatory relay. If it already has all authorized inputs and
-needs no other Mesh node, it should directly handle simple searches, analysis
-or table edits and reply naturally. If source data/files live on the computer
-or another node, the owner requests saving there, or a canonical centralized
-file workspace already exists, delegate that work to Leader rather than making
-another independent copy. Existing task/channel receipts and communication
-management remain local entrance duties. Do not ask for confirmation merely
-to choose direct handling versus authorized delegation. Preserve native tools.
+Deliver user-visible functionality. Deploy completed authorized changes promptly
+and prefer one real CLI/Web/GUI acceptance. Reuse valid evidence and specialist
+results; do not create an audit/test framework or repeat broad suites.
+Extra checks require a concrete failure or material data/security risk.
+Run every test/check through Click Evidence: click-gate verify, with the exact
+command and absolute workdir for other worktrees. No Guarded approval contract
+is needed. Missing Evidence storage does not block host-authorized work.
 
-Latest approved implementation (2026-10-21): the owner cleared the previous
-native Goal and explicitly requested a NEW full Goal. It is active; old usage
-was not migrated. The effective stage is docs/STAGE-WORKSPACE-2026-10-21.md
-and docs/LEADER-GOVERNANCE-2026-10-21.md. These override historical paused
-development snapshots below. SCHOOL EVALUATION REMAINS PAUSED; Root does not
-resume, inspect or perform that business. Preserve the original 43 task IDs,
-dependencies, native histories, operation IDs and unknown-effect guards.
+## Architecture
 
-Leader must grade task difficulty and record its model/effort/quota policy.
-Ordinary and bounded non-development work defaults to GPT-6 Luna max; advanced
-development/architecture/security requires a qualified stronger route and WAITS
-for quota rather than automatically falling back to a free/lower-quality model.
-Daily development, bounded local unit tests and self-debugging are authorized;
-unit-tested work may deploy before acceptance. Leader coordinates integration
-trials, model comparisons, fault drills and acceptance in one weekly queue,
-preferably before the actual weekly quota reset. Do not invent model trials or
-rerun completed work to consume quota. Production observations and real owner
-work are not synthetic acceptance tests.
+First deliver same-device process rolling upgrades: model-independent supervisor,
+durable local state, communication, discovery, heartbeat, queues and recovery.
+Run versions side by side; new work goes to a ready new version, existing work
+hands over at a safe checkpoint using its original identity. Retain executions
+that cannot safely hand over; other upgrades continue. Roll back failed versions.
+Maintain adjacent-version protocol/state compatibility and short DB transactions.
 
-The actual network Leader owns development of the PUBLIC independent
-gih10012/personal-assistant-workspace repository. Root supplies contracts,
-coordination and serialized shared operations, never substitutes its own Web
-implementation and calls that a Leader delivery. Workspace data is decentralized:
-node-local durable replicas follow Mesh leadership/backup selection, partition
-locally and merge authenticated events on reunion. No permanent VPS/PC primary;
-keep conflicting versions for agent reconciliation, never replay effects from
-merged metadata. Source is public, tasks/documents/auth/native history are private.
-Develop the workspace as the main line, with the existing Chat/Events final-reply
-wiring and current-laptop capability adaptation in parallel. New-device automatic
-adaptation/Cloud/Harmony/Live remain on the full graph, not extra scope now.
+VPS, computer and future devices are peers. Automatically assign coordinator,
+replica, ingress and execution roles from current capabilities and availability.
+Do not require an owner-guaranteed always-on device. Prefer two eligible data
+copies; disclose degraded operation. Partition locally, synchronize authenticated
+events on reunion, retain conflicting versions for agent reconciliation.
+Do not restore/copy a SQLite file over a running authority or replay effects
+because metadata merged. Unknown work isolates its task/operation/resource,
+not every later request in the same Leader conversation.
 
-Latest separate authorization (2026-10-21): implement the existing laptop's
-skill/MCP capability adaptation; general NEW-node automatic inventory,
-portability judgement, migration and proxy enrollment are planned for later.
-Keep the overall native Goal and school evaluation paused. Reuse capability
-class/instance and A2A: portable code/workflows may move, device-bound actions
-remain on their provider and are delegated to a local helper. Assess actions
-and dependencies, not an entire skill name as one portable/not-portable bit.
-Never copy auth/session state or private artifacts into packages/public Git.
-The AA/quota/Mobius reviews were read-only; their findings do not authorize
-fixing policies, replaying unknown tasks or changing the reference project.
-See docs/LOCAL-CAPABILITIES-2026-10-21.md. Root owns shared deployment/GUI writes.
+Keep Codex as the main harness. Select any actually accessible, authorized model
+and real reasoning level that meets the task's intelligence/tool/context/vision
+requirements, INCLUDING advanced tasks and qualified free/non-OpenAI routes.
+No permanent provider/model list or blanket ban on free advanced execution.
+If no candidate qualifies, only the affected task waits and is reconsidered
+automatically when capacity returns. Model outages do not switch harness.
+Use Pi/another rescue harness only for actual Codex startup/severe framework
+failure, repair Codex, then return to it. Preserve native history and business
+memory; do not disguise a provider or invent effective model/effort evidence.
+AA and observed task results are references; reprice the actual route's marginal
+cash cost, with quota/privacy/latency separate. Never call a model just to grade
+or budget every task. Keep the 3–5 day official frontier/update cadence.
 
-Latest owner override (2026-10-20/21): the native development Goal is PAUSED,
-and the school evaluation is independently paused until the owner explicitly
-resumes that business. The owner separately authorized a bounded change and
-controlled tests for per-agent model/reasoning selection (including Leader)
-and a simple agent create/configure/status/stop entry. Only that leaf may move;
-do not resume Chat/Events deployments, the school task, or other paused work.
-The earlier active snapshots below are historical, not authority to resume.
+## Interfaces and entrances
 
-Read `docs/GOAL.md`, `docs/PLAN.md` and `docs/TASKS.json` before changing this project. Preserve
-the complete owner goal, task IDs, dependencies and next actions; update the
-coordination record when work or evidence changes. Runtime tasks and external
-results must be verified from their actual authority, not inferred from this file.
+Chat is an interactive node and entrance. Add mesh_connect, mesh_discover,
+mesh_node_update, mesh_work_pull and mesh_work_report while preserving old
+task/conversation tools and mappings. Discovery/join must not require a fake
+business task. Control handshakes are idempotent; uncertain external effects
+retain their original operation and require receipt reconciliation.
+Use actual host capabilities: Work MCP Events where supported; no fabricated
+ordinary-Chat daemon, arbitrary wake API or official-Cloud attestation.
+Free public bootstrap/relay is authorized; first implementation uses Cloudflare
+Workers Free and existing ingress compatibility. It owns neither the sole
+ledger nor permanent coordination. Do not enable paid service/credit fallback.
 
-Latest approved stage (2026-10-20): see
-`docs/STAGE-ENTRANCES-2026-10-20.md`. The owner cleared the previous native Goal
-and explicitly requested a new one; the new full-scope Goal is active. Do not
-claim its accounting migrated or recreate the original 43 coordinating tasks.
-First synchronize the revised role contract, then recover the existing Claw
-entrance and send the owner's teaching-evaluation commission using PERSONAL
-WeChat -> existing ClawBot, not the bot -> owner reporting route. The actual
-Mesh Leader must read the authorized WeCom context, perform the school business
-with the owner's evaluation criteria, and report naturally. Root must not do
-the business itself and call that an end-to-end Mesh acceptance.
+Claw remains an independent low-cost continuous assistant with full authorized
+history/media/channel tools and accurate message timestamps. Simple complete
+work may be handled directly; computer/other-node data, requested saving there
+or existing canonical business files require Leader coordination. Reply naturally
+when useful; no stale answer replay, template task receipts or retry-counter spam.
+Use the private confirmed owner-account binding, without rechecking known menus.
+Normal Leader communication goes through Claw; existing direct authority remains.
 
-In parallel, add an implicitly selected skill to the EXISTING Chat plugin:
-ordinary new Chat chooses Mesh when personal-device/action/long-running work
-needs it, without requiring an @ mention. Preserve other native tools. Native
-scheduled tasks return to that same ordinary Chat; Work web / desktop Cloud
-uses official MCP Events (2026-07-28) for completion/attention webhooks. These
-are separate destinations, not arbitrary injection into ordinary Chat. No paid
-Agents API or new model key. Preserve the verified plugin/App/OAuth identities.
-Persist task-agent final replies at the authorized task-completion transaction;
-delivery failure must not rerun completed native work or require Root to approve
-every normal answer. Never export whole native histories as conversational replies.
+## Collaboration and boundaries
 
-The original Chat diagnostic DID run in the original Leader thread at
-2026-10-19 23:54 Asia/Shanghai: two correlated read-only execs and native
-task_complete are verified. Its result was not returned to Chat. Do not repeat
-that task or interpret live=false after completion, conservative
-execution_verified=false, or per-message native_interaction_effective as an
-offline-Leader test. Restore only that original reviewed result separately.
-Resume the stopped chat_explicit_sync_20261019 specialist on its saved work;
-if quota remains unavailable, preserve its exact checkpoint and have Root take
-over the remaining review without pretending the specialist completed it.
-Cloud Codex/Harmony/Live and the full long-term graph remain in scope but are
-not additional implementation expansion during this entrance-wrap-up stage.
+Independent implementation/research/review uses separate branches/worktrees in
+parallel. Root alone writes coordination files and mutates shared production,
+accounts and desktop during development. Serialize maintenance of one resource;
+the resulting system must support its own leased, authorized maintenance.
+Continue a truly stopped specialist's same work/checkpoint when a qualified route
+is available. An observation timeout alone does not authorize restarting work.
+Retain the owner's unrelated dirty changes; never reset/stash them silently.
 
-Earlier owner priority (2026-10-16), retained where consistent with the stage:
-first publish/synchronize the role contract in `docs/ENTRANCE-AGENT-CONTRACT.md`,
-then implement the continuous-memory low-cost ClawBot entrance agent, then the
-ChatGPT-INTERNAL plugin and official Codex Cloud outbound connection to public
-Mesh. These cloud entrances must work without the owner's computer. Connection
-initiation is directional; communication inside that connection is bidirectional:
-Mesh/Leader progress, questions and results plus owner/client replies. Deferring
-Mesh-initiated activation of Chat/Cloud does NOT forbid those reverse messages.
-Firefox collaboration/active Chat invocation is deferred; retain its old queue
-and worktree without replay. Do not restrict the new contract to the old three
-tools when genuine bidirectional conversation needs authenticated extensions.
+Actual network Leader owns personal-assistant-workspace development; Root must
+not author a substitute Web app and label it Leader delivery. Resume original
+project branches. Keep decentralized task/plan/document/agent-activity/API/skill
+and replica requirements; Cloud, HarmonyOS/Xiaoyi, new-device automation,
+delegated peripherals and Live remain on the full graph for AMITA to extend.
 
-The entrance agent communicates/manages the channel and hands work to Leader;
-it is not a new Leader. Reuse complete authorized ClawBot history/media tools,
-continuous native memory and actual message timestamps/reply/task links. Do not
-spam canned task receipts, internal retry counts or yesterday's stale answers.
-Leader keeps direct ClawBot access but normally communicates through this agent.
-Keep checks proportional and targeted; after the requested deliverables work,
-invite the owner through ClawBot for direct validation instead of expanding tests.
-Repository docs are not proof that a running remote agent read them: record
-actual delivery/acknowledgement separately before declaring synchronization done.
+Mesh adds managed capabilities; native Shell/files/network/MCP stay available.
+Node agents adapt their OS/environment. Portable code may move; device-bound
+GUI/campus/browser actions remain at their provider and use local helpers/A2A.
+Do not clone account credentials or publish chats, tasks, attachments, native
+history or private machine identifiers. Zero new spend and no paid model keys.
+The owner's 127.0.0.1:7890 proxy is laptop-local only. External requests here
+use command-local proxy settings; local/internal traffic remains direct.
 
-Prioritize bottom/middle Mesh architecture: decentralized recovery, autonomous
-resource routing, real network/capability inventory and environment-adaptive
-enrollment. Live/voice/panel are later projects to delegate to Mesh. Dots is the
-product benchmark; native Codex is primary, Pi optional, not an OpenClaw leader.
-
-Prioritize real egress and multi-node communication alongside native-goal work;
-the latter must not block all other capabilities. ClawBot is communication,
-never the Leader workspace or permanently VPS-only. Internal node ID `cloud`
-means Alibaba VPS (display `ali-vps`), not official OpenAI Codex Cloud
-(`openai-codex-cloud`). Preserve existing IDs and journals.
-
-Keep all native Shell/files/network/MCP features available. Mesh adds managed
-capability contracts; it is not a host-wide allowlist. Let node agents adapt
-Windows/mobile/cloud environments rather than imposing the Linux examples.
-
-Discover the current terminal's existing skills, symlinked capability registries,
-commands, and private credential metadata before building replacements or asking
-the owner to log in. Read only the relevant contracts progressively; a historical
-registry claim is not live availability. Inspect wrapper code before even running
-help: configuration, session/history sync, retries and paid defaults may have
-side effects. Reuse compatible mechanisms without rewriting the continuous
-Leader's history or exposing credentials. Real anonymous OpenCode may be an
-explicitly selected temporary external execution capability; it is not the
-Codex/Pi Leader or a reason to impersonate clients or convert free calls to paid.
-
-Parallel implementation is the default for independent leaves of the approved
-task graph: code, research, documentation, tests and review should proceed at
-the same time when they do not depend on one another. Give each specialist a
-dedicated Git branch and worktree; record its task, owner, base commit and merge
-dependencies. Do not make unrelated work wait for GUI, deployment, OAuth or a
-single stalled branch. The coordinator reviews tested commits and merges them
-without overwriting other branches or the owner's changes. See
-`docs/PARALLEL-WORK.md` for the standing owner instruction.
-
-Serialize mutations to the same production state, credentials/account UI,
-desktop or migration target, not all project work. Keep unrelated development
-running while the operations owner executes a controlled change. The main
-coordination files have one writer; branch-specific docs can be parallel.
-
-Continue the Leader's native context and project specialist threads, using
-native compression/memory. If a specialist actually stops because of quota,
-transport interruption or a Goal interruption, retain its branch, checkpoint,
-original operation IDs and tool handles and continue the same specialist when
-capacity and the active owner Goal permit. Inspect authoritative agent/job
-state first: an observation timeout alone is not a stopped task. Do not restart
-an effectful operation, recreate completed work, mark stopped work complete or
-discard it. An explicit owner pause still suspends Goal work; a later owner
-resume allows the stopped specialists to continue without asking again.
-
-Maintain frontier awareness: every 3–5 days review official OpenAI/Codex/model/
-skill/protocol releases and relevant primary GitHub implementations. Let the
-model choose among currently accessible models based on work and evidence, not
-a permanent ranking. Upgrades stay within owner authority and zero new spend;
-test in an isolated installation and retain a recovery path.
-
-Owner model preference: compare model + reasoning effort + actual accessible
-route on the current intelligence/cost frontier, preferring useful high-quality,
-low-cost points. Reprice AA reference costs using the owner's actual route:
-free routes and included subscription calls can have zero incremental cash
-cost; track quota, latency, privacy and tool reliability separately. Do not
-reject a free model merely because its paid-price AA point is below the line.
-Use matching physical-model/effort quality as an explicit reference assumption,
-not evidence that every same-name gateway is identical. Current Luna(max)/
-GPT-6.1 Sol preference is revisable; no permanent model list, invented score,
-mandatory geometry gate, native-feature interception or unknown-turn replay.
-
-Do not turn validation into an endless completeness exercise. Test the risk and
-protocol boundaries, document unsupported environments and real limits, then
-advance the next task. Do not call a directory, self-report, fixture, live PID,
-historical activation, or research result proof of full autonomy/HA/execution.
-
-Secrets, account state, chats, native rollouts and private machine identifiers
-remain outside this public repository. Unknown side effects retain the original
-identity and never replay because a leader, model, version or node changes.
-
-Reuse the owner's explicitly confirmed main-account display-name binding. The
-private owner-state `personal-assistant-mesh/OWNER-IDENTITY.md` records it; read
-that handoff instead of repeatedly opening profile/email menus or asking the
-owner to confirm again. Normal profile evidence consistent with that binding
-is sufficient for the known owner workflow. Recheck only an actual account
-switch or conflicting identity, never arbitrary names/emails in chat content.
-Missing DOM selectors are an adapter gap, not an unconfirmed owner identity.
+Implementation, merged source, deployed state and actual acceptance are distinct.
+Read actual authority/process/receipt evidence before claiming runtime success.
+Only complete the native Goal when the full objective has been achieved.
