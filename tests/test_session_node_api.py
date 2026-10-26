@@ -84,6 +84,24 @@ class SessionNodeAPITests(unittest.TestCase):
                 self.api.install_session_nodes(policy)
         self.assertIs(original, self.api.session_nodes)
 
+    def test_ready_hook_keeps_original_dispatch_and_one_store(self):
+        from assistant_mesh.session_node_authority import attach
+        original_store, previous_calls = self.api.store, []
+        def previous(*args):
+            previous_calls.append(args)
+            return {'prior_hook': 'retained'}
+        self.api.dispatch = previous
+        attach(self.api, self.policy)
+        self.assertIs(original_store, self.api.session_nodes.store)
+        reply = self.call('discover', {})
+        self.assertEqual('reachable', reply['network']['state'])
+        self.assertEqual([], previous_calls)
+        self.assertEqual({'prior_hook': 'retained'},
+            self.api.dispatch('POST', '/original-final-route', {'id': 'original'}, {'role': 'worker'}))
+        self.assertEqual(1, len(previous_calls))
+        with self.assertRaises(ValueError):
+            attach(self.api, self.policy)
+
 
 if __name__ == '__main__':
     unittest.main()

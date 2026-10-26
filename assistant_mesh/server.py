@@ -111,18 +111,8 @@ class API:
 
     def install_session_nodes(self, config):
         """Owner-only installation over this API's original ingress and ledger."""
-        fields = {'subjects', 'mesh_id', 'ttl_seconds', 'work_lease_seconds'}
-        if (not isinstance(config, dict) or 'subjects' not in config
-                or set(config) - fields):
-            raise ValueError('invalid_session_nodes_config')
-        if self.ingress is None or self.ingress_results is None:
-            raise ValueError('session_nodes_require_original_ingress')
-        from .ingress_backend import LocalIngressBackend
-        from .session_nodes import LocalSessionNodes
-        backend = LocalIngressBackend(self.ingress, self.ingress_results)
-        service = LocalSessionNodes(backend, **config)
-        self.session_nodes = service
-        return service
+        from .session_node_authority import install
+        return install(self, config)
 
     def principal(self, authorization):
         if not authorization.startswith('Bearer '):
@@ -148,6 +138,10 @@ class API:
                     or binding['canonical_authority'] != self.channel_authority.authority):
                 raise PermissionError('channel_carrier_binding_changed')
             return self.channel_authority.dispatch(node, parsed.path[len('/channel-carrier/'):], payload)
+        from .session_node_authority import dispatch as session_dispatch
+        session_result = session_dispatch(self, method, path, payload, peer)
+        if session_result is not NotImplemented:
+            return session_result
         if role == 'ingress' or parsed.path.startswith('/v1/ingress/'):
             # Scoped entrypoints must not fall through to existing global
             # status/discovery/operator/worker routes, even with a node field.
@@ -155,17 +149,6 @@ class API:
                 raise PermissionError('ingress_not_authorized')
             if method != 'POST' or query:
                 raise PermissionError('ingress_route_not_authorized')
-            session_actions = {
-                '/v1/ingress/mesh/connect': 'connect',
-                '/v1/ingress/mesh/discover': 'discover',
-                '/v1/ingress/mesh/node_update': 'node_update',
-                '/v1/ingress/mesh/work_pull': 'work_pull',
-                '/v1/ingress/mesh/work_report': 'work_report',
-            }
-            if parsed.path in session_actions:
-                if self.session_nodes is None or parsed.fragment:
-                    raise PermissionError('session_nodes_not_configured')
-                return self.session_nodes.request(peer['ingress'], session_actions[parsed.path], payload)
             if parsed.path == '/v1/ingress/tasks':
                 return self.ingress.submit(peer, payload)
             if parsed.path == '/v1/ingress/task/status':
@@ -173,15 +156,6 @@ class API:
             if parsed.path == '/v1/ingress/task/result':
                 return self.ingress_results.read(peer, payload)
             raise PermissionError('ingress_route_not_authorized')
-        if parsed.path == '/v1/session-nodes/authorize':
-            if (role != 'operator' or method != 'POST' or query or parsed.fragment
-                    or self.session_nodes is None):
-                raise PermissionError('session_work_authorization_rejected')
-            required = {'subject', 'request_id', 'operation_id'}
-            optional = {'conversation_id', 'task_id', 'expires_at'}
-            if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - required - optional:
-                raise ValueError('invalid_session_work_authorization')
-            return self.session_nodes.authorize_work(authorized=True, **payload)
         if parsed.path == '/v1/ingress-result/publish':
             # Owner approval is an independent private route. A scoped ingress
             # cannot become its own publisher by supplying reviewed=true.
