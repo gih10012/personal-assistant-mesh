@@ -20,7 +20,7 @@ FORMAT = 'mesh-native-goal-source-candidate/1'
 PINS = {
     'codex.py': '0dcf663c7014932586737e46a44915067a3000aa17bf844ee01c1d21586781cd',
     'worker.py': 'ad7fc4cc5aa59f51d4aadd293cd31c34a3b8d7424a8d588a0b56f555f1712faf',
-    'store.py': 'b59b5ca35ce1941dfff749173c0100c89277db87364cf1710492b9fd8bec7b4d',
+    'store.py': '06c4590c2df0de66f0c0b3addff4779ccd388246fe8d030597ad30b730e3f095',
     'sessions.py': '61382191eff2f3979b817db0e07b9fc143c2544632362d3de23166304a3e5304',
     'native_goal_observer.py': '0dec24469800087382dd58c550535302e6a4c43ec7c36db64ee6bee450d796c1',
     'native_history.py': '5e06abac895a169a7738b52f8818b2cec64bf3d7e112d92f285a1bf076b7dd6c',
@@ -31,7 +31,7 @@ PINS = {
 }
 WORKER_PIN = '816a8eb2f6bc5a24a22ae345b1b7b94b0dd5d0ce52f99a6658688e683ce9cbf0'
 STORE_PIN = 'be2df48e03021f48c382efc4690fa7a8ee5e67da8bd93497e725566532e30c0b'
-SCOPE_SHA256 = 'abfd11279155244085ee517fe1e82513f5faddb87613c811278b15645472d4e4'
+SCOPE_SHA256 = '7d7438f8c49803fd327f471b05e91af82bbd4ff03b8575cc2ec571f67a9c82f8'
 LAUNCH_SHA256 = '5ddfd0673827f9f446f9a8e9f03c5f2637431ea60345eee85ad7d6cd5e85e667'
 
 
@@ -105,7 +105,7 @@ def scoped_worker_source(text):
 
 def authority_source(text, legacy_text):
     names = ('_yielded_active_goal_checkpoint', '_yielded_goal_reserves_scope',
-             'claim', 'update_task', 'agent_action')
+             'claim', '_claim_in_db', 'update_task', '_update_task_in_db', 'agent_action')
     methods = [_function(text, 'Store', name) for name in names]
     # A paused yielded owner still owns its active Goal; a new task must not
     # consume that native conversation while the original task is paused.
@@ -115,7 +115,7 @@ def authority_source(text, legacy_text):
         "('waiting_children', 'pending', 'waiting_backend', 'waiting_auth', 'paused')")
     methods[methods.index(reserve)] = ast.parse(reserve_text).body[0]
     for index, method in enumerate(methods):
-        if method.name == 'claim':
+        if method.name == '_claim_in_db':
             loop = next(node for node in ast.walk(method) if isinstance(node, ast.For)
                         and isinstance(node.target, ast.Name) and node.target.id == 'row')
             loop.body[0:0] = ast.parse('if not self._native_goal_row_allowed(db, row, node):\n    continue').body
@@ -126,14 +126,15 @@ def authority_source(text, legacy_text):
                     break
             else:
                 raise ValueError('native_goal_candidate_claim_shape_changed')
-        elif method.name == 'update_task':
-            block = next(node for node in ast.walk(method) if isinstance(node, ast.With)).body
+        elif method.name == '_update_task_in_db':
+            block = method.body
             lifecycle = next(i for i, node in enumerate(block) if isinstance(node, ast.Assign)
                              and any(isinstance(target, ast.Name) and target.id == 'lifecycle' for target in node.targets))
-            block[lifecycle:lifecycle] = ast.parse('self._native_goal_validate_checkpoint(db, row, next_checkpoint, status)').body
-            update = next(i for i, node in enumerate(block) if isinstance(node, ast.Expr)
-                          and ast.unparse(node).startswith("db.execute('UPDATE tasks SET checkpoint=?,deadline=?,result=?,status=? WHERE id=?',"))
-            block[update:update] = ast.parse("hook = getattr(self, '_conversation_final_in_db', None)\nif hook is not None:\n    hook(db, row, node, epoch, checkpoint, result, status)").body
+            block[lifecycle:lifecycle] = ast.parse(
+                'if self._native_goal_managed_in_db(db, task_id, node) is not None:\n'
+                '    self._native_goal_validate_checkpoint(db, row, next_checkpoint, status)').body
+            # The source helper already owns the same-transaction final hook.
+            # Retain it exactly once; public update_task only opens/delegates.
         methods[index] = ast.fix_missing_locations(method)
     # Keep the existing owner continuation protocol and all of its same-ledger
     # checks. Only a matching scoped final proof can replace the old false

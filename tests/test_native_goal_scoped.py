@@ -100,15 +100,15 @@ print('pure source import only')
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10)
         self.assertEqual(0, result.returncode, result.stderr)
 
-    def api(self, directory, policy=None):
+    def api(self, directory, policy=None, original=None):
         policy = policy or self.policy()
-        store_class = self.scope.make_store_class(self.old_store.Store, self.authority.AuthorityMethods, policy)
+        store_class = self.scope.make_store_class(original or self.old_store.Store, self.authority.AuthorityMethods, policy)
         store = store_class(Path(directory) / 'ledger', clock=lambda: 1000, recover_inflight=False)
         node = {'role': 'worker', 'node': 'node', 'capabilities': ['leader', self.scope.CAPABILITY]}
         ingress = types.SimpleNamespace(authority=policy['authority'], owner_id=policy['owner_id'])
         def dispatch(method, path, payload, peer):
             if path == '/v1/claim':
-                return {'task': store.claim(peer['node'])}
+                return {'task': store.claim(peer['node'], task_ids=payload.get('task_ids'))}
             if path == '/v1/task/update':
                 return store.update_task(payload['id'], peer['node'], payload['epoch'],
                     payload.get('checkpoint'), payload.get('result'), payload.get('status'))
@@ -121,6 +121,113 @@ print('pure source import only')
         self.scope.attach_authority(api, policy)
         store.heartbeat('node', ['leader', 'agent'])
         return api, node
+
+    def test_filtered_public_and_atomic_claim_keep_scope_auth_and_excluded_unknown_untouched(self):
+        from assistant_mesh.store import Store
+        for original in (self.old_store.Store, Store):
+            with self.subTest(base=original.__module__), tempfile.TemporaryDirectory() as directory:
+                api, peer = self.api(directory, original=original)
+                store = api.store
+                excluded = store.create_task('excluded unknown', context={'session_scope': 'independent:unknown'})
+                selected = store.create_task('selected scoped', context={'session_scope': 'project:future-goal'})
+                with store.transaction() as db:
+                    db.execute('UPDATE tasks SET checkpoint=? WHERE id=?',
+                               (json.dumps({'side_effect_started': True}), excluded))
+                # Neither explicit IDs nor private helpers create executor auth.
+                self.assertIsNone(store.claim('node', task_ids=[selected]))
+                with store.transaction() as db:
+                    self.assertIsNone(store._claim_in_db(db, 'node', task_ids=[selected]))
+                other = dict(peer, capabilities=['leader'])
+                self.assertIsNone(api.dispatch('POST', '/v1/claim', {'task_ids': [selected]}, other)['task'])
+                self.assertIsNone(api.dispatch('POST', '/v1/claim', {'task_ids': []}, peer)['task'])
+                with self.assertRaisesRegex(ValueError, 'invalid_claim_task_ids'):
+                    api.dispatch('POST', '/v1/claim', {'task_ids': selected}, peer)
+                claimed = api.dispatch('POST', '/v1/claim', {'task_ids': [selected]}, peer)['task']
+                self.assertEqual(selected, claimed['id'])
+                self.assertEqual('project:future-goal', claimed['native_goal_profile']['scope'])
+                with store.transaction() as db:
+                    self.assertEqual(('pending', 0), tuple(db.execute(
+                        'SELECT status,epoch FROM tasks WHERE id=?', (excluded,)).fetchone()))
+
+    def test_atomic_scoped_report_checks_executor_seal_and_commits_final_hook_once(self):
+        from assistant_mesh.store import Store
+        for original in (self.old_store.Store, Store):
+            with self.subTest(base=original.__module__), tempfile.TemporaryDirectory() as directory:
+                api, peer = self.api(directory, original=original)
+                store = api.store
+                identity = store.create_task('atomic scoped', context={'session_scope': 'project:future-goal'})
+                task = api.dispatch('POST', '/v1/claim', {'task_ids': [identity]}, peer)['task']
+                with store.transaction() as db:
+                    db.execute('CREATE TABLE fixture_finals(task TEXT PRIMARY KEY)')
+                    db.execute('CREATE TABLE fixture_reports(task TEXT PRIMARY KEY)')
+
+                def final_hook(db, row, node, epoch, checkpoint, result, status):
+                    if status == 'completed':
+                        db.execute('INSERT INTO fixture_finals VALUES(?)', (row['id'],))
+                store._conversation_final_in_db = final_hook
+                with self.assertRaisesRegex(PermissionError, 'authenticated_executor_required'):
+                    with store.transaction() as db:
+                        store._update_task_in_db(db, identity, 'node', task['epoch'], status='completed')
+                # Simulate the authenticated dispatch's existing thread-local
+                # context while the caller owns the receipt transaction.
+                store._native_goal_caller.node = 'node'
+                try:
+                    with self.assertRaisesRegex(ValueError, 'lifecycle_unsettled'):
+                        with store.transaction() as db:
+                            store._update_task_in_db(db, identity, 'node', task['epoch'],
+                                checkpoint={'side_effect_started': False}, status='completed')
+                    checkpoint = {'side_effect_started': False, 'thread_id': 'same-thread', 'goal': None,
+                        'native_execution_intent': {'settled': True},
+                        'native_lifecycle': {'controller_enabled': True, 'settled': True,
+                            'runtime_closed': True, 'quiescent': True, 'goal_managed': False,
+                            'thread_id': 'same-thread', 'turn_ids': ['finished'],
+                            'completed_turn_ids': ['finished'],
+                            'completion_statuses': {'finished': 'completed'}, 'goal': None}}
+                    with self.assertRaisesRegex(RuntimeError, 'before-receipt'):
+                        with store.transaction() as db:
+                            store._update_task_in_db(db, identity, 'node', task['epoch'],
+                                checkpoint=checkpoint, result='same result', status='completed')
+                            raise RuntimeError('before-receipt')
+                    with store.transaction() as db:
+                        self.assertEqual('running', db.execute('SELECT status FROM tasks WHERE id=?',
+                                                              (identity,)).fetchone()[0])
+                        self.assertEqual(0, db.execute('SELECT COUNT(*) FROM fixture_finals').fetchone()[0])
+                        store._update_task_in_db(db, identity, 'node', task['epoch'],
+                            checkpoint=checkpoint, result='same result', status='completed')
+                        db.execute('INSERT INTO fixture_reports VALUES(?)', (identity,))
+                    with store.transaction() as db:
+                        self.assertEqual((1, 1), (db.execute('SELECT COUNT(*) FROM fixture_finals').fetchone()[0],
+                                                 db.execute('SELECT COUNT(*) FROM fixture_reports').fetchone()[0]))
+                finally:
+                    store._native_goal_caller.node = None
+
+    def test_disabled_unbound_default_and_filtered_private_paths_preserve_base_hooks(self):
+        from assistant_mesh.store import Store
+        for original in (self.old_store.Store, Store):
+            with self.subTest(base=original.__module__), tempfile.TemporaryDirectory() as directory:
+                api, peer = self.api(directory, self.policy(enabled=False), original=original)
+                store = api.store
+                first = store.create_task('default legacy', context={'session_scope': 'independent:first'})
+                second = store.create_task('filtered legacy', context={'session_scope': 'independent:second'})
+                default = store.claim('node')
+                self.assertEqual(first, default['id'])
+                self.assertNotIn('native_goal_profile', default)
+                self.assertIsNone(store.claim('node', task_ids=[]))
+                with store.transaction() as db:
+                    selected = store._claim_in_db(db, 'node', task_ids=[second])
+                    self.assertEqual(second, selected['id'])
+                    self.assertNotIn('native_goal_profile', selected)
+                    db.execute('CREATE TABLE fixture_finals(task TEXT PRIMARY KEY)')
+                    self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='native_goal_scope_metadata'").fetchone())
+                def final_hook(db, row, node, epoch, checkpoint, result, status):
+                    if status == 'completed':
+                        db.execute('INSERT INTO fixture_finals VALUES(?)', (row['id'],))
+                store._conversation_final_in_db = final_hook
+                store.update_task(first, 'node', default['epoch'], checkpoint={'side_effect_started': False}, status='completed')
+                with store.transaction() as db:
+                    store._update_task_in_db(db, second, 'node', selected['epoch'],
+                        checkpoint={'side_effect_started': False}, status='completed')
+                    self.assertEqual(2, db.execute('SELECT COUNT(*) FROM fixture_finals').fetchone()[0])
 
     def test_authority_grant_active_yield_scope_guard_and_commit_ack(self):
         with tempfile.TemporaryDirectory() as directory:

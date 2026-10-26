@@ -276,16 +276,24 @@ def make_store_class(original, methods, policy):
             return (policy['enabled'] and row['scope'] in policy['scopes'] and row['created'] >= binding['activated_at']
                     and getattr(self._native_goal_caller, 'node', None) == node)
 
-        def claim(self, node):
-            if not self._native_goal_store_bound:
+        def claim(self, node, task_ids=None):
+            if not self._native_goal_store_bound and task_ids is None:
                 return super(GoalScopeStore, self).claim(node)
-            return methods.claim(self, node)
+            return methods.claim(self, node, task_ids=task_ids)
+
+        def _claim_in_db(self, db, node, task_ids=None):
+            if not self._native_goal_store_bound and hasattr(original, '_claim_in_db'):
+                return super(GoalScopeStore, self)._claim_in_db(db, node, task_ids=task_ids)
+            return methods._claim_in_db(self, db, node, task_ids=task_ids)
 
         def _managed(self, task_id, node=None):
             with self.transaction() as db:
-                row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-                binding = self._native_goal_binding(db, row)
-                selected = binding is not None and row['created'] >= binding['activated_at']
+                return self._native_goal_managed_in_db(db, task_id, node)
+
+        def _native_goal_managed_in_db(self, db, task_id, node=None):
+            row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+            binding = self._native_goal_binding(db, row)
+            selected = binding is not None and row['created'] >= binding['activated_at']
             if selected and (not policy['enabled'] or row['scope'] not in policy['scopes']
                              or getattr(self._native_goal_caller, 'node', None) != node):
                 raise PermissionError('native_goal_scope_authenticated_executor_required')
@@ -377,6 +385,13 @@ def make_store_class(original, methods, policy):
             if self._managed(task_id, node) is None:
                 return super(GoalScopeStore, self).update_task(task_id, node, epoch, checkpoint, result, status)
             return methods.update_task(self, task_id, node, epoch, checkpoint, result, status)
+
+        def _update_task_in_db(self, db, task_id, node, epoch, checkpoint=None, result=None, status=None):
+            binding = self._native_goal_managed_in_db(db, task_id, node)
+            if binding is None and hasattr(original, '_update_task_in_db'):
+                return super(GoalScopeStore, self)._update_task_in_db(
+                    db, task_id, node, epoch, checkpoint, result, status)
+            return methods._update_task_in_db(self, db, task_id, node, epoch, checkpoint, result, status)
 
         def agent_action(self, task_id, node, epoch, call_id, action, arguments):
             if self._managed(task_id, node) is None or action not in ('delegate', 'wait_children'):
