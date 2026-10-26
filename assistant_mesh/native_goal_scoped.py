@@ -11,6 +11,8 @@ import json
 import math
 import threading
 
+from . import operation_isolation as isolation
+
 from .store import Conflict
 
 
@@ -362,7 +364,7 @@ def make_store_class(original, methods, policy):
                     or not isinstance(lifecycle.get('history_fingerprint'), dict)
                     or state.get('goal') != checkpoint.get('goal')
                     or state.get('thread_id') != checkpoint.get('thread_id')
-                    or native['scope'] != row['scope'] or native['harness'] != 'codex'
+                    or native['scope'] != isolation.native_scope(db, row, Conflict) or native['harness'] != 'codex'
                     or native['node'] != row['node'] or state.get('codex_node') != native['node']
                     or checkpoint.get('codex_node') != native['node'] or native['artifact'] != artifact):
                 return False

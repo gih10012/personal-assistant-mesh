@@ -20,7 +20,7 @@ FORMAT = 'mesh-native-goal-source-candidate/1'
 PINS = {
     'codex.py': '05c493989fd97aacfb064176fb826844d0d134338f4004d4ece3eb27e4f65c4b',
     'worker.py': 'ad7fc4cc5aa59f51d4aadd293cd31c34a3b8d7424a8d588a0b56f555f1712faf',
-    'store.py': '06c4590c2df0de66f0c0b3addff4779ccd388246fe8d030597ad30b730e3f095',
+    'store.py': '2ee2b5db192426d2c5882684d76c8f3c8a2b7960b3fb0a679a6500d9836c42c6',
     'sessions.py': '61382191eff2f3979b817db0e07b9fc143c2544632362d3de23166304a3e5304',
     'native_goal_observer.py': '0dec24469800087382dd58c550535302e6a4c43ec7c36db64ee6bee450d796c1',
     'native_history.py': '5e06abac895a169a7738b52f8818b2cec64bf3d7e112d92f285a1bf076b7dd6c',
@@ -31,8 +31,13 @@ PINS = {
 }
 WORKER_PIN = '816a8eb2f6bc5a24a22ae345b1b7b94b0dd5d0ce52f99a6658688e683ce9cbf0'
 STORE_PIN = 'be2df48e03021f48c382efc4690fa7a8ee5e67da8bd93497e725566532e30c0b'
-SCOPE_SHA256 = '7d7438f8c49803fd327f471b05e91af82bbd4ff03b8575cc2ec571f67a9c82f8'
+SCOPE_SHA256 = 'cfb87991cc4cdca28638914c80fc7843db32df91b81f2be632a775c92d34143e'
 LAUNCH_SHA256 = '5ddfd0673827f9f446f9a8e9f03c5f2637431ea60345eee85ad7d6cd5e85e667'
+ISOLATION_PINS = {
+    'operation_isolation_authority.py': '28fd8a542f860b4c778390705a9438e720e1dcf9686ad9c7e4eb7ddf58790ac5',
+    'operation_isolation.py': '5f58ffaf130a6e86090eec9f7d78267dd1388b0f5a31387f516bcdec105c0c84',
+    'task_transaction_adapter.py': '2fd5cfa724a44bd5ce745352205e9a537f6273ddb8ce137351d19b7d7cc03d89',
+}
 
 
 def sha(data):
@@ -139,12 +144,12 @@ def authority_source(text, legacy_text):
     # Keep the existing owner continuation protocol and all of its same-ledger
     # checks. Only a matching scoped final proof can replace the old false
     # session guard prerequisite; no session row/guard is rewritten here.
-    continuation = ast.unparse(_function(legacy_text, 'Store', 'continue_task'))
+    continuation = ast.unparse(_function(text, 'Store', 'continue_task'))
     continuation = replace_once(continuation,
         "'side_effect_started' in native_state and native_state['side_effect_started'] is not False",
         "'side_effect_started' in native_state and native_state['side_effect_started'] is not False and not self._native_goal_continuation_source_settled(db, row, native, native_state)")
     methods.append(ast.parse(continuation).body[0])
-    return _module('import hashlib, json, uuid\nfrom ..store import Conflict\n', 'AuthorityMethods', methods)
+    return _module('import hashlib, json, uuid\nfrom ..store import Conflict\nfrom .. import operation_isolation as isolation\n', 'AuthorityMethods', methods)
 
 
 def backend_source(text):
@@ -215,6 +220,9 @@ def import_closure(pure):
                 elif (node.level == 2 and ((name == 'config' and node.module == 'config')
                                           or (name == 'authority' and node.module == 'store'))):
                     boundaries.add(node.module)
+                elif (node.level == 2 and name == 'authority' and node.module is None
+                      and [item.name for item in node.names] == ['operation_isolation']):
+                    boundaries.add('operation_isolation')
                 else:
                     raise ValueError('native_goal_candidate_relative_import_changed')
             elif isinstance(node, ast.Import):
@@ -232,7 +240,7 @@ def import_closure(pure):
         if name in reached:
             continue
         reached.add(name); pending.extend(graph[name])
-    if reached != set(graph) or boundaries != {'config', 'store'}:
+    if reached != set(graph) or boundaries != {'config', 'store', 'operation_isolation'}:
         raise ValueError('native_goal_candidate_import_closure_changed')
     return graph
 
@@ -292,6 +300,11 @@ def build(base_root, destination, expected_base_manifest_sha256, support_root=RO
         files[key] = replace_once(original[key].decode('utf8'), WORKER_PIN, new_worker_pin).encode('utf8')
     files['assistant_mesh/native_goal_scoped.py'] = scope_bytes
     files['assistant_mesh/native_goal_launch.py'] = launch_bytes
+    for name, expected in ISOLATION_PINS.items():
+        data = base_builder._bytes(root / 'assistant_mesh' / name)
+        if sha(data) != expected:
+            raise ValueError('native_goal_candidate_isolation_pin_changed')
+        files['assistant_mesh/' + name] = data
     pure = {
         '__init__.py': '"""Pinned optional native lifecycle components; no startup on import."""\n',
         'config.py': 'from ..config import discover_codex_auth, private_json\n',
@@ -332,7 +345,7 @@ def build(base_root, destination, expected_base_manifest_sha256, support_root=RO
         'changed_original_files': sorted(name for name in original if original[name] != files[name]),
         'source_sha256': {name: sha(data) for name, data in sorted(files.items())},
         'optional_runtime_modules': sorted(pure), 'optional_import_graph': graph,
-        'preserved_import_boundaries': ['config', 'store'], 'worker_pin': new_worker_pin,
+        'preserved_import_boundaries': ['config', 'store', 'operation_isolation'], 'worker_pin': new_worker_pin,
         'old_scope_body_preserved': True, 'production_installed': False, 'ledger_opened': False,
         'model_requested': False, 'original_cases_replayed': False}
     with (target / 'native-goal-candidate.json').open('x') as stream:

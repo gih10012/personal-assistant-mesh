@@ -9,6 +9,8 @@ import time
 import uuid
 from pathlib import Path
 
+from . import operation_isolation as isolation
+
 _UNSPECIFIED = object()
 
 
@@ -17,6 +19,8 @@ class Conflict(ValueError):
 
 
 class Store:
+    _operation_isolation_version = 1
+
     def __init__(self, path, clock=time.time, recover_inflight=True, notification_policy=None, node_id=None):
         # Only this extra managed notification route is configured here.
         # Native communication, Shell and network tools are unaffected.
@@ -432,7 +436,10 @@ class Store:
             required = set(json.loads(row['required']))
             if not required <= caps or ('leader' in required and (leader['node'] != node or leader['deadline'] <= now)):
                 continue
-            if db.execute("SELECT 1 FROM tasks WHERE scope=? AND id<>? AND status='running' AND deadline>? LIMIT 1", (row['scope'], row['id'], now)).fetchone():
+            admission = isolation.admit(self, db, row, Conflict)
+            if admission is False:
+                continue
+            if admission is None and db.execute("SELECT 1 FROM tasks WHERE scope=? AND id<>? AND status='running' AND deadline>? LIMIT 1", (row['scope'], row['id'], now)).fetchone():
                 continue  # one native thread has one active turn, across all nodes
             # Native effects are not blindly replayed after losing a worker.
             if json.loads(row['checkpoint']).get('side_effect_started'):
@@ -440,7 +447,7 @@ class Store:
                 self._enqueue(db, 'review-' + row['id'], '任务 ' + row['id'][:8] + ' 执行中断，可能已产生外部效果，等待核对后续接。')
                 continue
             unsettled = db.execute("SELECT status,checkpoint FROM tasks WHERE scope=? AND id<>? AND status<>'completed'", (row['scope'], row['id']))
-            if any((json.loads(other['checkpoint']).get('side_effect_started')
+            if admission is None and any((json.loads(other['checkpoint']).get('side_effect_started')
                     or self._yielded_goal_reserves_scope(other['status'], json.loads(other['checkpoint'])))
                    for other in unsettled):
                 # A new task must not sidestep review by resuming the same
@@ -455,8 +462,11 @@ class Store:
             result = dict(db.execute('SELECT * FROM tasks WHERE id=?', (row['id'],)).fetchone())
             result['checkpoint'] = json.loads(result['checkpoint'])
             result['context'] = json.loads(result['context'])
+            if admission is not None:
+                result['execution_resource'] = {key: admission[key] for key in ('declaration_id', 'operation_id', 'native_scope')}
             result['sessions'] = {}
-            for session in db.execute('SELECT * FROM native_sessions WHERE scope=?', (row['scope'],)):
+            execution_scope = admission['native_scope'] if admission is not None else row['scope']
+            for session in db.execute('SELECT * FROM native_sessions WHERE scope=?', (execution_scope,)):
                 native = dict(session)
                 native['state'] = json.loads(native['state'])
                 result['sessions'][native['harness']] = native
@@ -506,6 +516,7 @@ class Store:
         next_checkpoint = json.loads(row['checkpoint'])
         if checkpoint:
             next_checkpoint.update(checkpoint)
+        isolation.validate_native(self, db, row, next_checkpoint, next_checkpoint.get('harness', 'codex'), Conflict)
         lifecycle = next_checkpoint.get('native_lifecycle')
         if (next_checkpoint.get('side_effect_started') is False
                 and isinstance(lifecycle, dict) and lifecycle.get('outcome') == 'yielded'):
@@ -691,8 +702,8 @@ class Store:
             context = json.loads(row['context'])
             if context.get('remote_proxy'):
                 raise Conflict('remote_proxy_requires_remote_control_protocol')
-            busy = db.execute("SELECT * FROM tasks WHERE scope=? AND id<>? AND status<>'completed'",
-                              (row['scope'], row['id'])).fetchall()
+            related = isolation.related(db, row, Conflict)
+            busy = [other for other in related if other['id'] != row['id'] and other['status'] != 'completed']
             if any((other['status'] == 'running' and other['deadline'] is not None
                     and other['deadline'] > self.clock())
                    or json.loads(other['checkpoint']).get('side_effect_started')
@@ -710,8 +721,8 @@ class Store:
                    or json.loads(child['checkpoint']).get('side_effect_started') for child in children):
                 raise Conflict('continuation_children_not_settled')
             linked = family + ''', linked(id) AS (
-                SELECT id FROM family UNION SELECT id FROM tasks WHERE scope=?) '''
-            linked_parameters = (row['id'], row['scope'])
+                SELECT id FROM family UNION SELECT id FROM tasks WHERE id IN (''' + ','.join('?' for other in related) + ')) '
+            linked_parameters = (row['id'],) + tuple(other['id'] for other in related)
             tables = {item[0] for item in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if 'managed_allocations' in tables:
                 # Allocations settle as completed; stopped is a dispatch outcome
@@ -754,7 +765,7 @@ class Store:
                         or len(session_file.encode('utf8')) > 4096):
                     raise Conflict('continuation_native_identity_required')
             native = db.execute('SELECT * FROM native_sessions WHERE scope=? AND harness=?',
-                                (row['scope'], harness)).fetchone()
+                                (isolation.native_scope(db, row, Conflict), harness)).fetchone()
             native_state = json.loads(native['state']) if native else None
             if (not isinstance(native_state, dict) or native_state.get('thread_id') != thread
                     or native_state.get('harness', harness) != harness
@@ -838,7 +849,8 @@ class Store:
             harness = payload.get('harness', 'codex')
             if harness not in ('codex', 'pi'):
                 raise ValueError('invalid_session_harness')
-            session = db.execute('SELECT * FROM native_sessions WHERE scope=? AND harness=?', (row['scope'], harness)).fetchone()
+            execution_scope = isolation.native_scope(db, row, Conflict)
+            session = db.execute('SELECT * FROM native_sessions WHERE scope=? AND harness=?', (execution_scope, harness)).fetchone()
             artifact_id = hashlib.sha256(json.dumps([task_id, epoch, harness], separators=(',', ':')).encode()).hexdigest()
             if action == 'upload':
                 part = payload['part']
@@ -856,6 +868,7 @@ class Store:
                 state, harness, count = payload['state'], payload['harness'], payload.get('parts', 0)
                 if not isinstance(state, dict) or not isinstance(count, int) or isinstance(count, bool) or count < 0:
                     raise ValueError('invalid_session_state')
+                isolation.validate_native(self, db, row, state, harness, Conflict)
                 actual = db.execute('SELECT COUNT(*),MIN(part),MAX(part) FROM session_chunks WHERE id=?', (artifact_id,)).fetchone()
                 if count and (actual[0] != count or actual[1] != 0 or actual[2] != count - 1):
                     raise Conflict('incomplete_session_artifact')
@@ -869,7 +882,7 @@ class Store:
                         # to a newly created session just because no upload came.
                         artifact = None
                 db.execute('INSERT OR REPLACE INTO native_sessions VALUES(?,?,?,?,?,?)',
-                    (row['scope'], node, harness, json.dumps(state), artifact, self.clock()))
+                    (execution_scope, node, harness, json.dumps(state), artifact, self.clock()))
                 return {'ok': True, 'scope': row['scope'], 'saved': True, 'artifact_saved': bool(count)}
             if action == 'download':
                 if not session or not session['artifact']:
