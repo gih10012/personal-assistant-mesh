@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "project": "personal-assistant-mesh",
-  "goal_status": "paused",
-  "updated_at": "2026-10-26",
+  "goal_status": "active",
+  "updated_at": "2026-10-27",
   "plan": "docs/PLAN.md",
   "effective_owner_goal": "docs/GOAL.md",
-  "latest_owner_status": "docs/STATUS-2026-10-26.md",
+  "latest_owner_status": "docs/STATUS-2026-10-27.md",
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
-  "latest_continuation_at": "2026-10-26",
+  "latest_continuation_at": "2026-10-27",
   "owner_report_20261025": {
     "channel": "existing bound-self ClawBot",
     "status": "accepted; same-ID lookup only, no duplicate send",
@@ -3202,23 +3202,26 @@
     }
   ],
   "current_work": {
-    "phase": "owner-requested wrap-up and joint HarmonyOS USB enrollment planning",
-    "goal_status": "paused",
+    "phase": "owner explicitly resumed entire AMITA development",
+    "goal_status": "active",
     "whole_goal_completed": false,
     "coordination": "Root owns current docs and serial shared operations; separate worktrees for independent leaves",
     "streams": {
       "rolling_runtime": "laptop rolling/parent upgrade and VPS idle worker adoption deployed/accepted; original standalone VPS worker disabled; in-flight handover/capacity/fault acceptance pending",
-      "model_routes": "qualified route/recovery and native transition source merged; production remains OpenAI-only; zero-cost qualified non-OpenAI entitlement/protocol evidence missing",
+      "model_routes": "new exact frozen model/Goal consumer overlay leaf; actual accessible qualified alternative route still required",
       "chat_nodes": "five added tools deployed on original authority/OAuth; plugin1.1.0; real ordinary Firefox Chat implicit discovery/join accepted and original DB membership confirmed; work delegation/report pending",
-      "role_replication": "quota-stopped original worktree retains three untracked source modules; no Node consumer/tests/deployment yet; owner paused development",
+      "role_replication": "original three-module worktree resumed; Node consumer/authenticated project replication and evidence pending",
       "public_bootstrap": "Cloudflare Workers Free authorized; deployment pending",
-      "operation_isolation": "merged/deployed: exact new-task/native-resource declaration, private operator/live-parent API; ten targeted cases and live original-workspace inspection passed; old unknown/business not resumed"
+      "operation_isolation": "merged/deployed: exact new-task/native-resource declaration, private operator/live-parent API; ten targeted cases and live original-workspace inspection passed; old unknown/business not resumed",
+      "original_workspace": "read-only original family grounding resumed; old branches/epochs/unknowns preserved; real network Leader remains implementation owner",
+      "phone": "USB/HDC/API26/arm64 resource discovery completed; no signed HAP or enrollment; device removed and real-name/signing deferred; outbound AMITA updates required, no persistent campus wireless HDC"
     },
     "current_production_changed_by_amita": true,
-    "next": "joint phone enrollment plan, USB selected; obtain actual Harmony SDK/device/signing facts before install; do not automatically resume development",
+    "next": "deploy real peer replicas and qualified model/Goal consumers, reconcile original work and let actual Leader continue workspace; preserve deferred phone installation",
     "deployment_record": "docs/AMITA-DEPLOYMENT-2026-10-26.md",
-    "owner_pause_20261026": true,
-    "report_20261026": "Claw status accepted; delivery_verified=false; one retained request ID, no duplicate submission"
+    "owner_pause_20261026": false,
+    "report_20261026": "Claw status accepted; delivery_verified=false; one retained request ID, no duplicate submission",
+    "owner_resume_20261027": true
   },
   "network_name": "AMITA",
   "amita_approved_replan_20261026": {

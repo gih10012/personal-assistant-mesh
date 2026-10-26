@@ -12,9 +12,12 @@ AMITA means Autonomous Mesh for Intelligence, Tools and Agents
 original 43 coordinating task identities/dependencies, business tasks, operation
 IDs, worktrees, native sessions, histories and unknown results.
 The owner cleared the previous native Goal and requested a new one, createdAt
-1792949790. It is now PAUSED at the owner's request for wrap-up and joint
-HarmonyOS enrollment planning. Do not resume development automatically. Existing
-network services remain running. Old accounting was not migrated.
+1792949790. On 2026-10-27 the owner explicitly resumed the ENTIRE AMITA
+development plan and the native Goal is ACTIVE again. Continue original work
+and checkpoints; old accounting was not migrated. The phone is no longer
+USB-present and Huawei real-name/signing is deferred; that gate does not block
+other work. Never keep wireless HDC open on the campus network as a management
+channel; the intended phone node initiates authenticated AMITA connections.
 SCHOOL EVALUATION remains independently PAUSED; do not inspect or perform it.
 
 Deliver user-visible functionality. Deploy completed authorized changes promptly
