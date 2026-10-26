@@ -271,6 +271,39 @@ print('pure source import only')
             disabled_api, disabled_peer = self.api(directory, self.policy(enabled=False))
             self.assertIsNone(disabled_api.dispatch('POST', '/v1/claim', {}, disabled_peer)['task'])
 
+    def test_model_route_capability_and_resume_use_selected_isolated_namespace(self):
+        from assistant_mesh.codex import Codex
+        from assistant_mesh.codex_provider import NativeRouteAuthorization
+        from assistant_mesh.model_recovery import native_authorization
+        from tests import test_native_model_transition as protocol
+        fixture = protocol.NativeModelTransitionTests(
+            'test_real_worker_and_codex_resume_same_thread_on_calibrated_free_provider')
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        plan = fixture.state.recovery_plan(fixture.original, fixture.config, _bindings=True)
+        binding = next(row for row in plan['_bindings'] if row['identity']['provider'] == 'free-fixture')
+        hybrid = self.scope.make_backend(Codex, self.runtime.Codex)
+        hybrid.instances, hybrid.actual_goal, hybrid.response_override = [], fixture.goal, None
+        agent = hybrid.__new__(hybrid)
+        protocol.ProtocolCodex.__init__(agent, binding['native_config'])
+        agent._native_goal_selected = True
+        agent.rpc = types.MethodType(protocol.ProtocolCodex.rpc, agent)
+        agent._native_route_authorization = native_authorization(fixture.original, binding,
+            'same-model-attempt', fixture.state.policy_hash, factory=agent.make_route_authorization)
+        local_provider = __import__(self.runtime.__package__ + '.codex_provider', fromlist=['x'])
+        self.assertIsInstance(agent._native_route_authorization, local_provider.NativeRouteAuthorization)
+        self.assertNotIsInstance(agent._native_route_authorization, NativeRouteAuthorization)
+        source = copy.deepcopy(fixture.original['checkpoint'])
+        state = agent.start('Continue original task', source)
+        self.assertEqual(source, fixture.original['checkpoint'])
+        self.assertEqual(source['thread_id'], state['thread_id'])
+        transition = state['native_lifecycle']['model_route_transition']
+        self.assertEqual('openai', transition['source']['provider_identity'])
+        self.assertTrue(transition['native_configuration_verified'])
+        self.assertFalse(transition['effective_inference_verified'])
+        self.assertFalse(any(method in ('thread/start', 'turn/start', 'thread/goal/set')
+                             for method, _ in agent.calls))
+
     def test_scoped_strategy_keeps_guard_during_failed_commit_and_preserves_legacy_mro(self):
         from tests.test_native_goal_worker import GoalWorkerTests
         fixture = GoalWorkerTests('test_durable_guard_precedes_resume_even_for_read_only_and_settles_after_seal')

@@ -16,6 +16,10 @@ import sqlite3
 import stat
 import sys
 import time
+import uuid
+
+from .model_recovery import (classify_failure, native_resume_compatible, qualified, requirements,
+                             route_bindings, startable)
 
 
 DIFFICULTIES = ('D1', 'D2', 'D3')
@@ -57,9 +61,13 @@ def metadata(value):
             or value.get('risk') not in ('low', 'medium', 'high')
             or not isinstance(value.get('priority'), int) or isinstance(value['priority'], bool)
             or not 0 <= value['priority'] <= 9
-            or set(value) - {'difficulty', 'rationale', 'risk', 'priority', 'route_id'}
+            or set(value) - {'difficulty', 'rationale', 'risk', 'priority', 'route_id', 'requirements'}
             or ('route_id' in value and not text(value['route_id']))):
         raise GovernanceError('governance_task_rating_required')
+    try:
+        requirements(value.get('requirements', {}))
+    except ValueError as exc:
+        raise GovernanceError(str(exc)) from None
     return dict(value)
 
 
@@ -114,7 +122,14 @@ def policy_routes(policy):
                 or row.get('cost_basis') not in ('included_subscription', 'local', 'free')
                 or row.get('quality') not in ('standard', 'strong')
                 or not isinstance(row.get('difficulties'), list) or not row['difficulties']
-                or not set(row['difficulties']) <= set(DIFFICULTIES) or row['id'] in routes):
+                or not set(row['difficulties']) <= set(DIFFICULTIES) or row['id'] in routes
+                or any(k in row and not text(row[k]) for k in
+                       ('provider', 'provider_identity', 'endpoint_id', 'account_id', 'egress_id',
+                        'frontier_candidate_id', 'reasoning_mode'))
+                or ('marginal_cost_usd' in row and (not number(row['marginal_cost_usd'])
+                    or row['marginal_cost_usd'] < 0))
+                or any(k in row and (not isinstance(row[k], list)
+                    or not all(text(v) for v in row[k])) for k in ('capabilities', 'allowed_scopes'))):
             raise GovernanceError('governance_owner_route_invalid')
         routes[row['id']] = dict(row)
     if any(policy['defaults'].get(d) not in routes for d in DIFFICULTIES):
@@ -154,6 +169,10 @@ class Governance:
                 CREATE TABLE IF NOT EXISTS leader_review_queue(id TEXT PRIMARY KEY, fingerprint TEXT,
                     value TEXT, status TEXT, scheduled_at REAL, updated REAL);
                 CREATE TABLE IF NOT EXISTS leader_review_plans(id TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE IF NOT EXISTS model_route_availability(route_key TEXT PRIMARY KEY,
+                    identity TEXT, value TEXT);
+                CREATE TABLE IF NOT EXISTS model_attempts(id TEXT PRIMARY KEY, task_id TEXT,
+                    epoch INTEGER, route_key TEXT, value TEXT);
             ''')
 
     @contextlib.contextmanager
@@ -184,56 +203,179 @@ class Governance:
         return dict(value, revision=revision)
 
     def select_route(self, rating, role_profile=None):
+        routes = self.candidate_routes(rating, role_profile)
+        if not routes:
+            raise GovernanceError('governance_advanced_quality_floor' if rating['difficulty'] == 'D3'
+                                  else 'governance_qualified_route_required')
+        return dict(routes[0])
+
+    def candidate_routes(self, rating, role_profile=None):
+        """Owner defaults/profiles are preferences, not permanent model gates."""
         if role_profile is not None:
             if (not isinstance(role_profile, dict) or not text(role_profile.get('model'))
                     or not text(role_profile.get('reasoning_effort'))):
                 raise GovernanceError('governance_role_profile_incomplete')
-            candidates = [r for r in self.routes.values() if r['model'] == role_profile['model']
-                          and r['effort'] == role_profile['reasoning_effort']
-                          and rating['difficulty'] in r['difficulties']]
-            if not candidates:
-                raise GovernanceError('governance_role_profile_below_or_outside_floor')
-            # Multiple route labels do not create a new quality authorization.
-            route = sorted(candidates, key=lambda r: r['id'])[0]
-        else:
-            route_id = rating.get('route_id') or (self.policy or {}).get('defaults', {}).get(rating['difficulty'])
-            route = self.routes.get(route_id)
-        if not route or rating['difficulty'] not in route['difficulties']:
-            raise GovernanceError('governance_qualified_route_required')
-        if rating['difficulty'] == 'D3' and (route['quality'] != 'strong' or route['cost_basis'] == 'free'):
-            raise GovernanceError('governance_advanced_quality_floor')
-        return dict(route)
+        preferred = rating.get('route_id') or (self.policy or {}).get('defaults', {}).get(rating['difficulty'])
+        candidates = [r for r in self.routes.values() if rating['difficulty'] in r['difficulties']
+                      and (rating['difficulty'] != 'D3' or r['quality'] == 'strong')]
+        return sorted(candidates, key=lambda r: (
+            not (role_profile and r['model'] == role_profile['model']
+                 and r['effort'] == role_profile['reasoning_effort']),
+            r['id'] != preferred, r.get('marginal_cost_usd', 0), r['id']))
 
-    def choose(self, task, role_profile=None):
-        cp = task.get('checkpoint') or {}
-        failure = cp.get('runtime_failure') or {}
-        if (task.get('status') in ('paused', 'needs_review', 'completed', 'failed')
-                or cp.get('side_effect_started') is True
-                or (cp.get('goal') or {}).get('status') == 'paused'
-                or (failure.get('native_start_attempted') is True and failure.get('outcome') == 'unknown')):
-            raise GovernanceError('governance_original_task_not_safely_startable')
+    def task_rating(self, task, persist=False):
         with self.transaction() as db:
             row = db.execute('SELECT value FROM task_ratings WHERE task_id=?', (task['id'],)).fetchone()
         raw = json.loads(row['value']) if row else (task.get('context') or {}).get('governance')
         rating = metadata(raw)
-        if not row:
+        if persist and not row:
             self.rate(task['id'], rating, task['id'] + ':initial-governance')
+        return rating
+
+    def choose(self, task, role_profile=None):
+        if not startable(task):
+            raise GovernanceError('governance_original_task_not_safely_startable')
+        rating = self.task_rating(task, persist=True)
         route = self.select_route(rating, role_profile)
         return {'rating': rating, 'route': dict(route), 'policy_revision': self.policy['revision'],
                 'policy_sha256': self.policy_hash, 'quota_policy': 'wait_for_qualified_route',
                 'selection_basis': 'owner_role_profile' if role_profile is not None else 'task_route_or_default',
-                'automatic_free_or_pi_fallback': False, 'independent_quality_verified': False}
+                'automatic_free_or_pi_fallback': False, 'independent_quality_verified': False,
+                'qualified_free_routes_allowed': True, 'model_outage_switches_harness': False}
+
+    def recovery_plan(self, task, config, role_profile=None, _bindings=False):
+        """Local supervisor projection. No account/model RPC, claim or replay.
+
+        next_recheck_at is a scheduling hint for the ORIGINAL authority task;
+        callers must still obtain the ordinary claim/epoch fence. A due failure
+        becomes probeable, not proven healthy. Internal bindings contain only
+        private config paths; public projections omit them.
+        """
+        now = self.clock()
+        result = dict(task_id=task['id'], epoch=task.get('epoch'), status='waiting_model',
+            qualified_routes=[], blocked_routes=[], next_recheck_at=None,
+            rescue_harness_allowed=False, automatic_task_replay=False,
+            model_outage_switches_harness=False, network_ready_independent=True,
+            actual_model_effort_verified=False)
+        if not startable(task):
+            return dict(result, status='hold_original_operation')
+        try:
+            rating = self.task_rating(task)
+            candidates = self.candidate_routes(rating, role_profile)
+        except GovernanceError as exc:
+            return dict(result, status='waiting_policy', reason=str(exc))
+        result['rating'] = rating
+        advice = None
+        if any(r.get('frontier_candidate_id') for r in candidates):
+            from .model_advice import model_advice
+            needs = dict(rating.get('requirements', {}))
+            needs.setdefault('data_scope', 'owner_private')
+            advice = model_advice(config, needs, now=now)
+        with self.transaction() as db:
+            availability = {r['route_key']: json.loads(r['value']) for r in
+                db.execute('SELECT route_key,value FROM model_route_availability')}
+        quotas = {(q['route_id'], q['account_id']): q for q in self.quotas()}
+        retry_times, bindings, failures = [], [], []
+        for route in candidates:
+            found = False
+            try:
+                for binding in route_bindings(config, route, rejected=result['blocked_routes']):
+                    found = True
+                    identity = binding['identity']
+                    accepted, basis = qualified(route, rating, identity, now, advice)
+                    if not accepted:
+                        result['blocked_routes'].append(dict(identity, reason=basis))
+                        continue
+                    compatible, reason = native_resume_compatible(task, binding, config)
+                    if not compatible:
+                        result['blocked_routes'].append(dict(identity, reason=reason))
+                        continue
+                    observation = availability.get(identity['route_key'])
+                    quota = quotas.get((route['id'], identity['account_id']))
+                    if quota and quota['current_status'] == 'exhausted':
+                        observation = dict(category='quota', reason='model_route_quota',
+                            retry_at=quota['observation']['retry_at'],
+                            observed_at=quota['observation']['observed_at'])
+                    if observation and observation.get('retry_at', 0) > now:
+                        failures.append(observation['category'])
+                        retry_times.append(observation['retry_at'])
+                        result['blocked_routes'].append(dict(identity, **observation))
+                        continue
+                    result['qualified_routes'].append(dict(identity, quality_basis=basis,
+                        quota_status=quota['current_status'] if quota else 'unknown',
+                        availability='retry_due' if observation else 'not_known_unavailable'))
+                    binding['quality_basis'] = basis
+                    bindings.append(binding)
+            except (OSError, ValueError, KeyError, TypeError):
+                result['blocked_routes'].append(dict(route_id=route['id'],
+                    reason='route_configuration_or_cost_invalid'))
+            if not found:
+                result['blocked_routes'].append(dict(route_id=route['id'], reason='route_not_installed'))
+        if bindings:
+            result['status'] = 'ready'
+        # No inference health loop: supervisors sleep until this deadline or a
+        # capability/auth/network/config observation signals an earlier change.
+        result['next_recheck_at'] = min(retry_times) if retry_times else (None if bindings else now + 300)
+        result['rescue_harness_allowed'] = not bindings and bool(failures) and all(f == 'framework' for f in failures)
+        if _bindings:
+            result['_bindings'] = bindings
+        return result
+
+    def route_failure(self, identity, error, phase='preflight', protocol=None, retry_at=None):
+        value = classify_failure(error, self.clock(), phase, protocol, retry_at)
+        with self.transaction() as db:
+            db.execute('INSERT OR REPLACE INTO model_route_availability VALUES(?,?,?)',
+                (identity['route_key'], canonical(identity), canonical(value)))
+        return value
+
+    def route_available(self, identity):
+        with self.transaction() as db:
+            db.execute('DELETE FROM model_route_availability WHERE route_key=?', (identity['route_key'],))
+
+    def begin_attempt(self, task, identity):
+        attempt_id = str(uuid.uuid4())
+        value = dict(attempt_id=attempt_id, task_id=task['id'], epoch=task['epoch'],
+            route=identity, status='preflight', native_start_attempted=False,
+            operation_id=(task.get('checkpoint') or {}).get('operation_id') or
+                         (task.get('context') or {}).get('operation_id'),
+            observed_at=self.clock(), automatic_operation_replay=False)
+        with self.transaction() as db:
+            db.execute('INSERT INTO model_attempts VALUES(?,?,?,?,?)',
+                (attempt_id, task['id'], task['epoch'], identity['route_key'], canonical(value)))
+        return attempt_id
+
+    def update_attempt(self, attempt_id, **changes):
+        if set(changes) - {'status', 'native_start_attempted', 'failure', 'outcome', 'thread_id', 'turn_id'}:
+            raise GovernanceError('governance_model_attempt_fields_invalid')
+        with self.transaction() as db:
+            row = db.execute('SELECT value FROM model_attempts WHERE id=?', (attempt_id,)).fetchone()
+            value = dict(json.loads(row['value']), **changes)
+            value['observed_at'] = self.clock()
+            db.execute('UPDATE model_attempts SET value=? WHERE id=?', (canonical(value), attempt_id))
+        return value
+
+    def attempts(self, task_id):
+        with self.transaction() as db:
+            return [json.loads(row['value']) for row in db.execute(
+                'SELECT value FROM model_attempts WHERE task_id=? ORDER BY rowid', (task_id,))]
 
     def observe(self, route_id, account_id, raw):
         value = quota_snapshot(raw, self.clock())
         with self.transaction() as db:
             db.execute('INSERT OR REPLACE INTO quota_observations VALUES(?,?,?)',
                        (route_id, account_id, canonical(value)))
+            if value['status'] == 'available':
+                for row in db.execute('SELECT route_key,identity,value FROM model_route_availability').fetchall():
+                    identity, failure = json.loads(row['identity']), json.loads(row['value'])
+                    if (identity['route_id'] == route_id and identity['account_id'] == account_id
+                            and failure.get('category') == 'quota'):
+                        db.execute('DELETE FROM model_route_availability WHERE route_key=?', (row['route_key'],))
         return value
 
     def record_decision(self, task, value):
         value = dict(value, task_id=task['id'], epoch=task['epoch'], observed_at=self.clock(),
-                     automatic_task_replay=False, preflight_observation_only=True)
+                     automatic_task_replay=False,
+                     preflight_observation_only=not value.get('native_start_attempted', False))
         with self.transaction() as db:
             db.execute('INSERT OR REPLACE INTO governance_decisions VALUES(?,?,?)',
                        (task['id'], task['epoch'], canonical(value)))

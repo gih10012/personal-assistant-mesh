@@ -18,16 +18,16 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 FORMAT = 'mesh-native-goal-source-candidate/1'
 PINS = {
-    'codex.py': '0dcf663c7014932586737e46a44915067a3000aa17bf844ee01c1d21586781cd',
+    'codex.py': '05c493989fd97aacfb064176fb826844d0d134338f4004d4ece3eb27e4f65c4b',
     'worker.py': 'ad7fc4cc5aa59f51d4aadd293cd31c34a3b8d7424a8d588a0b56f555f1712faf',
     'store.py': '06c4590c2df0de66f0c0b3addff4779ccd388246fe8d030597ad30b730e3f095',
     'sessions.py': '61382191eff2f3979b817db0e07b9fc143c2544632362d3de23166304a3e5304',
     'native_goal_observer.py': '0dec24469800087382dd58c550535302e6a4c43ec7c36db64ee6bee450d796c1',
     'native_history.py': '5e06abac895a169a7738b52f8818b2cec64bf3d7e112d92f285a1bf076b7dd6c',
     'native_ws.py': '4d2bc715cc2676dd4b7793550872f300a7f3dbe1ee789b7d140a96eb5ad9246d',
-    'codex_provider.py': '3b00058a29fb24dbbafb19f3195df134f61106bb3619a32fce756072554d6e7b',
+    'codex_provider.py': '5ff5c97c66e4090f4ef6bacefec037fdde39eab829610a96c8ddea639670034f',
     'model_provider_policy.py': '8c64c465cb227eb800100600480a824b22f14d13cd92eb7b4613f59ae5ca961b',
-    'reasoning.py': '720d82d51ab6093149bf86f66e5e271c3ebad3f08290280559dc8e497d888084',
+    'reasoning.py': '822bb2e14750d3b1606654a6c8dfea2d2c9ced6ff109b10bc597f92e4ef6af3a',
 }
 WORKER_PIN = '816a8eb2f6bc5a24a22ae345b1b7b94b0dd5d0ce52f99a6658688e683ce9cbf0'
 STORE_PIN = 'be2df48e03021f48c382efc4690fa7a8ee5e67da8bd93497e725566532e30c0b'

@@ -92,6 +92,37 @@ def prepare_turn(rpc, params, model, reasoning_effort=None):
     return selected, receipt
 
 
+def prepare_thread(params, selection):
+    """Real native model/provider/default effort for resume and auto-goal work.
+
+    The trusted Worker already checked native catalog support at preflight.
+    Explicit config prevents persisted defaults from changing the selected
+    effort when a resumed native goal schedules its own next turn.
+    """
+    selected = copy.deepcopy(params)
+    selected['model'] = selection['model']
+    selected['modelProvider'] = selection['provider']
+    selected['config'] = dict(selected.get('config') or {},
+                              model_reasoning_effort=selection['reasoning_effort'])
+    return selected
+
+
+def verify_thread_selection(value, selection):
+    """Validate returned native configuration, not effective inference use."""
+    if (not isinstance(value, dict) or value.get('model') != selection['model']
+            or value.get('modelProvider') != selection['provider']
+            or value.get('reasoningEffort') != selection['reasoning_effort']):
+        raise ReasoningError('codex_route_native_configuration_mismatch')
+    mode = value.get('collaborationMode')
+    if mode is not None:
+        settings = mode.get('settings') if isinstance(mode, dict) else None
+        if (not isinstance(settings, dict) or settings.get('model') != selection['model']
+                or settings.get('reasoning_effort') != selection['reasoning_effort']):
+            raise ReasoningError('codex_route_native_configuration_mismatch')
+    return dict(model=value['model'], provider=value['modelProvider'],
+                reasoning_effort=value['reasoningEffort'], effective_inference_verified=False)
+
+
 def observed_turn(records, thread_id, turn_id):
     """Extract only matched native metadata from caller-supplied owned rollout.
 

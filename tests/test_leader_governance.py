@@ -79,7 +79,7 @@ class LeaderGovernanceTests(unittest.TestCase):
         self.assertEqual('max', self.state.choose(task('D1'))['route']['effort'])
         other = task(); other['id'] = 'different-task'
         self.assertEqual('gpt-6.1-sol', self.state.choose(other)['route']['model'])
-        for route in ({'quality': 'standard'}, {'cost_basis': 'free'}):
+        for route in ({'quality': 'standard'},):
             policy = copy.deepcopy(POLICY); policy['routes'][1].update(route)
             state = Governance(str(Path(self.temporary.name) / 'other.sqlite'), policy)
             with self.assertRaisesRegex(GovernanceError, 'advanced_quality_floor'):
@@ -137,7 +137,7 @@ class LeaderGovernanceTests(unittest.TestCase):
             worker.open_backend()
         decision = self.state.decision('original-task', 3)
         self.assertEqual(('waiting_quota', 2000), (decision['status'], decision['next_safe_retry']))
-        self.assertTrue(decision['authority_deadline_hook_required'])
+        self.assertEqual(2000, decision['next_recheck_at'])
         self.assertEqual(2, len(FakeCodex.instances))
         self.assertTrue(all(n.closed for n in FakeCodex.instances))
         self.assertFalse(any(c[0] == 'turn/start' for n in FakeCodex.instances for c in n.calls))
@@ -169,7 +169,7 @@ class LeaderGovernanceTests(unittest.TestCase):
         self.assertEqual('max', native.calls[-1][1]['effort'])
         self.assertIsNone(self.state.decision('original-task', 3))
 
-    def test_qualified_explicit_profile_is_retained_and_weaker_profile_waits(self):
+    def test_qualified_profile_is_preferred_and_weaker_profile_does_not_gate_routes(self):
         policy = copy.deepcopy(POLICY)
         policy['routes'].append(dict(policy['routes'][1], id='strong-max', effort='max'))
         self.state = Governance(str(Path(self.temporary.name) / 'profile.sqlite'), policy, clock=lambda: self.now)
@@ -185,9 +185,10 @@ class LeaderGovernanceTests(unittest.TestCase):
         profile.update(model='gpt-6-luna', reasoning_effort='max')
         worker.current = task(); worker.current['epoch'] = 4
         count = len(FakeCodex.instances)
-        with self.assertRaisesRegex(GovernanceError, 'role_profile_below_or_outside_floor'):
-            worker.open_backend()
-        self.assertEqual(count, len(FakeCodex.instances))
+        native = worker.open_backend()
+        self.assertEqual(count + 1, len(FakeCodex.instances))
+        self.assertEqual('gpt-6.1-sol', native.config['model'])
+        native.close()
 
     def test_weekly_review_queue_is_idempotent_cancellable_and_never_execution_authority(self):
         value = {'project_id': 'project', 'task_id': 'original-task', 'kind': 'integration',

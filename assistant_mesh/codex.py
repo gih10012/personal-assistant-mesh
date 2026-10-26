@@ -15,10 +15,11 @@ import time
 from pathlib import Path
 
 from .config import discover_codex_auth, private_json
-from .codex_provider import custom_provider, private_profile_home, provider_overrides
+from .codex_provider import (NativeRouteAuthorization, custom_provider,
+                             private_profile_home, provider_overrides)
 from .model_provider_policy import validate_provider_cost
 from .native_ws import NativeSocketError, UnixWebSocket, _private_socket
-from .reasoning import prepare_turn
+from .reasoning import prepare_thread, prepare_turn, verify_thread_selection
 
 
 class CodexError(ValueError):
@@ -516,6 +517,11 @@ class Codex:
             return {'status': 'exhausted', 'retry_at': max(exhausted)}
         return {'status': 'available' if known and not stale else 'unknown'}
 
+    def make_route_authorization(self, task_id, epoch, attempt_id, target, sources, policy_sha256):
+        # Scoped/frozen Codex namespaces have their own imported capability
+        # class. Mint through the selected backend, never by JSON coercion.
+        return NativeRouteAuthorization(task_id, epoch, attempt_id, target, sources, policy_sha256)
+
     def start(self, text, checkpoint=None):
         if (getattr(self, 'native_drain_active', False) is True
                 or getattr(self, '_term_sent', False) is True
@@ -531,10 +537,15 @@ class Codex:
             validate_provider_cost(self.config, provider['id'], self.config['model'])
         bound_provider = checkpoint.get('codex_provider_identity')
         actual_provider = provider['identity'] if provider else 'openai'
+        authorization = getattr(self, '_native_route_authorization', None)
+        selection = (authorization.admit(checkpoint, actual_provider,
+            self.config.get('model'), self.config.get('reasoning_effort'))
+            if isinstance(authorization, NativeRouteAuthorization) else None)
         if checkpoint.get('thread_id') and (
                 (bound_provider is not None and bound_provider != actual_provider)
                 or (bound_provider is None and provider is not None)):
-            raise CodexError('codex_provider_resume_identity_mismatch')
+            if selection is None or selection['transition'] is None:
+                raise CodexError('codex_provider_resume_identity_mismatch')
         # Checkpoint goals are historical observations, never a command to
         # restore status/accounting or reactivate an owner's paused goal.
         requested_goal = self.config.get('goal') or None
@@ -561,6 +572,10 @@ class Codex:
                                  'turn_ids': [], 'completed_turn_ids': [],
                                  'expected_goal_objective': (requested_goal or {}).get('objective'),
                                  'goal': None, 'thread_status': None}
+        if selection is not None and selection['transition'] is not None:
+            # Source remains the original binding. Persist the explicit intent
+            # before resume, which itself may wake the SAME active native Goal.
+            self.native_lifecycle['model_route_transition'] = copy.deepcopy(selection['transition'])
         self._completed_turns = set()
         self._pending_goal_input = None
         self._hold_host_requests = bool(checkpoint.get('thread_id'))
@@ -583,6 +598,8 @@ class Codex:
             if not catalog:
                 raise CodexError('codex_model_unavailable')
             parameters['model'] = catalog[0]['id']
+        if selection is not None:
+            parameters = prepare_thread(parameters, selection)
         method = 'thread/resume' if checkpoint.get('thread_id') else 'thread/start'
         self._activity('native_start_intent', {
             'thread_id': checkpoint.get('thread_id'), 'method': method,
@@ -603,6 +620,11 @@ class Codex:
         self.thread_id = value['thread']['id']
         if checkpoint.get('thread_id') and self.thread_id != checkpoint['thread_id']:
             raise CodexError('codex_native_resume_identity_mismatch')
+        if selection is not None:
+            self.native_lifecycle['model_route_selection'] = verify_thread_selection(value, selection)
+            transition = self.native_lifecycle.get('model_route_transition')
+            if transition is not None:
+                transition.update(status='native_configuration_verified', native_configuration_verified=True)
         self.rollout_path = value['thread'].get('path')
         self.model = parameters.get('model') or value['thread'].get('model')
         self.native_lifecycle['thread_id'] = self.thread_id
@@ -616,6 +638,22 @@ class Codex:
                                          'codex_provider_identity': actual_provider})
         actual_goal = (self._read_goal_snapshot(resume_input=text, checkpoint=checkpoint)
                        if checkpoint.get('thread_id') else None)
+        if selection is not None and selection['transition'] is not None:
+            previous = selection['transition']['source']['goal']
+            if previous is not None:
+                if (not isinstance(actual_goal, dict) or any(previous.get(k) != actual_goal.get(k)
+                        for k in ('threadId', 'objective', 'createdAt'))):
+                    raise CodexError('codex_native_goal_continuity_unverified')
+                if any(k in previous and previous[k] != actual_goal.get(k)
+                       for k in ('tokenBudget', 'timeBudgetSeconds')):
+                    raise CodexError('codex_native_goal_continuity_unverified')
+                for key in ('tokensUsed', 'timeUsedSeconds'):
+                    old, current = previous.get(key), actual_goal.get(key)
+                    if (not isinstance(old, (int, float)) or isinstance(old, bool)
+                            or not isinstance(current, (int, float)) or isinstance(current, bool)
+                            or not math.isfinite(old) or not math.isfinite(current)
+                            or current < old or old < 0):
+                        raise CodexError('codex_native_goal_continuity_unverified')
         prior_lifecycle = checkpoint.get('native_lifecycle')
         yielded = isinstance(prior_lifecycle, dict) and prior_lifecycle.get('outcome') == 'yielded'
         if requested_goal and actual_goal is not None:
