@@ -116,6 +116,10 @@ claim admission. `stage` + `activate --runner ID --operation-id ID` expose the
 same steps separately. An operation ID with different content is rejected.
 Repeating a launch operation never creates a second process. A crash between
 launch intent and PID receipt stays unknown and is never auto-launched again.
+Its real same-user peer may actively reconnect using the original runner token:
+the supervisor verifies SO_PEERCRED PID/birth and kernel-observed argv, executable
+and cwd against the original owner spec. JSON pid/work fields cannot establish
+identity or clear busy work. Unverifiable wrappers/observations remain unknown.
 
 The old runner completes only its admitted work. A sealed checkpoint permits
 the original authority to resume the original task/session at its normal claim
@@ -129,8 +133,25 @@ ready control heartbeat and cannot claim. Candidate startup failure leaves the
 old active. If an activated candidate exits or its control heartbeat goes stale,
 the previous healthy ready standby/draining runner becomes active. A timeout
 only closes admission and retains the suspect process; it never proves death
-or permits a signal. If no healthy previous runner exists, execution waits and
-the stable ingress/status/authority queue continues.
+or permits a signal. If every remaining runner is confirmed dead and no healthy
+standby exists, deterministic recovery queues a new process attempt using the
+same owner spec, a NEW local control operation/runner ID and a `restart_of`
+reference. Old runner/task/work records remain intact. The new worker still
+claims through the original authority's task/epoch/effect guards; restarting a
+process never authorizes replay of an old business operation.
+
+`autorestart` defaults to true when absent, including old persisted specs;
+setting it to false opts out. Missing defaults are never inserted into an old
+stage request or its idempotency fingerprint. Only a known PID/birth's missing
+process, zombie, PID reuse, confirmed old boot or owned Popen exit proves death.
+Failed `/proc` reads, heartbeat/ready timeouts and missing PID receipts do not.
+Launch failures have persistent exponential backoff from 1 to at most 60 seconds
+(`restart_backoff={"initial":1,"maximum":60}`); owner values may use an initial
+delay >=0.2 seconds and a maximum <=60. Thirty healthy active seconds reset the
+failure count. `status.recovery` exposes the next attempt and pending runner.
+The supervisor/status stay available during repeated startup failure. Draining
+the current active/source/pending runner disables its component's automatic
+recovery; candidate activation establishes the new owner-desired source.
 
 Manual rollback uses `activate` on the original ready standby ID and a new
 control operation ID. Retire an unnecessary known-good standby explicitly:

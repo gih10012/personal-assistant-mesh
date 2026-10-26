@@ -8,6 +8,7 @@ import argparse
 import contextlib
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -77,7 +78,46 @@ class LinuxProcess:
 
     @classmethod
     def alive(cls, pid, identity):
-        return bool(pid and identity and cls.identity(pid) == identity)
+        return cls.observe(pid, identity) == 'alive'
+
+    @staticmethod
+    def observe(pid, identity):
+        """Distinguish confirmed death from unavailable process observation."""
+        if not pid or not identity:
+            return 'unknown'
+        try:
+            boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+            previous_boot, ticks = identity.rsplit(':', 1)
+            if len(boot) != 36 or len(previous_boot) != 36 or not ticks.isdigit():
+                return 'unknown'
+            if boot != previous_boot:
+                return 'dead'
+            try:
+                raw = Path('/proc/{}/stat'.format(pid)).read_text()
+            except FileNotFoundError:
+                return 'dead'
+            fields = raw[raw.rindex(')') + 2:].split()
+            if fields[0] in ('Z', 'X') or fields[19] != ticks:
+                return 'dead'
+            return 'alive'
+        except (OSError, ValueError, IndexError):
+            return 'unknown'
+
+    @staticmethod
+    def matches_spec(pid, spec):
+        """Unknown-launch recovery requires actual kernel observations.
+
+        Direct executable/interpreter argv are supported. If an exec wrapper
+        changes these observations, retain unknown instead of guessing identity.
+        """
+        try:
+            root = Path('/proc/{}'.format(pid))
+            argv = (root / 'cmdline').read_bytes().rstrip(b'\0').split(b'\0')
+            return (argv == [os.fsencode(value) for value in spec['argv']]
+                    and Path(os.readlink(str(root / 'cwd'))).resolve() == Path(spec['cwd']).resolve()
+                    and Path(os.readlink(str(root / 'exe'))).resolve() == Path(spec['argv'][0]).resolve())
+        except (OSError, ValueError, KeyError):
+            return False
 
     @staticmethod
     def launch(spec, env, log):
@@ -105,6 +145,13 @@ def validate_spec(spec):
                 or '=' in k or '\0' in k + v or k.startswith('AMITA_')
                 for k, v in env.items())):
         raise ValueError('runtime_launch_spec_invalid')
+    restart = spec.get('restart_backoff', {'initial': 1, 'maximum': 60})
+    if (type(spec.get('autorestart', True)) is not bool or not isinstance(restart, dict)
+            or set(restart) != {'initial', 'maximum'} or any(
+                type(restart.get(key)) not in (int, float) or not math.isfinite(restart[key])
+                for key in ('initial', 'maximum'))
+            or not 0.2 <= restart['initial'] <= restart['maximum'] <= 60):
+        raise ValueError('runtime_restart_policy_invalid')
     return json.loads(_json(spec))
 
 
@@ -123,15 +170,26 @@ class RuntimeStore:
                 spec TEXT NOT NULL, token TEXT NOT NULL, state TEXT NOT NULL,
                 pid INTEGER, birth TEXT, ready INTEGER NOT NULL DEFAULT 0,
                 heartbeat REAL, created REAL NOT NULL, previous TEXT,
-                work TEXT, note TEXT, last_checkpoint TEXT)''')
+                work TEXT, note TEXT, last_checkpoint TEXT, restart_of TEXT,
+                death_confirmed INTEGER NOT NULL DEFAULT 0)''')
             # Additive only: adjacent deployments retain the same rows, IDs,
             # protocol and schema major. No restore over a running authority.
             if 'last_checkpoint' not in {r[1] for r in db.execute('PRAGMA table_info(runners)')}:
                 db.execute('ALTER TABLE runners ADD COLUMN last_checkpoint TEXT')
+            for name, definition in (('restart_of', 'TEXT'), ('death_confirmed', 'INTEGER NOT NULL DEFAULT 0')):
+                if name not in {r[1] for r in db.execute('PRAGMA table_info(runners)')}:
+                    db.execute('ALTER TABLE runners ADD COLUMN {} {}'.format(name, definition))
             db.execute('''CREATE TABLE IF NOT EXISTS operations (
                 id TEXT PRIMARY KEY, kind TEXT NOT NULL, request TEXT NOT NULL,
                 result TEXT NOT NULL, created REAL NOT NULL)''')
             db.execute('CREATE TABLE IF NOT EXISTS supervisor (pid INTEGER, birth TEXT)')
+            db.execute('''CREATE TABLE IF NOT EXISTS recovery (
+                component TEXT PRIMARY KEY, source TEXT NOT NULL, enabled INTEGER NOT NULL,
+                failures INTEGER NOT NULL DEFAULT 0, next_attempt REAL, pending TEXT,
+                activated_at REAL)''')
+            for row in db.execute("SELECT * FROM runners WHERE state='active'").fetchall():
+                if db.execute('SELECT 1 FROM recovery WHERE component=?', (row['component'],)).fetchone() is None:
+                    self._record_active(db, row)
             db.execute('PRAGMA user_version=1')
         self.path.chmod(0o600)
 
@@ -155,6 +213,13 @@ class RuntimeStore:
         if row is None:
             raise ValueError('runtime_runner_missing')
         return row
+
+    @staticmethod
+    def _record_active(db, row):
+        enabled = json.loads(row['spec']).get('autorestart', True)
+        db.execute('''INSERT OR REPLACE INTO recovery
+            (component,source,enabled,failures,next_attempt,pending,activated_at)
+            VALUES (?,?,?,0,NULL,NULL,?)''', (row['component'], row['id'], int(enabled), time.time()))
 
     def operation(self, operation, kind, request, apply):
         _name(operation)
@@ -196,12 +261,16 @@ class RuntimeStore:
                        (candidate['component'],))
             old = previous['id'] if previous else None
             db.execute("UPDATE runners SET state='active',previous=?,note=NULL WHERE id=?", (old, runner))
+            self._record_active(db, candidate)
             return {'runner': runner, 'active': True, 'previous': old}
         return self.operation(operation, 'activate', {'runner': runner}, apply)
 
     def drain(self, operation, runner):
         def apply(db):
             row = self._runner(db, runner)
+            db.execute('''UPDATE recovery SET enabled=0,next_attempt=NULL
+                WHERE component=? AND (source=? OR pending=? OR ?='active')''',
+                (row['component'], runner, runner, row['state']))
             if row['state'] in LIVE_STATES + ('queued',):
                 state = 'stopped' if row['state'] == 'queued' else 'draining'
                 db.execute('UPDATE runners SET state=?,note=? WHERE id=?', (state, 'owner_drain', runner))
@@ -214,14 +283,24 @@ class RuntimeStore:
             if not isinstance(token, str) or not secrets.compare_digest(row['token'], token):
                 raise ValueError('runtime_runner_auth_failed')
             identity = LinuxProcess.identity(peer_pid)
-            if (not identity or (row['pid'] is not None and
-                    (row['pid'] != peer_pid or row['birth'] != identity))):
+            if (not identity or (row['pid'] is not None and row['pid'] != peer_pid)
+                    or (row['birth'] is not None and row['birth'] != identity)):
                 raise ValueError('runtime_runner_process_mismatch')
             if action == 'ready':
-                if row['state'] not in ('starting', 'standby'):
+                recoverable = (row['state'] == 'retained' and row['note'] in
+                    ('launch_outcome_unknown', 'process_identity_unknown'))
+                if (row['pid'] is None or row['birth'] is None) and not LinuxProcess.matches_spec(
+                        peer_pid, json.loads(row['spec'])):
+                    raise ValueError('runtime_runner_process_mismatch')
+                if row['ready'] and row['state'] in LIVE_STATES:
+                    db.execute('UPDATE runners SET pid=?,birth=?,heartbeat=? WHERE id=?',
+                               (peer_pid, identity, time.time(), runner))
+                elif row['state'] not in ('starting', 'standby') and not recoverable:
                     raise ValueError('runtime_ready_state_invalid')
-                db.execute('''UPDATE runners SET pid=?,birth=?,ready=1,
-                    state='standby',heartbeat=? WHERE id=?''', (peer_pid, identity, time.time(), runner))
+                else:
+                    # Work/last_checkpoint never comes from a ready JSON body.
+                    db.execute('''UPDATE runners SET pid=?,birth=?,ready=1,
+                        state='standby',heartbeat=? WHERE id=?''', (peer_pid, identity, time.time(), runner))
             else:
                 if not row['ready'] or row['state'] not in LIVE_STATES:
                     raise ValueError('runtime_runner_not_registered')
@@ -298,14 +377,20 @@ def read_status(path):
         for row in db.execute('SELECT * FROM runners ORDER BY created'):
             item = {key: row[key] for key in ('id', 'component', 'version', 'state', 'pid',
                 'ready', 'heartbeat', 'created', 'previous', 'note')}
+            for key, default in (('restart_of', None), ('death_confirmed', 0)):
+                item[key] = row[key] if key in row.keys() else default
+            item['process_observation'] = LinuxProcess.observe(row['pid'], row['birth'])
             item['alive'] = LinuxProcess.alive(row['pid'], row['birth'])
             item['work'] = json.loads(row['work']) if row['work'] else None
             item['claim_admission'] = parent_alive and row['state'] == 'active' and item['alive'] and item['work'] is None
             runners.append(item)
         operations = [{key: row[key] for key in ('id', 'kind', 'created')}
                       for row in db.execute('SELECT * FROM operations ORDER BY created DESC LIMIT 50')]
+        recovery = ([dict(row) for row in db.execute('SELECT * FROM recovery ORDER BY component')]
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery'").fetchone() else [])
         return {'protocol': PROTOCOL, 'schema': 1, 'runners': runners,
-            'operations': operations, 'supervisor_alive': parent_alive, 'model_availability': 'not_checked',
+            'operations': operations, 'recovery': recovery,
+            'supervisor_alive': parent_alive, 'model_availability': 'not_checked',
             'business_queue': 'existing_authority', 'receiver_started': False}
     finally:
         db.close()
@@ -405,7 +490,7 @@ class Supervisor:
                     db.execute('UPDATE runners SET pid=?,birth=? WHERE id=?', (child.pid, birth, row['id']))
         except OSError:
             with self.store.transaction() as db:
-                db.execute("UPDATE runners SET state='failed',note='launch_failed' WHERE id=?", (row['id'],))
+                db.execute("UPDATE runners SET state='failed',death_confirmed=1,note='launch_failed' WHERE id=?", (row['id'],))
 
     @staticmethod
     def _fallback(db, row):
@@ -417,27 +502,93 @@ class Supervisor:
                 and previous['heartbeat'] and previous['heartbeat'] > time.time() - 10
                 and previous['note'] != 'owner_drain'):
             db.execute("UPDATE runners SET state='active',note='automatic_rollback' WHERE id=?", (previous['id'],))
+            RuntimeStore._record_active(db, previous)
+
+    def _recover(self, db, now):
+        for recovery in db.execute('SELECT * FROM recovery WHERE enabled=1').fetchall():
+            rows = db.execute('SELECT * FROM runners WHERE component=? ORDER BY created',
+                              (recovery['component'],)).fetchall()
+            pending = next((row for row in rows if row['id'] == recovery['pending']), None)
+            if pending is not None:
+                if (pending['state'] == 'standby' and pending['ready'] and not pending['work']
+                        and LinuxProcess.alive(pending['pid'], pending['birth'])
+                        and pending['heartbeat'] > now - 10
+                        and all(row['id'] == pending['id'] or row['state'] == 'stopped'
+                            or row['death_confirmed'] or LinuxProcess.observe(row['pid'], row['birth']) == 'dead'
+                            for row in rows)):
+                    db.execute("UPDATE runners SET state='active',note='automatic_recovery' WHERE id=?", (pending['id'],))
+                    db.execute('UPDATE recovery SET activated_at=? WHERE component=?', (now, recovery['component']))
+                    operation = 'recover-activate-' + pending['id']
+                    db.execute('INSERT OR IGNORE INTO operations VALUES(?,?,?,?,?)',
+                        (operation, 'activate_recovery', _json({'runner': pending['id']}),
+                         _json({'runner': pending['id'], 'active': True}), now))
+                    continue
+                if pending['state'] == 'active':
+                    if (recovery['activated_at'] and now - recovery['activated_at'] >= 30
+                            and LinuxProcess.alive(pending['pid'], pending['birth'])
+                            and pending['heartbeat'] > now - 10):
+                        db.execute('''UPDATE recovery SET failures=0,next_attempt=NULL,pending=NULL
+                            WHERE component=?''', (recovery['component'],))
+                    continue
+                if not pending['death_confirmed'] and LinuxProcess.observe(pending['pid'], pending['birth']) != 'dead':
+                    continue  # Starting, stale or unknown launch: do not duplicate.
+                db.execute('UPDATE recovery SET pending=NULL,next_attempt=NULL WHERE component=?', (recovery['component'],))
+            # Every non-retired process must be CONFIRMED dead. A healthy
+            # standby, slow observation, missing PID receipt or unknown launch
+            # blocks a replacement; no timer is a process-death proof.
+            if any(row['state'] == 'queued' or (
+                    row['state'] != 'stopped' and not row['death_confirmed']
+                    and LinuxProcess.observe(row['pid'], row['birth']) != 'dead') for row in rows):
+                continue
+            source = self.store._runner(db, recovery['source'])
+            spec = json.loads(source['spec'])
+            timing = spec.get('restart_backoff', {'initial': 1, 'maximum': 60})
+            delay = min(timing['maximum'], timing['initial'] * 2 ** min(recovery['failures'], 20))
+            deadline = None if pending is not None else recovery['next_attempt']
+            if deadline is None:
+                db.execute('UPDATE recovery SET next_attempt=? WHERE component=?',
+                           (now + delay, recovery['component']))
+                continue
+            if now < deadline:
+                continue
+            runner, operation = secrets.token_hex(16), 'recover-' + secrets.token_hex(16)
+            previous = rows[-1]['id'] if rows else source['id']
+            db.execute('''INSERT INTO runners
+                (id,component,version,spec,token,state,created,restart_of)
+                VALUES (?,?,?,?,?,'queued',?,?)''', (runner, source['component'], source['version'],
+                    source['spec'], secrets.token_hex(32), now, previous))
+            db.execute('INSERT INTO operations VALUES(?,?,?,?,?)',
+                (operation, 'recover', _json({'source': source['id'], 'previous': previous}),
+                 _json({'runner': runner, 'state': 'queued'}), now))
+            db.execute('''UPDATE recovery SET failures=failures+1,next_attempt=NULL,pending=?,activated_at=NULL
+                WHERE component=?''', (runner, recovery['component']))
 
     def reconcile(self):
         self._launch_one()
         now = time.time()
         with self.store.transaction() as db:
             for row in db.execute("SELECT * FROM runners WHERE state IN ('starting','standby','active','draining','retained')").fetchall():
-                alive = LinuxProcess.alive(row['pid'], row['birth'])
-                if row['pid'] is None:
+                child = self.children.get(row['id'])
+                exited = child is not None and child.poll() is not None and row['pid'] in (None, child.pid)
+                observation = 'dead' if exited else LinuxProcess.observe(row['pid'], row['birth'])
+                if observation == 'dead':
+                    state, note = 'failed', 'process_exited_work_retained' if row['work'] else 'process_exited'
+                elif row['pid'] is None:
                     if now - (row['heartbeat'] or row['created']) <= self.ready_timeout:
                         continue
                     state, note = 'retained', 'launch_outcome_unknown'
-                elif not alive:
-                    state, note = 'failed', 'process_exited_work_retained' if row['work'] else 'process_exited'
+                elif observation == 'unknown':
+                    state, note = 'retained', 'process_identity_unknown'
                 elif not row['ready'] and now - (row['heartbeat'] or row['created']) > self.ready_timeout:
                     state, note = 'retained', 'ready_timeout_process_retained'
                 elif row['ready'] and now - row['heartbeat'] > self.heartbeat_timeout:
                     state, note = 'retained', 'heartbeat_stale_process_retained'
                 else:
                     continue
-                db.execute('UPDATE runners SET state=?,note=? WHERE id=?', (state, note, row['id']))
+                db.execute('UPDATE runners SET state=?,note=?,death_confirmed=? WHERE id=?',
+                           (state, note, int(observation == 'dead'), row['id']))
                 self._fallback(db, row)
+            self._recover(db, now)
         for runner, child in list(self.children.items()):
             if child.poll() is not None:
                 del self.children[runner]

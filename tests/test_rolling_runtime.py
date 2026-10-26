@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def spec(directory, version='v1', **changes):
     value = {'kind': 'worker', 'component': 'unit-leader', 'version': version,
         'protocol_min': 1, 'protocol_max': 2, 'argv': [sys.executable, '-c', 'pass'],
-        'cwd': str(directory)}
+        'cwd': str(directory), 'autorestart': False}
     value.update(changes)
     return value
 
@@ -40,7 +40,8 @@ class RollingRuntimeStoreTests(unittest.TestCase):
     def runner(self, version):
         identifier = self.store.stage('stage-' + version, spec(self.temporary.name, version))['runner']
         with self.store.transaction() as db:
-            db.execute("UPDATE runners SET state='starting' WHERE id=?", (identifier,))
+            db.execute("UPDATE runners SET state='starting',pid=?,birth=? WHERE id=?",
+                       (os.getpid(), LinuxProcess.identity(os.getpid()), identifier))
             token = db.execute('SELECT token FROM runners WHERE id=?', (identifier,)).fetchone()[0]
         self.store.runner_request(identifier, token, 'ready', {}, os.getpid())
         return identifier, token
@@ -371,6 +372,213 @@ class RollingRuntimeProcessTests(unittest.TestCase):
         self.assertEqual('active', self.row(old)['state'])
         self.assertTrue(self.row(old)['alive'])
         self.assertEqual(2, len(request(self.socket, 'status')['runners']))
+
+
+RECOVERY_CHILD = r'''
+import os,sys,time,secrets
+from pathlib import Path
+fail,first,effects,database=map(Path,sys.argv[1:])
+if fail.exists(): raise SystemExit(3)
+from assistant_mesh.rolling_runtime import request
+endpoint=os.environ['AMITA_RUNTIME_SOCKET']; runner=os.environ['AMITA_RUNNER_ID']; token=os.environ['AMITA_RUNNER_TOKEN']
+def rpc(action,body=None):
+    while True:
+        try: return request(endpoint,action,body,runner,token)
+        except (OSError,ValueError):
+            if action!='heartbeat': raise
+            time.sleep(.05)
+while True:
+    try: rpc('ready'); break
+    except (OSError,ValueError): time.sleep(.05)
+while rpc('heartbeat')['state']!='active': time.sleep(.05)
+from assistant_mesh.store import Store
+store=Store(database,recover_inflight=False)
+def claim():
+    if not rpc('admit',{'claim':(call:=secrets.token_hex(8))}).get('admitted'): return None
+    store.heartbeat('recovery-node',['agent'])
+    task=store.claim('recovery-node')
+    rpc('bind',{'claim':call,'task':{k:task[k] for k in ('id','epoch')} if task else None})
+    return task
+def effect(text):
+    with effects.open('a') as output: output.write(text+'\n')
+if not first.exists():
+    task=claim()
+    store.update_task(task['id'],'recovery-node',task['epoch'],checkpoint={'side_effect_started':True,
+        'operation_id':'original-operation','thread_id':'original-thread'})
+    effect('original')
+    first.write_text(task['id'])
+    while True:
+        rpc('heartbeat'); time.sleep(.05)
+while True:
+    status=rpc('heartbeat')
+    if status['state']=='active' and not status['busy']:
+        task=claim()
+        if task:
+            effect(task['input'])
+            store.update_task(task['id'],'recovery-node',task['epoch'],
+                checkpoint={'side_effect_started':False},status='completed')
+            rpc('checkpoint',{'task':{k:task[k] for k in ('id','epoch')},'safe':True})
+    time.sleep(.05)
+'''
+
+
+UNKNOWN_CHILD = r'''
+import os,sys,time
+from pathlib import Path
+from assistant_mesh.rolling_runtime import request
+started,ready,pause=map(Path,sys.argv[1:])
+started.write_text(str(os.getpid()))
+while not ready.exists(): time.sleep(.02)
+def rpc(action,body=None):
+    return request(os.environ['AMITA_RUNTIME_SOCKET'],action,body,
+        os.environ['AMITA_RUNNER_ID'],os.environ['AMITA_RUNNER_TOKEN'])
+while True:
+    try: rpc('ready',{'pid':1,'work':None}); break
+    except (OSError,ValueError): time.sleep(.05)
+while True:
+    if not pause.exists(): rpc('heartbeat')
+    time.sleep(.05)
+'''
+
+
+@unittest.skipUnless(sys.platform == 'linux', 'Linux process adapter')
+class RollingRuntimeRecoveryProcessTests(unittest.TestCase):
+    # Reuse only the existing private-process setup, never inherit/re-run its
+    # completed test methods or touch the standing runtime on this host.
+    start_parent = RollingRuntimeProcessTests.start_parent
+    wait = RollingRuntimeProcessTests.wait
+    row = RollingRuntimeProcessTests.row
+    activate = RollingRuntimeProcessTests.activate
+
+    def setUp(self):
+        self.extra_children = {}
+        RollingRuntimeProcessTests.setUp(self)
+
+    def cleanup(self):
+        # Stop recovery before terminating only our owned temporary children.
+        for child in self.processes:
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=5)
+        for pid, birth in self.extra_children.items():
+            if LinuxProcess.alive(pid, birth):
+                os.kill(pid, signal.SIGTERM)
+        RollingRuntimeProcessTests.cleanup(self)
+
+    def launch(self, operation, value):
+        return request(self.socket, 'stage', {'operation': operation, 'spec': value})['runner']
+
+    def test_confirmed_boot_death_recovers_with_persistent_backoff_and_original_authority_guard(self):
+        from assistant_mesh.store import Store
+        database = self.root / 'authority.sqlite3'
+        authority = Store(database, recover_inflight=False)
+        original = authority.create_task('original', ['agent'], context={'session_scope': 'original-scope'})
+        fail, first, effects = [self.root / name for name in ('fail', 'first', 'effects')]
+        value = spec(self.root, autorestart=True, restart_backoff={'initial': .2, 'maximum': .8},
+            argv=[sys.executable, '-c', RECOVERY_CHILD, str(fail), str(first), str(effects), str(database)],
+            env={'PYTHONPATH': str(ROOT)})
+        # Missing autorestart on an already stored owner spec defaults True;
+        # its exact request/fingerprint must stay unchanged after parent restart.
+        value.pop('autorestart')
+        old = self.launch('original-owner-operation', value)
+        self.activate(old, 'original-owner-activation')
+        self.wait(first.exists)
+        self.assertEqual(original, first.read_text())
+        old_pid = self.row(old)['pid']
+        self.parent.terminate(); self.parent.wait(timeout=5)
+        os.kill(old_pid, signal.SIGTERM)
+        self.wait(lambda: not LinuxProcess.alive(old_pid, self.row_offline(old)['birth']))
+        independent = authority.create_task('independent', ['agent'], context={'session_scope': 'independent-scope'})
+        with authority.transaction() as db:
+            db.execute('UPDATE tasks SET deadline=0 WHERE id=?', (original,))
+        fail.touch()
+        with RuntimeStore(self.state).transaction() as db:
+            # A persisted prior boot plus PID reuse cannot authorize killing
+            # this test process. It proves only that the old identity is dead.
+            db.execute('UPDATE runners SET pid=?,birth=? WHERE id=?',
+                (os.getpid(), '00000000-0000-0000-0000-000000000000:1', old))
+        self.parent = self.start_parent()
+        self.wait(lambda: request(self.socket, 'status')['supervisor_alive'])
+        self.assertEqual({'runner': old, 'state': 'queued'}, request(self.socket, 'stage',
+            {'operation': 'original-owner-operation', 'spec': value}))
+        self.wait(lambda: request(self.socket, 'status')['recovery'][0]['failures'] >= 2)
+        status = request(self.socket, 'status')
+        attempts = [row for row in status['runners'] if row['restart_of']]
+        self.assertGreaterEqual(len(attempts), 2)
+        self.assertGreaterEqual(attempts[1]['created'] - attempts[0]['created'], .35)
+        self.assertLessEqual(len(attempts), 3)
+        self.assertTrue(status['supervisor_alive'])
+        self.assertTrue(self.row(old)['death_confirmed'])
+        self.assertEqual({'id': original, 'epoch': 1}, self.row(old)['work']['task'])
+        fail.unlink()
+        recovered = self.wait(lambda: next((row for row in request(self.socket, 'status')['runners']
+            if row['id'] != old and row['state'] == 'active'), None))
+        self.wait(lambda: effects.read_text().splitlines() == ['original', 'independent'])
+        self.assertNotEqual(old_pid, recovered['pid'])
+        self.assertNotEqual(old, recovered['id'])
+        with authority.transaction() as db:
+            retained = db.execute('SELECT * FROM tasks WHERE id=?', (original,)).fetchone()
+            self.assertEqual(('needs_review', 1), (retained['status'], retained['epoch']))
+            checkpoint = json.loads(retained['checkpoint'])
+            self.assertTrue(checkpoint['side_effect_started'])
+            self.assertEqual(('original-operation', 'original-thread'),
+                (checkpoint['operation_id'], checkpoint['thread_id']))
+            self.assertEqual('completed', db.execute('SELECT status FROM tasks WHERE id=?',
+                                                   (independent,)).fetchone()[0])
+        self.assertTrue(any(op['kind'] == 'recover' for op in request(self.socket, 'status')['operations']))
+
+    def row_offline(self, runner):
+        db = sqlite3.connect(str(self.state / 'runtime.sqlite3'))
+        db.row_factory = sqlite3.Row
+        try:
+            return dict(db.execute('SELECT * FROM runners WHERE id=?', (runner,)).fetchone())
+        finally:
+            db.close()
+
+    def test_unknown_launch_real_peer_can_reconnect_without_clearing_work_or_timeout_restart(self):
+        old_marker = self.root / 'old.marker'
+        old = self.launch('old-source', spec(self.root, autorestart=True,
+            restart_backoff={'initial': .2, 'maximum': .8},
+            argv=[sys.executable, '-c', CHILD, str(old_marker)], env={'PYTHONPATH': str(ROOT)}))
+        self.activate(old, 'active-old')
+        self.wait(old_marker.exists)
+        started, ready, pause = [self.root / name for name in ('started', 'ready', 'pause')]
+        value = spec(self.root, 'unknown-candidate', autorestart=True,
+            argv=[sys.executable, '-c', UNKNOWN_CHILD, str(started), str(ready), str(pause)],
+            env={'PYTHONPATH': str(ROOT)})
+        unknown = self.launch('unknown-original-operation', value)
+        self.wait(started.exists)
+        peer_pid = int(started.read_text())
+        self.extra_children[peer_pid] = LinuxProcess.identity(peer_pid)
+        old_pid, old_birth = self.row(old)['pid'], self.row_offline(old)['birth']
+        self.parent.terminate(); self.parent.wait(timeout=5)
+        os.kill(old_pid, signal.SIGTERM)
+        self.wait(lambda: not LinuxProcess.alive(old_pid, old_birth))
+        work = {'phase': 'unknown', 'task': {'id': 'original-held-task', 'epoch': 7}}
+        with RuntimeStore(self.state).transaction() as db:
+            db.execute("UPDATE runners SET pid=NULL,birth=NULL,state='retained',note='launch_outcome_unknown',work=? WHERE id=?",
+                       (json.dumps(work), unknown))
+        self.parent = self.start_parent()
+        self.wait(lambda: request(self.socket, 'status')['supervisor_alive'])
+        token = self.row_offline(unknown)['token']
+        with self.assertRaisesRegex(ValueError, 'process_mismatch'):
+            request(self.socket, 'ready', {'pid': peer_pid, 'work': None}, unknown, token)
+        self.assertEqual(work, self.row(unknown)['work'])
+        ready.touch()
+        self.wait(lambda: self.row(unknown)['ready'])
+        self.assertEqual(peer_pid, self.row(unknown)['pid'])
+        self.assertEqual(work, self.row(unknown)['work'])
+        pause.touch()
+        time.sleep(.15)
+        with RuntimeStore(self.state).transaction() as db:
+            db.execute('UPDATE runners SET heartbeat=? WHERE id=?', (time.time() - 100, unknown))
+        self.wait(lambda: self.row(unknown)['state'] == 'retained')
+        status = request(self.socket, 'status')
+        self.assertEqual(2, len(status['runners']))
+        self.assertEqual('alive', self.row(unknown)['process_observation'])
+        self.assertFalse(self.row(unknown)['death_confirmed'])
+        self.assertEqual(work, self.row(unknown)['work'])
+        self.assertFalse(any(op['kind'] == 'recover' for op in status['operations']))
 
 
 if __name__ == '__main__':
