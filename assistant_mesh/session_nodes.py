@@ -169,17 +169,21 @@ class LocalSessionNodes:
     execute_own_requests is a separate private execution grant, default False.
     Otherwise authorize_work() binds an existing ingress task and operation.
     """
-    def __init__(self, backend, subjects, *, mesh_id='amita', ttl_seconds=60):
+    def __init__(self, backend, subjects, *, mesh_id='amita', ttl_seconds=60,
+                 work_lease_seconds=900):
         if (not isinstance(backend, LocalIngressBackend) or backend.source != SOURCE
                 or not isinstance(backend.ingress.store, Store)):
             raise NotConfigured('session_nodes_local_ingress_required')
         if type(ttl_seconds) is not int or not 15 <= ttl_seconds <= 60:
             raise ValueError('invalid_interactive_ttl')
+        if type(work_lease_seconds) is not int or not 60 <= work_lease_seconds <= 3600:
+            raise ValueError('invalid_interactive_work_lease')
         if not isinstance(subjects, dict) or not subjects or len(subjects) > 32:
             raise ValueError('invalid_session_subject_policy')
         self.backend, self.owner, self.source = backend, backend.ingress.owner_id, backend.source
         self.ingress, self.store = backend.ingress, backend.ingress.store
         self.mesh_id, self.ttl = _identifier(mesh_id, 'mesh_id'), ttl_seconds
+        self.work_lease_seconds = work_lease_seconds
         self.subjects = {}
         for subject, policy in subjects.items():
             _identifier(subject, 'session_subject')
@@ -238,13 +242,14 @@ class LocalSessionNodes:
 
     def _session_view(self, row):
         online = row['state'] == 'online' and row['expires'] > self.store.clock()
+        presence = 'online' if online else 'inactive' if row['state'] == 'online' else 'offline'
         advertised = json.loads(row['capabilities'])
         granted = sorted(set(advertised) & set(self.subjects[row['subject']]['capabilities']))
         return {'node_id': row['node_id'], 'session_id': row['session_id'],
                 'lifecycle': 'interactive', 'generation': row['generation'],
-                'network': {'state': 'online' if online else 'offline', 'expires_at': row['expires']},
-                'agent': {'state': row['agent_state'] if online else 'offline', 'observation': 'session_reported'},
-                'model': {'state': row['model_state'], 'observation': 'session_reported'},
+                'network': {'state': presence, 'expires_at': row['expires'], 'presence_ttl_seconds': self.ttl},
+                'agent': {'state': row['agent_state'], 'observation': 'session_reported', 'observation_stale': not online},
+                'model': {'state': row['model_state'], 'observation': 'session_reported', 'observation_stale': not online},
                 'roles': ['entrance'] + (['execution'] if granted else []),
                 'capabilities': advertised, 'managed_capabilities': granted,
                 'capability_verification': 'session_reported', 'background_wake_supported': False,
@@ -387,8 +392,7 @@ class LocalSessionNodes:
         grant = self._grant(row, entry, binding['subject'])
         if grant is None or grant['operation_id'] != receipt['operation_id']:
             raise PermissionError('interactive_work_not_authorized')
-        online = session['state'] == 'online' and session['expires'] > self.store.clock()
-        live = online and self.store._task_is_live(db, row, session['node_id'], receipt['epoch'])
+        live = self.store._task_is_live(db, row, session['node_id'], receipt['epoch'])
         checkpoint = json.loads(row['checkpoint'])
         capable = set(json.loads(row['required'])) <= set(self._session_view(session)['managed_capabilities'])
         ready = session['agent_state'] != 'waiting_model' and session['model_state'] != 'unavailable'
@@ -396,8 +400,9 @@ class LocalSessionNodes:
             'operation_id': receipt['operation_id'], 'request_id': grant['request_id'],
             'conversation_id': grant['conversation_id'], 'input': row['input'],
             'required': json.loads(row['required']), 'status': row['status'], 'lease_live': bool(live),
-            'lease_remaining_seconds': max(0, min(row['deadline'] or 0, session['expires']) - self.store.clock()) if live else 0,
-            'may_execute': bool(live and capable and ready and not checkpoint.get('side_effect_started')),
+            'lease_remaining_seconds': max(0, (row['deadline'] or 0) - self.store.clock()) if live else 0,
+            'may_execute': bool(live and session['state'] == 'online' and capable and ready
+                                and not checkpoint.get('side_effect_started')),
             'effect_state': 'requires_original_receipt' if checkpoint.get('side_effect_started') else 'not_started',
             'checkpoint': checkpoint.get('interactive_progress', {}), 'execution_verified': False},
             pull_id=receipt['pull_id'])
@@ -427,7 +432,8 @@ class LocalSessionNodes:
                               (session['node_id'], self.store.clock())).fetchone()
             if task is not None and task['id'] not in eligible:
                 task, eligible = None, []
-            if task is None:
+            fresh_claim = task is None
+            if fresh_claim:
                 task = self.store._claim_in_db(db, session['node_id'], task_ids=eligible)
             receipt = {'pull_id': value['pull_id'], 'task_id': task['id'] if task else None}
             if task:
@@ -437,6 +443,9 @@ class LocalSessionNodes:
                 context['interactive_work'], checkpoint['operation_id'] = grant, grant['operation_id']
                 db.execute('UPDATE tasks SET context=?,checkpoint=? WHERE id=?',
                            (_encoded(context), _encoded(checkpoint), task['id']))
+                if fresh_claim:
+                    db.execute('UPDATE tasks SET deadline=? WHERE id=? AND node=? AND epoch=?',
+                               (self.store.clock() + self.work_lease_seconds, task['id'], session['node_id'], task['epoch']))
                 receipt.update(epoch=task['epoch'], operation_id=grant['operation_id'])
             self._save_receipt(db, session['node_id'], value['pull_id'], 'work_pull', fingerprint, receipt)
             return self._work_view(db, binding, session, receipt)
@@ -449,7 +458,6 @@ class LocalSessionNodes:
             old, fingerprint = self._receipt(db, session['node_id'], value['report_id'], 'work_report', value)
             if old is not None:
                 return self._base(receipt=old, replayed=False, original_receipt=True)
-            self._session(db, binding, value['session_id'], live=True)
             row = db.execute('SELECT * FROM tasks WHERE id=?', (value['task_id'],)).fetchone()
             entry = self._entry(db, row) if row is not None else None
             grant = self._grant(row, entry, binding['subject']) if row is not None and entry is not None else None
@@ -460,6 +468,11 @@ class LocalSessionNodes:
             if not any(all(claim.get(key) == value[key] for key in ('task_id', 'epoch', 'operation_id')) for claim in claims):
                 raise PermissionError('interactive_original_claim_required')
             checkpoint = json.loads(row['checkpoint'])
+            if value['status'] == 'effect_started':
+                capable = set(json.loads(row['required'])) <= set(self._session_view(session)['managed_capabilities'])
+                if (session['state'] != 'online' or not capable or session['agent_state'] == 'waiting_model'
+                        or session['model_state'] == 'unavailable' or checkpoint.get('side_effect_started')):
+                    raise Conflict('interactive_new_effect_not_authorized')
             effect = bool(checkpoint.get('side_effect_started'))
             if effect and value['status'] in ('completed', 'failed') and value['effect_receipt'] is None:
                 raise Conflict('interactive_original_effect_receipt_required')
@@ -472,6 +485,11 @@ class LocalSessionNodes:
             status = {'progress': None, 'effect_started': None, 'unknown': 'needs_review'}.get(value['status'], value['status'])
             self.store._update_task_in_db(db, value['task_id'], session['node_id'], value['epoch'],
                                          checkpoint=update, result=value['result'], status=status)
+            # Presence is an observation, not proof of an execution's death.
+            # Extend only an already fenced interactive running epoch, without
+            # fabricating a node heartbeat or changing normal Store timeouts.
+            db.execute("UPDATE tasks SET deadline=? WHERE id=? AND node=? AND epoch=? AND status='running'",
+                       (self.store.clock() + self.work_lease_seconds, value['task_id'], session['node_id'], value['epoch']))
             receipt = {key: value[key] for key in ('report_id', 'task_id', 'epoch', 'operation_id',
                                                   'request_id', 'conversation_id', 'status')}
             receipt.update(accepted=True, execution_verified=False)

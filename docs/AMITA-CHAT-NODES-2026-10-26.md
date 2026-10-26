@@ -26,9 +26,10 @@ there is no tool argument for a URL, owner, node, role or credential.
 
 `mesh_node_update` publishes a complete snapshot with the same session ID and a
 new retained control ID. Set `online=false` to disconnect explicitly. Membership
-expires after the privately configured 15–60 second TTL; no keeper task or
-background process refreshes it. During active interaction, connect again with
-the same original ID to renew/restore the same node. A retried connect preserves
+has a privately configured 15–60 second presence TTL; no keeper task or
+background process refreshes it. Expiry means `inactive` and a stale observation,
+not execution death. It stops eligibility for new work. When seeking new work,
+connect again with the same original ID to renew/restore the same node. A retried connect preserves
 later capability observations. A retried older node update only observes the
 current membership and does not overwrite newer state. Changing a control ID's
 content is rejected. A lost heartbeat/join ACK can safely retry the same ID.
@@ -67,7 +68,12 @@ never claims another task. An empty pull remains empty under that ID; a later
 poll uses a new ID. New pulls observe an existing live interactive turn before
 claiming additional work. A work response exposes only the business input and
 interactive checkpoint, with a current `lease_live`, bounded lease remainder,
-and `may_execute` flag. Expired receipts do not authorize execution.
+and `may_execute` flag. An execution lease is separate from presence: the private
+`work_lease_seconds` defaults to 900 seconds and accepts integers from 60 to 3600.
+It applies in the same transaction only to claimed interactive tasks; ordinary
+Store task leases keep their existing 90 seconds. Presence expiry does not cut
+short a live execution or force the model to interrupt thought every minute.
+Expired execution receipts do not authorize execution.
 
 Report using the exact returned `task_id`, `epoch`, `operation_id`, `request_id`
 and `conversation_id`, plus a retained `report_id`. Supported statuses are
@@ -75,7 +81,13 @@ and `conversation_id`, plus a retained `report_id`. Supported statuses are
 and `waiting_backend`. The existing fenced Store update and report receipt
 commit in one transaction. Lost ACK recovery reads that original receipt even
 after session expiry; changed content, a foreign subject, or a stale lease
-cannot issue another update. Results remain in the original Task and existing
+cannot issue another update. Progress on a currently live original epoch renews
+its configured execution lease, without fabricating a presence heartbeat.
+Explicitly offline sessions may report already executed work in that live lease,
+but cannot start a new effect or claim new work. Subject/grant revocation still
+blocks authority. Once the actual task deadline expires, a new report cannot
+revive the old epoch; ordinary safe recovery retains the task/operation and uses
+a new epoch. Confirmed original receipts remain readable. Results remain in the original Task and existing
 final/conversation/events path; they are not independently verified or
 owner-approved publications.
 
@@ -100,7 +112,7 @@ session_authority = LocalSessionNodes(local_backend, {
         "visible_nodes": {"PRIVATE_NODE_ID": "Computer"},
         "execute_own_requests": False,
     }
-})
+}, work_lease_seconds=900)
 ```
 
 Root's existing `role=ingress` branch must route only the five fixed POST paths
@@ -149,6 +161,15 @@ all 13 real tools, checked OAuth scope/closed arguments, and completed an
 original request/conversation/claim/report/status round trip. No model POST,
 production service, or platform GUI was used. The additional lease-generation
 boundary is verified separately without repeating those passing groups.
+
+The presence/execution separation adds two clock-advance Store cases: a model
+can think for 180 seconds after a 60-second presence TTL, report progress under
+the original 900-second execution lease, renew that same epoch, and complete
+without a fabricated node heartbeat. A configurable 240-second lease also
+accepts an existing effect outcome after presence expires while refusing a new
+effect after explicit offline and refusing revival of unknown work. The original
+epoch-recovery boundary and ordinary SDK round trip are checked at their affected
+scope; no new model request or background keeper is introduced.
 
 The existing isolated interpreter is
 `/var/tmp/mesh-mcp-http-sdk.TQsZqe/venv/bin/python`; no global installation was

@@ -82,7 +82,8 @@ class SessionNodeTests(unittest.TestCase):
             'capabilities': ['agent', 'native.unlisted'], 'agent_state': 'waiting_model', 'model_state': 'unavailable'})
         self.now[0] += 61
         expired = self.service.request(principal(), 'discover', {'session_id': 'original-chat'})
-        self.assertEqual('offline', expired['session']['network']['state'])
+        self.assertEqual('inactive', expired['session']['network']['state'])
+        self.assertTrue(expired['session']['agent']['observation_stale'])
         restored = self.connect()['session']
         self.assertEqual(first['node_id'], restored['node_id'])
         self.assertEqual(['agent', 'native.unlisted'], restored['capabilities'])
@@ -218,7 +219,7 @@ class SessionNodeTests(unittest.TestCase):
         task = self.create()
         self.connect()
         original = self.pull()['work']
-        self.now[0] += 100
+        self.now[0] += self.service.work_lease_seconds + 1
         self.connect()
         renewed = self.pull('after-lease-expiry')['work']
         self.assertEqual((task, original['operation_id']), (renewed['task_id'], renewed['operation_id']))
@@ -231,6 +232,57 @@ class SessionNodeTests(unittest.TestCase):
         self.assertFalse(self.pull('after-lease-expiry')['work']['may_execute'])
         self.assertEqual('running', self.row(task)['status'])
         self.assertEqual(2, self.row(task)['attempts'])
+
+    def test_deep_thought_outlives_presence_then_reports_and_renews_same_execution_epoch(self):
+        task = self.create()
+        self.connect()
+        original = self.pull()['work']
+        self.assertEqual(900, original['lease_remaining_seconds'])
+        node = self.row(task)['node']
+        with self.store.transaction() as db:
+            original_seen = db.execute('SELECT seen FROM nodes WHERE id=?', (node,)).fetchone()['seen']
+        self.now[0] += 180
+        observed = self.service.request(principal(), 'discover', {'session_id': 'original-chat'})['session']
+        self.assertEqual('inactive', observed['network']['state'])
+        self.assertEqual('ready', observed['agent']['state'])
+        self.assertTrue(observed['agent']['observation_stale'])
+        with self.assertRaises(Conflict):
+            self.pull('no-new-work-with-stale-presence')
+        self.assertTrue(self.pull()['work']['may_execute'])
+        self.report(original, report_id='long-reasoning-progress', status='progress', checkpoint={'step': 'reasoning finished'})
+        self.assertEqual((original['epoch'], self.now[0] + 900), (self.row(task)['epoch'], self.row(task)['deadline']))
+        with self.store.transaction() as db:
+            self.assertEqual(original_seen, db.execute('SELECT seen FROM nodes WHERE id=?', (node,)).fetchone()['seen'])
+        self.now[0] += 180
+        self.report(original, result='deep reasoning completed under original lease')
+        self.assertEqual(('completed', 1), (self.row(task)['status'], self.row(task)['attempts']))
+        self.assertEqual(original['operation_id'], json.loads(self.row(task)['checkpoint'])['operation_id'])
+
+    def test_inactive_presence_can_report_effect_outcome_but_offline_or_unknown_cannot_start_an_effect(self):
+        for invalid in (False, 59, 3601):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                LocalSessionNodes(self.backend, subjects(), work_lease_seconds=invalid)
+        self.service = LocalSessionNodes(self.backend, subjects(), work_lease_seconds=240)
+        task = self.create()
+        self.connect()
+        original = self.pull()['work']
+        self.now[0] += 120
+        self.report(original, report_id='after-thinking-effect-intent', status='effect_started')
+        self.assertFalse(self.pull()['work']['may_execute'])
+        self.service.request(principal(), 'node_update', {'session_id': 'original-chat',
+            'control_id': 'offline-during-existing-work', 'online': False, 'capabilities': ['agent']})
+        with self.assertRaises(Conflict):
+            self.report(original, report_id='offline-new-effect', status='effect_started')
+        self.report(original, report_id='effect-became-unknown', status='unknown')
+        self.assertEqual('needs_review', self.row(task)['status'])
+        with self.assertRaises(Conflict):
+            self.report(original, report_id='no-unknown-lease-revival', status='progress')
+        self.assertEqual(original['epoch'], self.row(task)['epoch'])
+        ordinary = self.store.create_task('Ordinary worker lease remains ninety seconds', ['agent'],
+            task_id='ordinary-lease', context={'session_scope': 'ordinary:independent'})
+        self.store.heartbeat('ordinary-worker', ['agent'])
+        claimed = self.store.claim('ordinary-worker', task_ids=[ordinary])
+        self.assertEqual(self.now[0] + 90, claimed['deadline'])
 
     def test_discovery_separates_network_agent_model_and_task_states(self):
         self.store.heartbeat('authority-fixture', ['leader', 'agent'])

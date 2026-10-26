@@ -12,7 +12,10 @@ INSTRUCTIONS = (
     'network; no business task is needed for discovery/join. Announce only tools '
     'and capabilities actually available in this session. Retry a lost connect '
     'or node_update with the same control ID. Renew this interactive membership '
-    'while actively using Mesh; let it expire or mark offline when idle. '
+    'when seeking new Mesh work; let presence expire or mark offline when idle. '
+    'Presence expiry is a stale observation, not execution death: already claimed '
+    'work uses its separate task lease (normally 15 minutes). Progress on that '
+    'original live epoch can renew it without interrupting thought every minute. '
     'Use mesh_work_pull only for eligible, independently authorized work, and '
     'retain every returned task/request/conversation/epoch/operation identity. '
     'Execute only while may_execute and lease_live are true. Report effect_started '
@@ -46,7 +49,7 @@ def register_tools(server, invoke, annotations):
         return await invoke('discover', {'session_id': session_id} if session_id is not None else {})
 
     @server.tool(name='mesh_node_update', annotations=hints(),
-                 description='Publish this interactive session actual capabilities and online state with a retained control_id. This is a complete snapshot. Advertising capabilities never grants managed work authority and never restricts native Chat tools.')
+                 description='Publish this interactive session actual capabilities and presence with a retained control_id. This is a complete snapshot. Presence TTL controls new work eligibility; existing work has a separate execution lease. Advertising capabilities never grants managed work authority and never restricts native Chat tools.')
     async def node_update(session_id: str, control_id: str, capabilities: List[str] = None,
                           online: bool = True, agent_state: str = 'ready', model_state: str = 'unknown'):
         return await invoke('node_update', {'session_id': session_id, 'control_id': control_id,
