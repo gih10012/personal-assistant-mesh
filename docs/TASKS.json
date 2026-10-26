@@ -3207,13 +3207,15 @@
     "whole_goal_completed": false,
     "coordination": "Root owns current docs and serial shared operations; separate worktrees for independent leaves",
     "streams": {
-      "rolling_runtime": "pending assignment",
-      "model_routes": "pending assignment",
-      "chat_nodes": "pending assignment",
-      "role_replication": "integrate after initial supervisor/control interfaces"
+      "rolling_runtime": "laptop deployed: idle roll and parent upgrade accepted with original worker PIDs/API retained; confirmed-death bounded recovery installed; VPS and in-flight handover pending",
+      "model_routes": "qualified route/recovery and native transition source merged; production remains OpenAI-only; zero-cost qualified non-OpenAI entitlement/protocol evidence missing",
+      "chat_nodes": "five added tools deployed on original authority/OAuth; plugin1.1.0; real ordinary Firefox Chat implicit discovery/join accepted and original DB membership confirmed; work delegation/report pending",
+      "role_replication": "existing authenticated PC/VPS retained; dynamic roles, replicas and reunion pending",
+      "public_bootstrap": "Cloudflare Workers Free authorized; deployment pending"
     },
-    "current_production_changed_by_amita": false,
-    "next": "same-device rolling runtime first; qualified model recovery and interactive node tools in parallel"
+    "current_production_changed_by_amita": true,
+    "next": "adopt VPS execution supervisor; safe original-operation isolation/checkpoints; qualified model production route; dynamic roles/replicas; actual Leader-to-Chat work and original workspace continuation",
+    "deployment_record": "docs/AMITA-DEPLOYMENT-2026-10-26.md"
   },
   "network_name": "AMITA",
   "amita_approved_replan_20261026": {

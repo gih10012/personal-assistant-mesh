@@ -1,9 +1,13 @@
 # Local worker rolling runtime
 
 Branch: `work/amita-rolling-runtime-20261026`, base `409572b`.
-This adds runnable Linux process control. It has not been installed or accepted
-on either standing node by this branch. Root owns deployment and one actual
-acceptance. The existing receiver, SQLite business authority and private owner
+This adds runnable Linux process control. Root has now installed the laptop
+supervisor and original worker adapter, completed an actual idle version roll,
+then upgraded the parent while both original worker PIDs remained alive and the
+existing authority API stayed reachable. Confirmed-death recovery is installed;
+in-flight long-task handover and VPS worker adoption are still pending. See
+[current deployment](AMITA-DEPLOYMENT-2026-10-26.md). The existing receiver,
+SQLite business authority and private owner
 launchers remain the sources of truth; this module creates none of them.
 
 ## What runs
