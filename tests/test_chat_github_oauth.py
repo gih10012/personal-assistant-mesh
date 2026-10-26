@@ -170,9 +170,9 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         await self.stack.aclose()
         self.temp.cleanup()
 
-    def make_app(self):
+    def make_app(self, **kwargs):
         return create_app(self.config, backend=self.backend, http_client=self.identity_client,
-                          allow_loopback_for_tests=True)
+                          allow_loopback_for_tests=True, **kwargs)
 
     def idp(self, request):
         self.idp_requests.append((request.method, str(request.url)))
@@ -263,7 +263,8 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         self.assertNotIn('SYNTHETIC_NOT_EXPORTED', json.dumps(signed))
         tools = await self.rpc(tokens['access_token'], 'tools/list')
         self.assertEqual(200, tools.status_code, tools.text)
-        self.assertEqual({'mesh_submit_task', 'mesh_task_status', 'mesh_approved_result'},
+        from assistant_mesh.session_nodes import TOOLS
+        self.assertEqual({'mesh_submit_task', 'mesh_task_status', 'mesh_approved_result'} | set(TOOLS),
                          {item['name'] for item in tools.json()['result']['tools']})
         args = {'name': 'mesh_submit_task', 'arguments': {'request_id': 'original-owner-request', 'input': 'SYNTHETIC_TASK'}}
         first = await self.rpc(tokens['access_token'], 'tools/call', args)
@@ -273,6 +274,29 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         with self.store.transaction() as db:
             row = db.execute('SELECT source,subject,request_id FROM ingress_requests').fetchone()
             self.assertEqual(('chatgpt-chat', 'fixed-owner-main-chat', 'original-owner-request'), tuple(row))
+
+    async def test_session_nodes_receive_signed_oauth_subject_and_reuse_original_authority(self):
+        from assistant_mesh.session_nodes import LocalSessionNodes
+        service = LocalSessionNodes(self.backend, {'fixed-owner-main-chat': {
+            'capabilities': ['agent'], 'visible_nodes': {'synthetic-authority': 'AMITA'}}})
+        self.provider, self.server, self.app = self.make_app(session_service=service)
+        self.http = await self.stack.enter_async_context(self.real_client(
+            transport=httpx2.ASGITransport(app=self.app), base_url=ORIGIN, follow_redirects=False))
+        async with self.app.router.lifespan_context(self.app):
+            tokens = await self.tokens()
+            reply = await self.rpc(tokens['access_token'], 'tools/call', {
+                'name': 'mesh_connect', 'arguments': {'session_id': 'signed-chat',
+                    'control_id': 'original-control', 'capabilities': ['agent']}})
+            joined = reply.json()['result']['structuredContent']
+            self.assertTrue(joined['ok'], joined)
+            node = joined['data']['session']['node_id']
+            discovered = await self.rpc(tokens['access_token'], 'tools/call', {
+                'name': 'mesh_discover', 'arguments': {'session_id': 'signed-chat'}})
+            self.assertEqual(node, discovered.json()['result']['structuredContent']['data']['session']['node_id'])
+        with self.store.transaction() as db:
+            row = db.execute('SELECT subject FROM interactive_nodes WHERE node_id=?', (node,)).fetchone()
+            self.assertEqual('fixed-owner-main-chat', row['subject'])
+            self.assertEqual(0, db.execute('SELECT COUNT(*) FROM tasks').fetchone()[0])
 
     @component_lifespan
     async def test_missing_or_wrong_pkce_never_exchanges_the_original_code(self):

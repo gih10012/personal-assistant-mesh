@@ -114,6 +114,7 @@ def _private_component_logs():
 
 
 def create_app(document, *, backend, conversation_service=None, event_service=None,
+               session_service=None,
                allow_loopback_for_tests=False, http_client=None):
     """Owner-installed factory; not a public daemon or GitHub App creator.
 
@@ -336,6 +337,7 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
     server, resource_app = create_server(policy, token_verifier=ProxyResourceVerifier(), backend=backend,
                                          conversation_service=conversation_service,
                                          event_service=event_service,
+                                         session_service=session_service,
                                          allow_loopback_for_tests=allow_loopback_for_tests)
     # Keep the existing resource's metadata/challenge and three tools. Only the
     # established AS routes are mounted; no generic Mesh/Store API appears here.
