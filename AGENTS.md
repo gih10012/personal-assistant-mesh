@@ -11,8 +11,10 @@ AMITA means Autonomous Mesh for Intelligence, Tools and Agents
 (阿米塔 / アミタ / amita). Preserve the complete general-assistant goal,
 original 43 coordinating task identities/dependencies, business tasks, operation
 IDs, worktrees, native sessions, histories and unknown results.
-The owner cleared the previous native Goal and requested a new one; its status
-is ACTIVE, createdAt 1792949790. Old accounting was not migrated.
+The owner cleared the previous native Goal and requested a new one, createdAt
+1792949790. It is now PAUSED at the owner's request for wrap-up and joint
+HarmonyOS enrollment planning. Do not resume development automatically. Existing
+network services remain running. Old accounting was not migrated.
 SCHOOL EVALUATION remains independently PAUSED; do not inspect or perform it.
 
 Deliver user-visible functionality. Deploy completed authorized changes promptly
