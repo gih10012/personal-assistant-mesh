@@ -279,7 +279,8 @@ class ActualSDKHTTPTests(unittest.TestCase):
         self.assertEqual(200, initialized[0])
         self.assertEqual('2025-11-25', initialized[2]['result']['protocolVersion'])
         tools = self.http(payload=self.rpc('tools/list'))
-        self.assertEqual({'mesh_submit_task', 'mesh_task_status', 'mesh_approved_result'},
+        self.assertEqual({'mesh_submit_task', 'mesh_task_status', 'mesh_approved_result',
+                          'mesh_connect', 'mesh_discover', 'mesh_node_update', 'mesh_work_pull', 'mesh_work_report'},
                          {tool['name'] for tool in tools[2]['result']['tools']})
         for descriptor in tools[2]['result']['tools']:
             self.assertEqual(descriptor['securitySchemes'], descriptor['_meta']['securitySchemes'])

@@ -91,7 +91,7 @@ def dispatch_conversation_sync(service, verifier, token, payload):
 
 
 def create_server(config, *, token_verifier=None, backend=None, conversation_service=None,
-                  event_service=None, allow_loopback_for_tests=False):
+                  event_service=None, session_service=None, allow_loopback_for_tests=False):
     """Build SDK server+ASGI app; does not bind a TCP/public listener.
 
     Root supplies only a trusted verifier and already owner-bound backend. There
@@ -112,6 +112,12 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
                    ('before_receive', 'after_reply', 'original_receipt'))):
         raise NotConfigured('mcp_http_conversation_runtime_not_configured')
     verifier = OwnerTokenVerifier(token_verifier, policy)
+    from . import session_nodes
+    if session_service is not None and (
+            not isinstance(session_service, (session_nodes.LocalSessionNodes, session_nodes.RemoteSessionNodes))
+            or session_service.owner != policy['owner_binding'] or session_service.backend is not backend
+            or session_service.source != SOURCE):
+        raise NotConfigured('mcp_http_session_nodes_not_configured')
     if event_service is not None:
         from .mcp_events import MCPEvents
         if not isinstance(event_service, MCPEvents) or event_service.owner != policy['owner_binding']:
@@ -149,6 +155,11 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
                         conversation.arguments(conversation_actions[params['name']], params.get('arguments', {}))
                     except Exception:
                         raise MCPError(code=-32602, message='Invalid Mesh conversation arguments') from None
+                elif params.get('name') in session_nodes.TOOLS:
+                    try:
+                        session_nodes.arguments(session_nodes.TOOLS[params['name']], params.get('arguments', {}))
+                    except Exception:
+                        raise MCPError(code=-32602, message='Invalid Mesh session node arguments') from None
             result = await call_next(context)
             if event_service is not None and context.method == 'server/discover' and context.protocol_version == '2026-07-28':
                 # Public middleware result seam: SDK's core capability model
@@ -163,12 +174,15 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
                 for descriptor in result.get('tools', []):
                     scopes = ['tasks:read', 'tasks:submit'] if descriptor['name'] in (
                         'mesh_submit_task', 'mesh_conversation_open', 'mesh_conversation_reply',
-                        'mesh_conversation_sync') else ['tasks:read']
+                        'mesh_conversation_sync', 'mesh_connect', 'mesh_node_update',
+                        'mesh_work_pull', 'mesh_work_report') else ['tasks:read']
                     descriptor['securitySchemes'] = [{'type': 'oauth2', 'scopes': scopes}]
                     descriptor.setdefault('_meta', {})['securitySchemes'] = descriptor['securitySchemes']
             return result
 
     instructions = INSTRUCTIONS
+    from .session_node_mcp import INSTRUCTIONS as SESSION_INSTRUCTIONS, register_tools
+    instructions += SESSION_INSTRUCTIONS
     if conversation_service is not None:
         instructions += (' For connected two-way conversation, open an existing original request with a retained conversation_id. '
             'Receive messages with the last cursor; show questions naturally and reply with one retained message_id/reply_to. '
@@ -208,6 +222,15 @@ def create_server(config, *, token_verifier=None, backend=None, conversation_ser
         meta = scope_challenge(token, result, 'tasks:submit' if action == 'submit' else 'tasks:read')
         return CallToolResult(content=[TextContent(type='text', text=json.dumps(result, ensure_ascii=False))],
                               structured_content=result, is_error=not result['ok'], _meta=meta)
+
+    async def session_call(action, arguments):
+        token = get_access_token()
+        result = await asyncio.to_thread(session_nodes.dispatch, session_service, verifier, token, action, arguments)
+        meta = scope_challenge(token, result, 'tasks:submit' if action in session_nodes.WRITES else 'tasks:read')
+        return CallToolResult(content=[TextContent(type='text', text=json.dumps(result, ensure_ascii=False))],
+                              structured_content=result, is_error=not result['ok'], _meta=meta)
+
+    register_tools(server, session_call, ToolAnnotations)
 
     @server.tool(name='mesh_submit_task', description='Submit one owner-authorized Mesh task with a durable original request_id. Never auto-retry unknown.',
                  annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True,
