@@ -11,7 +11,7 @@ import secrets
 import threading
 import urllib.error
 
-from .channel_supervisor import BoundedBackoff
+from .retry import BoundedBackoff
 from .rolling_runtime import request
 
 
