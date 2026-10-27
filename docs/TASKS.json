@@ -8,6 +8,17 @@
   "latest_owner_status": "docs/STATUS-2026-10-27.md",
   "previous_owner_status_retained": "docs/STATUS-2026-10-12.md",
   "latest_continuation_at": "2026-10-27",
+  "approved_phone_to_ha_stage_20261027": {
+    "contract": "docs/AMITA-PHONE-TO-HA-2026-10-27.md",
+    "native_goal_created_at": 1793082568,
+    "old_goal_cleared_by_owner": true,
+    "old_usage_migrated": false,
+    "priority": "all phone prerequisites, Claw readiness report, real-device window, VPS single-point removal",
+    "phone_delivery": "maintainable native node; foreground work and system-scheduled application data updates",
+    "huawei_account": "owner logged in; real SDK/signing eligibility to be established",
+    "implementation": "starting; no new phone deployment or membership claimed",
+    "school_evaluation": "paused"
+  },
   "owner_report_20261025": {
     "channel": "existing bound-self ClawBot",
     "status": "accepted; same-ID lookup only, no duplicate send",

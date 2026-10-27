@@ -1,7 +1,8 @@
 # AMITA working contract
 
-Current owner-approved contract: 2026-10-26. Read docs/GOAL.md,
-docs/PLAN.md and docs/AMITA-REPLAN-2026-10-26.md before implementation.
+Current owner-approved contract: 2026-10-27 phone-first implementation. Read
+docs/GOAL.md, docs/PLAN.md and docs/AMITA-PHONE-TO-HA-2026-10-27.md.
+The 2026-10-26 architecture remains applicable beneath this delivery order.
 Historical instructions are preserved in Git; their former pauses, fixed-VPS
 assumptions and model-specific fallback bans do not override this contract.
 
@@ -11,13 +12,17 @@ AMITA means Autonomous Mesh for Intelligence, Tools and Agents
 (阿米塔 / アミタ / amita). Preserve the complete general-assistant goal,
 original 43 coordinating task identities/dependencies, business tasks, operation
 IDs, worktrees, native sessions, histories and unknown results.
-The owner cleared the previous native Goal and requested a new one, createdAt
-1792949790. On 2026-10-27 the owner explicitly resumed the ENTIRE AMITA
-development plan and the native Goal is ACTIVE again. Continue original work
-and checkpoints; old accounting was not migrated. The phone is no longer
-USB-present and Huawei real-name/signing is deferred; that gate does not block
-other work. Never keep wireless HDC open on the campus network as a management
-channel; the intended phone node initiates authenticated AMITA connections.
+The owner cleared the previous native Goal and requested the current one,
+createdAt 1793082568, ACTIVE with independent accounting. Continue original
+business work and checkpoints; old Goal usage was not migrated. Concentrate
+development specialists AND actual network agents on all phone prerequisites,
+then report through Claw and advance VPS single-point removal while waiting for
+the phone. Prioritize actual installation/enrollment when it reconnects. Huawei
+is already logged in; reuse it and establish real SDK/signing eligibility.
+The chosen phone delivery is maintainable native membership: foreground work,
+system-scheduled background data/skill updates, and a legitimate same-signature
+HAP update path. Never keep wireless HDC open on the campus network as a
+management channel; the phone initiates authenticated AMITA connections.
 SCHOOL EVALUATION remains independently PAUSED; do not inspect or perform it.
 
 Deliver user-visible functionality. Deploy completed authorized changes promptly
