@@ -1,0 +1,10 @@
+{
+  "format": "amita-phone-runtime/1",
+  "owner_config": "/PRIVATE/phone-authority-owner.json",
+  "updates": {
+    "directory": "/PRIVATE/phone-data-release",
+    "key_id": "owner-data-v1",
+    "public_key_spki_base64": "REPLACE_WITH_OFFLINE_RSA2048_PUBLIC_SPKI_DER_BASE64"
+  },
+  "enrollments": []
+}
