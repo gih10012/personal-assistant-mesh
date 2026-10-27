@@ -174,8 +174,10 @@ export class WorkClient implements WorkHost {
     this.notify(this.status());
   }
   private observe(response: PhoneResponse): void {
-    requireValue(response.session !== undefined && response.session.network !== undefined &&
-      Number.isFinite(response.session.network.expires_at), 'mesh_work_presence_response_required');
+    if (response.session === undefined || response.session.network === undefined ||
+      !Number.isFinite(response.session.network.expires_at)) {
+      throw new Error('mesh_work_presence_response_required');
+    }
     this.state.presence_expires_at = response.session.network.expires_at;
     this.state.connection = response.session.network.state;
   }

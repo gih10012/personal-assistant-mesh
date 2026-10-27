@@ -1,5 +1,36 @@
 # 隔离 unsigned 构建实测（2026-10-15）
 
+## 2026-10-28：商业HarmonyOS手机工程完整构建
+
+本人通过无代理Edge在华为官方下载中心取得Linux Command Line Tools
+26.0.0.851。2,348,063,309 B完整包与官网SHA256精确匹配：
+`ab604bd92721d5cbcafd154e6461d46b9f1b105e7b89eab04a9d046681198082`。
+该项通过Click实际单次校验。私有工具含商业HarmonyOS API26 Release
+SDK26.0.0.105及真实phone定义，Hvigor6.26.8；没有全局安装或替换旧SDK。
+
+集成phone authority、原Allocation出站客户端与Asset/WorkScheduler/系统
+下载/验签更新后，Root逐字节复制44个工程文件到私有构建目录；保留原
+HarmonyOS runtime、phone/tablet及版本配置，**没有OpenHarmony/default
+平台overlay或SDK stub**。构建子进程无网络、空同路径个人home、只读工具，
+使用官方bundled Node/Hvigor；--no-daemon/--no-incremental，签名关闭。
+
+首次真实CompileArkTS拒绝WorkClient观察presence后未通过类型收窄的两处
+可选session引用；已将同一运行校验改为显式guard/throw，未扩大类型或删
+协议检查。失败日志完整保留；修正后相同Click检查实际通过：4.063s，
+33 tasks全部执行、0缓存。CompileArkTS、资源、PackageHap、PackingCheck
+均完成，原syscap/exception警告保留，不冒充所有机型API已验证。
+
+- unsigned手机HAP：393661 B，SHA256
+  `fbf185d6feab5e54916cac8acfb7d30def011a774c3a2c786dbbbc267a8abca2`。
+- 完整成功日志SHA256
+  `67fa67ecdd831aff1349c7cdd70f299e58ea0510bbd6f2459cfa24f7cbc00f5b`。
+- 原生ets/modules.abc与phone metadata实际读回；产物/源manifest/日志在
+  私有`/var/tmp/amita-harmony-commercial-20261028`，不提交生成包。
+
+这证明新客户端已通过真实商业SDK的手机版构建。**合法签名/Profile、
+手机安装、真实入网/第二业务往返、Asset与后台回调仍待真机验收**。
+下方2026-10-15公开SDK记录作为历史保留，不覆盖本次商业构建证据。
+
 在 `e2afb67` 首片基础上，新叶 `work/harmonyos-unsigned-build-20261015`
 完成了一次**真实 OpenHarmony 26 原生 ArkTS/资源/HAP完整构建**，不是
 Node测试或类型stub。**尚未完成华为商业 HarmonyOS SDK 构建、手机安装、
