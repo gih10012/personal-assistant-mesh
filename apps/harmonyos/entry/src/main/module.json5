@@ -11,6 +11,10 @@
       "startWindowIcon": "$media:app_icon", "startWindowBackground": "$color:start_window_background",
       "skills": [{ "entities": ["entity.system.home"], "actions": ["action.system.home"] }]
     }],
+    "extensionAbilities": [{
+      "name": "AmitaUpdateWork", "srcEntry": "./ets/background/AmitaUpdateWork.ets",
+      "type": "workScheduler", "exported": false
+    }],
     "requestPermissions": [{ "name": "ohos.permission.INTERNET" }]
   }
 }
