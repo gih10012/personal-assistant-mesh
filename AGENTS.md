@@ -93,6 +93,16 @@ capacity is exhausted. Use explicit spawn settings and resume their original
 worktrees/checkpoints. This is not a restriction on AMITA's autonomous network
 model/effort selection or a reason to recreate business/native tasks.
 
+Computer-use exception, explicitly requested by the owner on 2026-10-27:
+prefer `gpt-6.1-terra` / `max` for screen/browser/desktop interaction, including
+this development team and AMITA's own agents. Use a qualified dedicated worker
+when the current coordinator cannot change its own model. Preserve the exact
+task and operation when handing off. Read
+docs/COMPUTER-USE-MODEL-POLICY-2026-10-27.md. AMITA is responsible for evaluating
+new models and configurations itself, using current official releases, actual
+account/tool access, task outcomes and marginal cost; do not wait for the owner
+to name each upgrade or turn this preference into a permanent whitelist.
+
 Independent implementation/research/review uses separate branches/worktrees in
 parallel. Root alone writes coordination files and mutates shared production,
 accounts and desktop during development. Serialize maintenance of one resource;

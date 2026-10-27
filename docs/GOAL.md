@@ -9,6 +9,9 @@
 [当前阶段](AMITA-PHONE-TO-HA-2026-10-27.md)。手机主动出站入网，不开放
 校园无线HDC作长期管理口。完整目标及原工作保留。
 原43任务及依赖、业务任务/操作身份、分支、原生会话/历史和unknown保留。
+本人新增Computer Use偏好：当前优先GPT-6.1 Terra/max，适用于本会话团队与
+网内agent；后续新模型/配置由AMITA自主判断更新，见
+[模型偏好](COMPUTER-USE-MODEL-POLICY-2026-10-27.md)。
 历史目标见 [历史索引](HISTORY.md)，当前方案见 [AMITA实施方案](AMITA-REPLAN-2026-10-26.md)。
 
 ## 完整目标

@@ -18,6 +18,12 @@
     "development_subagent_model": "gpt-6.1-sol",
     "development_subagent_reasoning_effort": "high",
     "model_change_scope": "current development specialists only; original worktrees preserved; AMITA autonomous model policy retained",
+    "computer_use_model": "gpt-6.1-terra",
+    "computer_use_reasoning_effort": "max",
+    "computer_use_contract": "docs/COMPUTER-USE-MODEL-POLICY-2026-10-27.md",
+    "model_refresh_owner": "AMITA evaluates future models/configurations autonomously against official updates, actual access, task outcomes and marginal cost",
+    "leader_model_policy_request_id": "amita-cu-terra-policy-20261027-v1",
+    "leader_model_policy_notification": "prepared; delivery not yet claimed",
     "huawei_account": "owner logged in; real SDK/signing eligibility to be established",
     "implementation": "starting; no new phone deployment or membership claimed",
     "school_evaluation": "paused"
