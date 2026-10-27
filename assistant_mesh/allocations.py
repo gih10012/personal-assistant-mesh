@@ -551,7 +551,7 @@ class Allocations:
                                    task_epoch=allocation['task_epoch'], deadline=allocation['deadline'], admission_required=True))
             return {'dispatch': result, 'execution_authorized': False}
 
-    def accept(self, actor, operation_id, capability_id, epoch, receipt_id):
+    def accept(self, actor, operation_id, capability_id, epoch, receipt_id, admission_check=None):
         for value, label in ((actor, 'actor'), (operation_id, 'operation_id'), (capability_id, 'capability_id'), (receipt_id, 'receipt_id')):
             _name(value, label)
         _epoch(epoch)
@@ -565,6 +565,8 @@ class Allocations:
                 raise Conflict('stale_dispatch_epoch')
             allocation, now = self._allocation(db, operation_id), self.store.clock()
             self._admission(db, allocation, now)
+            if admission_check is not None:
+                admission_check(db)
             if db.execute('SELECT 1 FROM managed_dispatch WHERE provider=? AND receipt_id=?', (actor, receipt_id)).fetchone():
                 raise Conflict('provider_receipt_already_bound')
             db.execute("UPDATE managed_dispatch SET state='accepted',epoch=epoch+1,receipt_id=?,updated=? WHERE operation_id=? AND capability_id=?", (receipt_id, now, operation_id, capability_id))
@@ -573,7 +575,7 @@ class Allocations:
             self._audit(db, actor, 'accept', operation_id, {'capability_id': capability_id})
             return dict(self._dispatch_view(self._dispatch(db, operation_id, capability_id, actor)), accepted_new=True)
 
-    def start(self, actor, operation_id, capability_id, epoch, receipt_id):
+    def start(self, actor, operation_id, capability_id, epoch, receipt_id, admission_check=None):
         for value, label in ((actor, 'actor'), (operation_id, 'operation_id'), (capability_id, 'capability_id'), (receipt_id, 'receipt_id')):
             _name(value, label)
         _epoch(epoch)
@@ -589,6 +591,8 @@ class Allocations:
                 raise Conflict('stale_dispatch_epoch')
             allocation, now = self._allocation(db, operation_id), self.store.clock()
             self._admission(db, allocation, now)
+            if admission_check is not None:
+                admission_check(db)
             db.execute("UPDATE managed_dispatch SET state='running',epoch=epoch+1,updated=? WHERE operation_id=? AND capability_id=?", (now, operation_id, capability_id))
             db.execute("UPDATE managed_allocations SET state='running',epoch=epoch+1,updated=? WHERE operation_id=?", (now, operation_id))
             self._audit(db, actor, 'start', operation_id, {'capability_id': capability_id})

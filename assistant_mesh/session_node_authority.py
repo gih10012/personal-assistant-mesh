@@ -17,7 +17,7 @@ AUTHORIZE = '/v1/session-nodes/authorize'
 
 
 def install(api, config):
-    fields = {'subjects', 'mesh_id', 'ttl_seconds', 'work_lease_seconds'}
+    fields = {'subjects', 'mesh_id', 'ttl_seconds', 'work_lease_seconds', 'node_bindings'}
     if (not isinstance(config, dict) or 'subjects' not in config
             or set(config) - fields):
         raise ValueError('invalid_session_nodes_config')

@@ -1,0 +1,19 @@
+"""Append to the ACTUAL receiver ready chain; Root selects private paths/port.
+
+Do not replace launch_receiver.py or the incumbent media/conversation wrappers.
+Relays stay empty until the real phone produces node_id and owner prepares the
+original Bootstrap challenge/task. Empty nodes publish no usable credential.
+"""
+from assistant_mesh.phone_http import start as start_phone
+from assistant_mesh.phone_updates import UpdateService
+
+
+def phone_ready(api, private_config, updates_directory, update_trust, port):
+    # update_trust contains the offline-created PUBLIC SPKI only. Never put a
+    # private signing key, owner token or personal account credentials here.
+    updates = UpdateService(updates_directory,
+        key_id=update_trust['key_id'],
+        public_key_spki_base64=update_trust['public_key_spki_base64'],
+        origin='https://47-84-73-177.sslip.io')
+    return start_phone(api, private_config, origin='https://47-84-73-177.sslip.io',
+                       port=port, relays=(), updates=updates)

@@ -170,7 +170,7 @@ class LocalSessionNodes:
     Otherwise authorize_work() binds an existing ingress task and operation.
     """
     def __init__(self, backend, subjects, *, mesh_id='amita', ttl_seconds=60,
-                 work_lease_seconds=900):
+                 work_lease_seconds=900, node_bindings=None):
         if (not isinstance(backend, LocalIngressBackend) or backend.source != SOURCE
                 or not isinstance(backend.ingress.store, Store)):
             raise NotConfigured('session_nodes_local_ingress_required')
@@ -184,6 +184,12 @@ class LocalSessionNodes:
         self.ingress, self.store = backend.ingress, backend.ingress.store
         self.mesh_id, self.ttl = _identifier(mesh_id, 'mesh_id'), ttl_seconds
         self.work_lease_seconds = work_lease_seconds
+        self.node_bindings = {} if node_bindings is None else dict(node_bindings)
+        for subject, binding in self.node_bindings.items():
+            if subject not in subjects or not isinstance(binding, dict) or set(binding) != {'session_id', 'node_id'}:
+                raise ValueError('invalid_session_node_binding')
+            for key, value in binding.items():
+                _identifier(value, 'bound_' + key)
         self.subjects = {}
         for subject, policy in subjects.items():
             _identifier(subject, 'session_subject')
@@ -226,6 +232,11 @@ class LocalSessionNodes:
         return binding
 
     def _node_id(self, subject, session_id):
+        binding = self.node_bindings.get(subject)
+        if binding is not None:
+            if binding['session_id'] != session_id:
+                raise PermissionError('session_node_binding_mismatch')
+            return binding['node_id']
         return 'chat-' + _digest([FORMAT, self.owner, self.source, subject, session_id])[:48]
 
     def _public_node_id(self, node_id):
