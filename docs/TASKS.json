@@ -15,6 +15,9 @@
     "old_usage_migrated": false,
     "priority": "all phone prerequisites, Claw readiness report, real-device window, VPS single-point removal",
     "phone_delivery": "maintainable native node; foreground work and system-scheduled application data updates",
+    "development_subagent_model": "gpt-6.1-sol",
+    "development_subagent_reasoning_effort": "high",
+    "model_change_scope": "current development specialists only; original worktrees preserved; AMITA autonomous model policy retained",
     "huawei_account": "owner logged in; real SDK/signing eligibility to be established",
     "implementation": "starting; no new phone deployment or membership claimed",
     "school_evaluation": "paused"

@@ -87,6 +87,12 @@ Normal Leader communication goes through Claw; existing direct authority remains
 
 ## Collaboration and boundaries
 
+For the current phone-to-HA implementation, the owner explicitly selects
+`gpt-6.1-sol` with `high` reasoning for development subagents because Astra
+capacity is exhausted. Use explicit spawn settings and resume their original
+worktrees/checkpoints. This is not a restriction on AMITA's autonomous network
+model/effort selection or a reason to recreate business/native tasks.
+
 Independent implementation/research/review uses separate branches/worktrees in
 parallel. Root alone writes coordination files and mutates shared production,
 accounts and desktop during development. Serialize maintenance of one resource;
