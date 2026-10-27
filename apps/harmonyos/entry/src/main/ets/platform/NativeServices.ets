@@ -14,6 +14,7 @@ import {
   validateChallenge, validateEnrollment, validateHello, validateJoinUrl, validateRelayClientConfig,
   validateRelayResponse, validateRelayUrl, validateResultEnvelope
 } from '../core/Protocol';
+import { ProviderDispatch, WorkConfig, validateWorkDispatch } from '../core/WorkProtocol';
 
 export class NodeSnapshot {
   node_id: string = '';
@@ -31,6 +32,7 @@ export class NativeServices {
   private selectedUri: string = ''; // Picker's temporary grant: NEVER persisted/advertised.
   private busy: boolean = false;
   private foreground: boolean = true;
+  private filePermission: string = '';
   sharingEnabled: boolean = false; // App restarts require explicit local permission again.
 
   constructor(context: common.UIAbilityContext) {
@@ -70,10 +72,67 @@ export class NativeServices {
   }
   setForeground(value: boolean): void {
     this.foreground = value;
-    if (!value) { this.sharingEnabled = false; }
+    if (!value) { this.sharingEnabled = false; this.selectedUri = ''; this.filePermission = ''; }
   }
-  setSharing(value: boolean): void { this.sharingEnabled = value && this.foreground; }
+  setSharing(value: boolean): void {
+    this.sharingEnabled = value && this.foreground;
+    // A withdrawn grant never authorizes a buffered old file result later.
+    if (!this.sharingEnabled) { this.filePermission = ''; }
+    else if (this.selectedUri.length > 0 && this.filePermission.length === 0) {
+      this.filePermission = util.generateRandomUUID();
+    }
+  }
   hasSelectedGrant(): boolean { return this.foreground && this.sharingEnabled && this.selectedUri.length > 0; }
+  workCapabilities(): string[] {
+    if (!this.foreground || !this.sharingEnabled) { return []; }
+    const values: string[] = [this.snapshot.node_id + ':bytes-v1'];
+    if (this.hasSelectedGrant()) { values.push(this.snapshot.node_id + ':selected-file-v1'); }
+    return values;
+  }
+  workPermission(dispatch: ProviderDispatch): string {
+    return dispatch.selection?.action === 'file.read.selected' ? this.filePermission : '';
+  }
+  workAllowed(dispatch: ProviderDispatch, permissionContext?: string): boolean {
+    if (!this.foreground || !this.sharingEnabled || this.busy) { return false; }
+    if (dispatch.selection?.action === 'file.read.selected') {
+      return this.hasSelectedGrant() && this.filePermission.length > 0 &&
+        (permissionContext === undefined || permissionContext === this.filePermission);
+    }
+    return dispatch.selection?.action === 'challenge.bytes.repeat';
+  }
+  verifyWorkBinding(config: WorkConfig, operationId: string, requestHash: string): void {
+    requireValue(this.enrollment !== null && config.node_id === this.snapshot.node_id &&
+      config.mesh_id === (this.enrollment as Enrollment).mesh_id &&
+      config.authority_id === (this.enrollment as Enrollment).join.authority_id,
+      'mesh_work_original_enrollment_required');
+    const matches: JournalRecord[] = this.snapshot.records.filter((row: JournalRecord): boolean =>
+      row.operation_id === operationId && row.request_sha256 === requestHash && row.result_json.length > 0);
+    requireValue(matches.length === 1, 'mesh_work_original_enrollment_result_required');
+  }
+  async executeWorkDispatch(dispatch: ProviderDispatch): Promise<Blob> {
+    validateWorkDispatch(dispatch, this.snapshot.node_id);
+    requireValue(this.workAllowed(dispatch), 'mesh_work_local_permission_required');
+    const permission: string = this.workPermission(dispatch);
+    this.busy = true;
+    try {
+      const codec: util.Base64Helper = new util.Base64Helper();
+      let output: Uint8Array = new Uint8Array(0);
+      if (dispatch.selection?.action === 'file.read.selected') {
+        requireValue(permission === this.filePermission, 'mesh_work_file_grant_changed');
+        output = this.readSelectedComplete(dispatch.selection.workload.max_bytes as number);
+      } else {
+        const value: Blob = dispatch.selection?.workload.input as Blob;
+        const input: Uint8Array = codec.decodeSync(value.base64);
+        requireValue(input.length === value.bytes && codec.encodeToStringSync(input) === value.base64 &&
+          await this.digest(input) === value.sha256, 'mesh_work_input_changed');
+        requireValue(this.foreground && this.sharingEnabled, 'mesh_work_permission_revoked');
+        const repeat: number = dispatch.selection?.workload.repeat as number;
+        output = new Uint8Array(input.length * repeat);
+        for (let i: number = 0; i < repeat; i++) { output.set(input, input.length * i); }
+      }
+      return { bytes: output.length, sha256: await this.digest(output), base64: codec.encodeToStringSync(output) };
+    } finally { this.busy = false; }
+  }
   async bindEnrollment(raw: string): Promise<void> {
     requireValue(!this.busy && this.foreground && raw.length <= 65536, 'mesh_owner_binding_unavailable');
     this.busy = true;
@@ -126,6 +185,7 @@ export class NativeServices {
     requireValue(this.foreground && !this.busy, 'mesh_foreground_required');
     this.busy = true;
     this.sharingEnabled = false;
+    this.filePermission = '';
     try {
       const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
       options.maxSelectNumber = 1;
@@ -135,12 +195,12 @@ export class NativeServices {
       // Selecting is not consent to send; permission toggle remains separate.
     } finally { this.busy = false; this.sharingEnabled = false; }
   }
-  private readSelectedComplete(): Uint8Array {
+  private readSelectedComplete(maxBytes: number = MAX_BYTES): Uint8Array {
     requireValue(this.hasSelectedGrant(), 'mesh_selected_file_consent_required');
     const file: fileIo.File = fileIo.openSync(this.selectedUri, fileIo.OpenMode.READ_ONLY);
     try {
       const size: number = fileIo.statSync(file.fd).size;
-      requireValue(Number.isSafeInteger(size) && size >= 0 && size <= MAX_BYTES, 'mesh_file_budget_exceeded');
+      requireValue(Number.isSafeInteger(size) && size >= 0 && size <= MAX_BYTES && size <= maxBytes, 'mesh_file_budget_exceeded');
       const bytes: ArrayBuffer = new ArrayBuffer(size);
       const read: number = size === 0 ? 0 : fileIo.readSync(file.fd, bytes);
       requireValue(read === size && fileIo.statSync(file.fd).size === size, 'mesh_file_changed_or_incomplete');
