@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 
 FORMAT = 'amita-phone-frozen-candidate/1'
 PATCHED = ('session_nodes', 'session_node_authority', 'allocations')
-ADDITIVE = ('phone_authority', 'phone_http', 'phone_updates')
+ADDITIVE = ('phone_authority', 'phone_http', 'phone_updates', 'phone_owner')
 DEPENDENCIES = ('cloud_http', 'enrollment', 'enrollment_bootstrap', 'enrollment_relay')
 FORBIDDEN = frozenset(('store.py', 'worker.py', 'codex.py', 'server.py', 'entrance.py',
                        'entrance_runtime.py', 'entrance_media.py', 'native_history.py',

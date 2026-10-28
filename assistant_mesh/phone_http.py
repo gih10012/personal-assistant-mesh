@@ -100,6 +100,14 @@ def start(api, config_path, *, origin, port, relays=(), updates=None,
 
     server = ThreadingHTTPServer(('127.0.0.1', port), handler(service, origin, trusted_proxy_peers=trusted_proxy_peers))
     api.phone_authority, api.dispatch = service, dispatch
+    from .phone_owner import install_dispatch
+    try:
+        install_dispatch(api, service, origin)
+    except Exception:
+        api.dispatch = previous
+        del api.phone_authority
+        server.server_close()
+        raise
     thread = threading.Thread(target=server.serve_forever, name='amita-phone-http', daemon=True)
     thread.start()
     return server, service

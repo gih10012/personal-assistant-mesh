@@ -123,7 +123,7 @@ class PhoneAuthorityTests(unittest.TestCase):
         thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=.01), daemon=True)
         thread.start()
         try:
-            for path, expected in (('/phone/node', 200), ('/v1/status', 404), ('/phone/node?operator=1', 404)):
+            for path, expected in (('/phone/node', 200), ('/v1/status', 404), ('/v1/phone/owner/issue', 404), ('/phone/node?operator=1', 404)):
                 conn = http.client.HTTPConnection('127.0.0.1', server.server_port)
                 raw = json.dumps({'action': 'mesh_connect', 'arguments': {
                     'session_id': 'phone-session', 'control_id': 'connect', 'capabilities': ['target']}})

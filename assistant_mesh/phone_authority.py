@@ -92,7 +92,7 @@ class RegistryEnrollment:
         return self._receipt(publication, cap)
 
     def observe(self, publication):
-        return self._receipt(publication, self.registry.describe(publication['capability_id']))
+        return self._receipt(publication, self.registry.describe(publication['capability_id'], include_unavailable=False))
 
 
 class PhoneAuthority:
@@ -109,6 +109,11 @@ class PhoneAuthority:
                                                  clock=self.store.clock), gate))
         self.installed = self._config()
         self._install_bindings(self.installed)
+        previous_request = self.sessions.request
+        def session_request(*args, **kwargs):
+            with self.lock:
+                return previous_request(*args, **kwargs)
+        self.sessions.request = session_request
         with self.store.transaction() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS phone_result_blobs(
                 operation_id TEXT NOT NULL,capability_id TEXT NOT NULL,provider TEXT NOT NULL,
@@ -118,8 +123,8 @@ class PhoneAuthority:
                 node_id TEXT NOT NULL,report_id TEXT NOT NULL,fingerprint TEXT NOT NULL,
                 PRIMARY KEY(node_id,report_id))''')
 
-    def _config(self):
-        value = _private_json(self.config_path)
+    def _config(self, value=None):
+        value = _private_json(self.config_path) if value is None else value
         if (set(value) != {'format', 'enabled', 'nodes'} or value['format'] != 'mesh-phone-authority/1'
                 or type(value['enabled']) is not bool or not isinstance(value['nodes'], list)
                 or len(value['nodes']) > 32):
@@ -128,7 +133,8 @@ class PhoneAuthority:
         fields = {'node_id', 'subject', 'session_id', 'token_sha256', 'enabled',
                   'capabilities', 'scope', 'enrollment'}
         for node in value['nodes']:
-            if not isinstance(node, dict) or set(node) != fields or type(node['enabled']) is not bool:
+            if (not isinstance(node, dict) or not fields <= set(node)
+                    or set(node) - fields - {'visible_nodes'} or type(node['enabled']) is not bool):
                 raise ValueError('invalid_phone_node_config')
             for key in ('node_id', 'subject', 'session_id'):
                 _identifier(node[key], 'phone_' + key)
@@ -145,22 +151,66 @@ class PhoneAuthority:
             seen.add(node['node_id']); subjects.add(node['subject']); tokens.add(digest)
         return value
 
-    def _install_bindings(self, config):
+    def validate_policy(self, subject, session_id, capabilities, visible_nodes, *, observe=False):
+        for key, value in (('subject', subject), ('session_id', session_id)):
+            _identifier(value, 'phone_' + key)
+        if (not isinstance(capabilities, list) or len(capabilities) > 32
+                or len(set(capabilities)) != len(capabilities) or 'leader' in capabilities
+                or not isinstance(visible_nodes, dict) or len(visible_nodes) > 128):
+            raise ValueError('invalid_phone_owner_policy')
+        for cap in capabilities:
+            _identifier(cap, 'phone_capability')
+        with self.store.transaction() as db:
+            for node_id, metadata in visible_nodes.items():
+                _identifier(node_id, 'phone_visible_node')
+                if not isinstance(metadata, dict) or set(metadata) != {'display_name', 'capabilities'}:
+                    raise ValueError('invalid_phone_visible_metadata')
+                _identifier(metadata['display_name'], 'phone_visible_label')
+                caps = metadata['capabilities']
+                if not isinstance(caps, list) or len(caps) > 32 or len(set(caps)) != len(caps):
+                    raise ValueError('invalid_phone_visible_capabilities')
+                for cap in caps:
+                    _identifier(cap, 'phone_visible_capability')
+                row = db.execute('SELECT capabilities FROM nodes WHERE id=?', (node_id,)).fetchone() if observe else None
+                if observe and (row is None or set(caps) - set(json.loads(row['capabilities']))):
+                    raise ValueError('phone_visible_metadata_not_observed')
+
+    def prepare_bindings(self, config):
         if not hasattr(self.sessions, 'node_bindings'):
             raise ValueError('phone_session_node_binding_seam_required')
+        self._config(config)
+        subjects, bindings = dict(self.sessions.subjects), dict(self.sessions.node_bindings)
+        old_nodes = {n['subject']: n for n in getattr(self, 'installed', {}).get('nodes', [])}
+        # Initial installation cannot claim an existing non-phone subject.
+        installed_before = getattr(self, '_bindings_installed', False)
         for node in config['nodes']:
             subject = node['subject']
+            self.validate_policy(subject, node['session_id'], node['capabilities'], node.get('visible_nodes', {}),
+                                 observe=installed_before and subject not in old_nodes)
             binding = {'session_id': node['session_id'], 'node_id': node['node_id']}
             policy = {'capabilities': sorted(set(node['capabilities'])),
-                      'visible_nodes': {}, 'execute_own_requests': False}
-            if subject in self.sessions.subjects and (
-                    self.sessions.subjects[subject] != policy
-                    or self.sessions.node_bindings.get(subject) != binding):
+                      'visible_nodes': {k: v['display_name'] for k, v in node.get('visible_nodes', {}).items()},
+                      'execute_own_requests': False}
+            if subject in subjects and (not installed_before or subject not in old_nodes or
+                    subjects[subject] != policy or bindings.get(subject) != binding):
                 raise ValueError('phone_subject_already_bound')
-            self.sessions.subjects[subject] = policy
-            self.sessions.node_bindings[subject] = binding
+            for other, bound in bindings.items():
+                if other != subject and (bound['node_id'] == node['node_id'] or bound['session_id'] == node['session_id']):
+                    raise ValueError('phone_identity_already_bound')
+            subjects[subject], bindings[subject] = policy, binding
+        return subjects, bindings
+
+    def _install_bindings(self, config):
+        with self.lock:
+            subjects, bindings = self.prepare_bindings(config)
+            self.sessions.subjects, self.sessions.node_bindings = subjects, bindings
+            self._bindings_installed = True
 
     def principal(self, token, scope):
+        with self.lock:
+            return self._principal(token, scope)
+
+    def _principal(self, token, scope):
         if not isinstance(token, str) or not 32 <= len(token) <= 4096:
             raise PermissionError('phone_authentication_required')
         current = self._config()
@@ -177,6 +227,10 @@ class PhoneAuthority:
         raise PermissionError('phone_authentication_required')
 
     def enrollment(self, token, envelope):
+        with self.lock:
+            return self._enrollment(token, envelope)
+
+    def _enrollment(self, token, envelope):
         for relay, gate in self.relays:
             try:
                 relay._principal(token)
@@ -199,6 +253,10 @@ class PhoneAuthority:
         return row
 
     def node(self, token, envelope):
+        with self.lock:
+            return self._node(token, envelope)
+
+    def _node(self, token, envelope):
         node = self.principal(token, 'phone:node')
         if not isinstance(envelope, dict) or set(envelope) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_request')
@@ -207,7 +265,16 @@ class PhoneAuthority:
             raise PermissionError('phone_session_binding_required')
         with self.lock:
             if action in ('connect', 'node_update', 'discover'):
-                return self.sessions.request(self._binding(node), action, value)
+                result = self.sessions.request(self._binding(node), action, value)
+                if action == 'discover':
+                    visible = {self.sessions._public_node_id(k): v for k, v in node.get('visible_nodes', {}).items()}
+                    for item in result['nodes']:
+                        metadata = visible.get(item['node_id'])
+                        if metadata is not None:
+                            item['capabilities'] = sorted(set(item['capabilities']) & set(metadata['capabilities']))
+                            item['roles'] = []
+                            item.pop('tasks', None)  # never leak other projects' task counts
+                return result
             if action == 'work_pull':
                 if set(value) != {'session_id', 'pull_id'}:
                     raise ValueError('invalid_phone_pull')
@@ -318,13 +385,29 @@ def issue_node(bootstrap, registry, *, subject, session_id, capabilities, resour
     """Private owner call only, after real enrollment and separate registry query.
 
     Returns a private node config + one-time export. Caller writes node config
-    atomically and reloads ready hook; no bearer is retained by this service.
+    atomically and installs bindings under the owner lock; no bearer is retained by this service.
     """
     from urllib.parse import urlsplit
     url = urlsplit(resource_url)
     if (url.scheme != 'https' or not url.netloc or url.path != '/phone/node'
             or url.query or url.fragment or url.username or url.password):
         raise ValueError('phone_exact_https_resource_required')
+    enrollment = verified_enrollment(bootstrap, registry)
+    token = secrets.token_urlsafe(48)
+    config = {'node_id': enrollment['node_id'], 'subject': subject, 'session_id': session_id,
+              'capabilities': list(capabilities), 'scope': list(scope), 'enabled': True,
+              'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'enrollment': enrollment}
+    export = {'format': 'mesh-phone-bootstrap/1',
+              'config': {'format': 'mesh-phone-client/1', 'resource_url': resource_url,
+                         'node_id': enrollment['node_id'], 'session_id': session_id,
+                         'mesh_id': enrollment['mesh_id'], 'authority_id': enrollment['authority_id']},
+              'credential': {'kind': 'bearer', 'token': token, 'scope': list(scope)},
+              'enrollment': enrollment}
+    return config, export
+
+
+def verified_enrollment(bootstrap, registry):
+    """Original oracle receipt plus independent current Registry read; no token."""
     operation = bootstrap.config['challenge']['operation_id']
     receipt = bootstrap.receipt(operation)
     status = receipt['status']
@@ -338,17 +421,7 @@ def issue_node(bootstrap, registry, *, subject, session_id, capabilities, resour
     observed = RegistryEnrollment(registry, bootstrap).observe(publication)
     if observed != receipt['registration']:
         raise PermissionError('phone_original_registration_query_mismatch')
-    token = secrets.token_urlsafe(48)
     enrollment = {'operation_id': operation, 'request_sha256': status['request_sha256'],
                   'node_id': status['node_id'], 'mesh_id': status['mesh_id'],
                   'authority_id': publication['authority_id'], 'registration_receipt': observed}
-    config = {'node_id': status['node_id'], 'subject': subject, 'session_id': session_id,
-              'capabilities': list(capabilities), 'scope': list(scope), 'enabled': True,
-              'token_sha256': hashlib.sha256(token.encode()).hexdigest(), 'enrollment': enrollment}
-    export = {'format': 'mesh-phone-bootstrap/1',
-              'config': {'format': 'mesh-phone-client/1', 'resource_url': resource_url,
-                         'node_id': status['node_id'], 'session_id': session_id,
-                         'mesh_id': status['mesh_id'], 'authority_id': publication['authority_id']},
-              'credential': {'kind': 'bearer', 'token': token, 'scope': list(scope)},
-              'enrollment': enrollment}
-    return config, export
+    return enrollment
