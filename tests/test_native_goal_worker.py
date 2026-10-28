@@ -122,9 +122,23 @@ class GoalWorkerTests(unittest.TestCase):
         self.worker.run_once()
         self.assertTrue(self.task['checkpoint']['side_effect_started'])
         self.assertEqual('original-thread', self.task['checkpoint']['thread_id'])
-        self.assertEqual('waiting_backend', self.updates()[-1]['status'])
+        self.assertEqual('needs_review', self.updates()[-1]['status'])
         self.agent.start.assert_called_once()
         self.agent.finish.assert_not_called()
+        self.agent.seal_native_lifecycle.assert_not_called()
+
+    def test_disconnected_native_finish_reports_review_and_preserves_unknown(self):
+        self.agent.finish.side_effect = CodexError('codex_disconnected')
+        self.worker.run_once()
+        final = self.updates()[-1]
+        self.assertEqual('needs_review', final['status'])
+        self.assertEqual(('native_finish', 'codex_disconnected', True, 'unknown'),
+            tuple(final['checkpoint']['runtime_failure'][key]
+                  for key in ('phase', 'category', 'native_start_attempted', 'outcome')))
+        self.assertTrue(self.task['checkpoint']['side_effect_started'])
+        self.assertEqual(('original-task', 4, 'original-thread'),
+                         (self.task['id'], self.task['epoch'], self.task['checkpoint']['thread_id']))
+        self.agent.start.assert_called_once()
         self.agent.seal_native_lifecycle.assert_not_called()
 
     def test_missing_intent_receipt_does_not_reach_native_resume(self):
@@ -154,7 +168,7 @@ class GoalWorkerTests(unittest.TestCase):
         self.agent.seal_native_lifecycle.side_effect = unsafe_seal
         self.worker.run_once()
         self.assertTrue(self.task['checkpoint']['side_effect_started'])
-        self.assertEqual('waiting_backend', self.updates()[-1]['status'])
+        self.assertEqual('needs_review', self.updates()[-1]['status'])
         self.assertEqual(1, self.saved.call_count)
 
     def test_paused_limited_or_blocked_goal_stays_needs_review_not_completed(self):
@@ -185,7 +199,7 @@ class GoalWorkerTests(unittest.TestCase):
         self.agent.finish.side_effect = CodexError('codex_goal_coordination_yield_unavailable')
         self.worker.run_once()
         self.assertTrue(self.task['checkpoint']['side_effect_started'])
-        self.assertEqual('waiting_backend', self.updates()[-1]['status'])
+        self.assertEqual('needs_review', self.updates()[-1]['status'])
         self.assertEqual('codex_goal_coordination_yield_unavailable',
                          self.updates()[-1]['checkpoint']['runtime_failure']['category'])
         self.agent.start.assert_called_once()
@@ -272,7 +286,7 @@ class GoalWorkerTests(unittest.TestCase):
         self.agent.seal_native_lifecycle.assert_not_called()
         self.assertEqual(1, self.saved.call_count)  # Initial guarded state only, no post-drain artifact.
         self.assertTrue(self.task['checkpoint']['side_effect_started'])
-        self.assertEqual('waiting_backend', self.updates()[-1]['status'])
+        self.assertEqual('needs_review', self.updates()[-1]['status'])
         self.assertEqual('codex_native_yield_seal_required',
                          self.updates()[-1]['checkpoint']['runtime_failure']['category'])
         self.assertTrue(all(body['id'] == 'original-task' and body['epoch'] == 4
@@ -299,7 +313,7 @@ class GoalWorkerTests(unittest.TestCase):
         self.worker.run_once()
         self.agent.seal_native_lifecycle.assert_called_once()
         self.assertTrue(self.task['checkpoint']['side_effect_started'])
-        self.assertEqual('waiting_backend', self.updates()[-1]['status'])
+        self.assertEqual('needs_review', self.updates()[-1]['status'])
         self.assertEqual('native_session_fingerprint_changed',
                          self.updates()[-1]['checkpoint']['runtime_failure']['category'])
 

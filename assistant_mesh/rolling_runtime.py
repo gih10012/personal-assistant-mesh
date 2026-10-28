@@ -517,7 +517,10 @@ class Supervisor:
                             or row['death_confirmed'] or LinuxProcess.observe(row['pid'], row['birth']) == 'dead'
                             for row in rows)):
                     db.execute("UPDATE runners SET state='active',note='automatic_recovery' WHERE id=?", (pending['id'],))
-                    db.execute('UPDATE recovery SET activated_at=? WHERE component=?', (now, recovery['component']))
+                    # The recovered runner becomes the authorized owner too.
+                    # Clearing pending after stability must not lose that owner.
+                    db.execute('UPDATE recovery SET source=?,activated_at=? WHERE component=?',
+                               (pending['id'], now, recovery['component']))
                     operation = 'recover-activate-' + pending['id']
                     db.execute('INSERT OR IGNORE INTO operations VALUES(?,?,?,?,?)',
                         (operation, 'activate_recovery', _json({'runner': pending['id']}),
@@ -533,6 +536,21 @@ class Supervisor:
                 if not pending['death_confirmed'] and LinuxProcess.observe(pending['pid'], pending['birth']) != 'dead':
                     continue  # Starting, stale or unknown launch: do not duplicate.
                 db.execute('UPDATE recovery SET pending=NULL,next_attempt=NULL WHERE component=?', (recovery['component'],))
+            source = self.store._runner(db, recovery['source'])
+            # A retained idle owner can reconnect and cooperatively become a
+            # standby. Re-admit only that owner, never a staged/old standby or
+            # an owner drain. Other possibly live/unknown launches still fence
+            # admission; heartbeat timeout alone cannot prove their death.
+            if (source['state'] == 'standby' and source['note'] == 'rollback_standby'
+                    and source['ready'] and source['work'] is None
+                    and LinuxProcess.alive(source['pid'], source['birth'])
+                    and source['heartbeat'] is not None and source['heartbeat'] > now - 10
+                    and all(row['id'] == source['id'] or row['state'] == 'stopped'
+                        or (row['state'] != 'queued' and (row['death_confirmed']
+                            or LinuxProcess.observe(row['pid'], row['birth']) == 'dead'))
+                        for row in rows)):
+                db.execute("UPDATE runners SET state='active',note='automatic_readmission' WHERE id=?", (source['id'],))
+                continue
             # Every non-retired process must be CONFIRMED dead. A healthy
             # standby, slow observation, missing PID receipt or unknown launch
             # blocks a replacement; no timer is a process-death proof.
@@ -540,7 +558,6 @@ class Supervisor:
                     row['state'] != 'stopped' and not row['death_confirmed']
                     and LinuxProcess.observe(row['pid'], row['birth']) != 'dead') for row in rows):
                 continue
-            source = self.store._runner(db, recovery['source'])
             spec = json.loads(source['spec'])
             timing = spec.get('restart_backoff', {'initial': 1, 'maximum': 60})
             delay = min(timing['maximum'], timing['initial'] * 2 ** min(recovery['failures'], 20))

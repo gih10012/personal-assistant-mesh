@@ -180,6 +180,45 @@ class LedgerTests(unittest.TestCase):
             self.store.heartbeat('n', ['leader'])
         self.assertEqual({'pending': 1}, self.store.status()['outbox'])
 
+    def test_unknown_native_failure_is_held_even_without_effect_marker(self):
+        self.store.heartbeat('n', ['leader'])
+        identity = self.store.create_task('unknown native start')
+        task = self.store.claim('n')
+        failure = {'phase': 'native_finish', 'category': 'codex_disconnected',
+                   'native_start_attempted': True, 'outcome': 'unknown', 'attempt_epoch': task['epoch']}
+        checkpoint = dict(task['checkpoint'], side_effect_started=False, runtime_failure=failure,
+                          thread_id='original-thread')
+        self.store.update_task(identity, 'n', task['epoch'], checkpoint, status='waiting_backend')
+        self.assertEqual('needs_review', self.store.task_status(identity)['status'])
+        # Adjacent older Workers may already have written retryable metadata.
+        with self.store.transaction() as db:
+            db.execute("UPDATE tasks SET status='waiting_backend',deadline=0 WHERE id=?", (identity,))
+        self.assertEqual({'requeued': 0}, self.store.retry_waiting())
+        independent = self.store.create_task('independent work', context={'session_scope': 'independent'})
+        claimed = self.store.claim('n')
+        self.assertEqual(independent, claimed['id'])
+        with self.store.transaction() as db:
+            held = db.execute('SELECT * FROM tasks WHERE id=?', (identity,)).fetchone()
+            self.assertEqual(('needs_review', task['epoch']), (held['status'], held['epoch']))
+            self.assertEqual(checkpoint, json.loads(held['checkpoint']))
+        with self.assertRaises(Conflict):
+            with self.store.transaction() as db:
+                self.store._control_task(db, identity, 'resume')
+
+    def test_preflight_quota_failure_retains_original_backend_backoff(self):
+        self.store.heartbeat('n', ['leader'])
+        identity = self.store.create_task('safe quota wait')
+        task = self.store.claim('n')
+        self.store.update_task(identity, 'n', task['epoch'], checkpoint={'runtime_failure': {
+            'native_start_attempted': False, 'outcome': 'unknown', 'category': 'codex_usage_limit_exceeded'}},
+            status='waiting_backend')
+        self.assertEqual('waiting_backend', self.store.task_status(identity)['status'])
+        self.assertIsNone(self.store.claim('n'))
+        self.now += 61
+        self.store.heartbeat('n', ['leader'])
+        retry = self.store.claim('n')
+        self.assertEqual((identity, task['epoch'] + 1), (retry['id'], retry['epoch']))
+
     def test_old_input_is_archived_not_executed_on_activation(self):
         self.store.set('activate_after_ms', 1000)
         self.store.ingest([self.message(create_time_ms=100)], 'c', 'owner', 'bot')

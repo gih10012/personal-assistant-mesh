@@ -15,7 +15,7 @@ import threading
 import time
 import unittest
 
-from assistant_mesh.rolling_runtime import (LinuxProcess, RuntimeStore, request,
+from assistant_mesh.rolling_runtime import (LinuxProcess, RuntimeStore, Supervisor, request,
                                             read_status, validate_spec)
 from assistant_mesh.rolling_worker import ClaimGate, safe_boundary
 
@@ -37,8 +37,8 @@ class RollingRuntimeStoreTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.store = RuntimeStore(self.temporary.name)
 
-    def runner(self, version):
-        identifier = self.store.stage('stage-' + version, spec(self.temporary.name, version))['runner']
+    def runner(self, version, **changes):
+        identifier = self.store.stage('stage-' + version, spec(self.temporary.name, version, **changes))['runner']
         with self.store.transaction() as db:
             db.execute("UPDATE runners SET state='starting',pid=?,birth=? WHERE id=?",
                        (os.getpid(), LinuxProcess.identity(os.getpid()), identifier))
@@ -98,6 +98,63 @@ class RollingRuntimeStoreTests(unittest.TestCase):
         self.assertFalse(self.call(old, 'admit', {'claim': 'denied'})['admitted'])
         self.store.activate('rollback-original', old[0])
         self.assertTrue(self.call(old, 'admit', {'claim': 'accepted'})['admitted'])
+
+    def test_only_idle_current_owner_is_readmitted_after_cooperative_reconnect(self):
+        owner = self.runner('owner', autorestart=True)
+        self.store.activate('activate-owner', owner[0])
+        other = self.runner('other')
+        supervisor = Supervisor(self.temporary.name)
+        with self.store.transaction() as db:
+            db.execute("UPDATE runners SET state='retained' WHERE id=?", (owner[0],))
+            db.execute("UPDATE runners SET state='stopped' WHERE id=?", (other[0],))
+        self.call(owner, 'quiescent')
+        # Each candidate violation or unfenced peer must keep admission closed.
+        cases = [
+            ("UPDATE runners SET work=? WHERE id=?", (json.dumps({'phase': 'unknown'}), owner[0])),
+            ("UPDATE runners SET note='owner_drain' WHERE id=?", (owner[0],)),
+            ("UPDATE runners SET heartbeat=0 WHERE id=?", (owner[0],)),
+            ("UPDATE runners SET birth=NULL WHERE id=?", (owner[0],)),
+            ("UPDATE runners SET state='standby' WHERE id=?", (other[0],)),
+            ("UPDATE runners SET state='active' WHERE id=?", (other[0],)),
+            ("UPDATE runners SET state='retained',pid=NULL,birth=NULL WHERE id=?", (other[0],)),
+            ("UPDATE runners SET state='queued' WHERE id=?", (other[0],)),
+            ("UPDATE recovery SET enabled=0", ()),
+        ]
+        for sql, args in cases:
+            with self.subTest(sql=sql), self.store.transaction() as db:
+                db.execute("UPDATE runners SET state='standby',work=NULL,note='rollback_standby',heartbeat=?,birth=? WHERE id=?",
+                           (time.time(), LinuxProcess.identity(os.getpid()), owner[0]))
+                db.execute("UPDATE runners SET state='stopped' WHERE id=?", (other[0],))
+                db.execute('UPDATE recovery SET enabled=1')
+                db.execute(sql, args)
+                supervisor._recover(db, time.time())
+                self.assertEqual('standby', self.store._runner(db, owner[0])['state'])
+        with self.store.transaction() as db:
+            db.execute('UPDATE recovery SET enabled=1')
+            supervisor._recover(db, time.time())
+            self.assertEqual('active', self.store._runner(db, owner[0])['state'])
+            self.assertEqual(2, db.execute('SELECT COUNT(*) FROM runners').fetchone()[0])
+        self.assertTrue(self.call(owner, 'admit', {'claim': 'first-after-reconnect'})['admitted'])
+
+    def test_automatic_recovery_transfers_owner_before_clearing_pending(self):
+        old = self.runner('source', autorestart=True)
+        self.store.activate('activate-source', old[0])
+        recovered = self.runner('recovered', autorestart=True)
+        supervisor = Supervisor(self.temporary.name)
+        with self.store.transaction() as db:
+            db.execute("UPDATE runners SET state='failed',death_confirmed=1 WHERE id=?", (old[0],))
+            db.execute('UPDATE recovery SET pending=?', (recovered[0],))
+            supervisor._recover(db, time.time())
+            row = db.execute('SELECT * FROM recovery').fetchone()
+            self.assertEqual(recovered[0], row['source'])
+            db.execute('UPDATE recovery SET activated_at=?', (time.time() - 31,))
+            supervisor._recover(db, time.time())
+            self.assertIsNone(db.execute('SELECT pending FROM recovery').fetchone()[0])
+            db.execute("UPDATE runners SET state='retained' WHERE id=?", (recovered[0],))
+        self.call(recovered, 'quiescent')
+        with self.store.transaction() as db:
+            supervisor._recover(db, time.time())
+            self.assertEqual('active', self.store._runner(db, recovered[0])['state'])
 
 
 class _Session:

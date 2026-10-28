@@ -436,18 +436,20 @@ class Store:
             required = set(json.loads(row['required']))
             if not required <= caps or ('leader' in required and (leader['node'] != node or leader['deadline'] <= now)):
                 continue
+            # Fence unknown native starts even if their first effect/checkpoint
+            # ACK was lost. Do this before optional resource admission, which
+            # may otherwise silently skip this row without recording the hold.
+            if isolation.native_work_unsettled(json.loads(row['checkpoint'])):
+                db.execute("UPDATE tasks SET status='needs_review',node=NULL,deadline=NULL WHERE id=?", (row['id'],))
+                self._enqueue(db, 'review-' + row['id'], '任务 ' + row['id'][:8] + ' 执行中断，可能已产生外部效果，等待核对后续接。')
+                continue
             admission = isolation.admit(self, db, row, Conflict)
             if admission is False:
                 continue
             if admission is None and db.execute("SELECT 1 FROM tasks WHERE scope=? AND id<>? AND status='running' AND deadline>? LIMIT 1", (row['scope'], row['id'], now)).fetchone():
                 continue  # one native thread has one active turn, across all nodes
-            # Native effects are not blindly replayed after losing a worker.
-            if json.loads(row['checkpoint']).get('side_effect_started'):
-                db.execute("UPDATE tasks SET status='needs_review',node=NULL,deadline=NULL WHERE id=?", (row['id'],))
-                self._enqueue(db, 'review-' + row['id'], '任务 ' + row['id'][:8] + ' 执行中断，可能已产生外部效果，等待核对后续接。')
-                continue
             unsettled = db.execute("SELECT status,checkpoint FROM tasks WHERE scope=? AND id<>? AND status<>'completed'", (row['scope'], row['id']))
-            if admission is None and any((json.loads(other['checkpoint']).get('side_effect_started')
+            if admission is None and any((isolation.native_work_unsettled(json.loads(other['checkpoint']))
                     or self._yielded_goal_reserves_scope(other['status'], json.loads(other['checkpoint'])))
                    for other in unsettled):
                 # A new task must not sidestep review by resuming the same
@@ -516,6 +518,8 @@ class Store:
         next_checkpoint = json.loads(row['checkpoint'])
         if checkpoint:
             next_checkpoint.update(checkpoint)
+        if status in ('waiting_backend', 'waiting_auth') and isolation.native_work_unsettled(next_checkpoint):
+            status = 'needs_review'
         isolation.validate_native(self, db, row, next_checkpoint, next_checkpoint.get('harness', 'codex'), Conflict)
         lifecycle = next_checkpoint.get('native_lifecycle')
         if (next_checkpoint.get('side_effect_started') is False
@@ -803,7 +807,7 @@ class Store:
             if row['status'] != 'paused':
                 db.execute("UPDATE tasks SET paused_status=status,paused_deadline=deadline,status='paused',node=NULL,epoch=epoch+1,deadline=NULL WHERE id=?", (task_id,))
             return {'id': task_id, 'status': 'paused'}
-        if (checkpoint.get('side_effect_started') or row['status'] == 'needs_review'
+        if (isolation.native_work_unsettled(checkpoint) or row['status'] == 'needs_review'
                 or row['paused_status'] == 'needs_review'):
             raise Conflict('effectful_task_requires_review')
         if row['status'] in ('running', 'pending', 'waiting_children', 'continuing'):
@@ -1155,7 +1159,7 @@ class Store:
             rows = db.execute("SELECT id,checkpoint FROM tasks WHERE status IN ('failed','waiting_backend','waiting_auth')").fetchall()
             count = 0
             for row in rows:
-                if not json.loads(row['checkpoint']).get('side_effect_started'):
+                if not isolation.native_work_unsettled(json.loads(row['checkpoint'])):
                     db.execute("UPDATE tasks SET status='pending',node=NULL,epoch=epoch+1,deadline=NULL WHERE id=?", (row['id'],))
                     count += 1
             return {'requeued': count}

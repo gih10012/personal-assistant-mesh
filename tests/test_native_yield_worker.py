@@ -103,7 +103,7 @@ class NativeYieldWorkerTests(unittest.TestCase):
     def assert_unknown_guarded(self, category, phase=None):
         self.assertTrue(self.task['checkpoint']['side_effect_started'])
         final = self.updates()[-1]
-        self.assertEqual('waiting_backend', final['status'])
+        self.assertEqual('needs_review', final['status'])
         failure = final['checkpoint']['runtime_failure']
         self.assertEqual(category, failure['category'])
         if phase:

@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FORMAT = 'mesh-native-goal-source-candidate/1'
 PINS = {
     'codex.py': '05c493989fd97aacfb064176fb826844d0d134338f4004d4ece3eb27e4f65c4b',
-    'worker.py': 'ad7fc4cc5aa59f51d4aadd293cd31c34a3b8d7424a8d588a0b56f555f1712faf',
-    'store.py': '2ee2b5db192426d2c5882684d76c8f3c8a2b7960b3fb0a679a6500d9836c42c6',
+    'worker.py': '082fe07f42659b256e7447d41586da16d5e096b31b11370fa5189f66974ee943',
+    'store.py': '381fbab992e38fe8a3d1b9f63e52663772e616cabd50d02f3097adf7dacfd090',
     'sessions.py': '61382191eff2f3979b817db0e07b9fc143c2544632362d3de23166304a3e5304',
     'native_goal_observer.py': '0dec24469800087382dd58c550535302e6a4c43ec7c36db64ee6bee450d796c1',
     'native_history.py': '5e06abac895a169a7738b52f8818b2cec64bf3d7e112d92f285a1bf076b7dd6c',
@@ -35,7 +35,7 @@ SCOPE_SHA256 = 'cfb87991cc4cdca28638914c80fc7843db32df91b81f2be632a775c92d34143e
 LAUNCH_SHA256 = '5ddfd0673827f9f446f9a8e9f03c5f2637431ea60345eee85ad7d6cd5e85e667'
 ISOLATION_PINS = {
     'operation_isolation_authority.py': '28fd8a542f860b4c778390705a9438e720e1dcf9686ad9c7e4eb7ddf58790ac5',
-    'operation_isolation.py': '5f58ffaf130a6e86090eec9f7d78267dd1388b0f5a31387f516bcdec105c0c84',
+    'operation_isolation.py': '681bcc7a424d7f606b297c51fff7a89964f2a6b0ebefa3c92d83068f7dfbfebf',
     'task_transaction_adapter.py': '2fd5cfa724a44bd5ce745352205e9a537f6273ddb8ce137351d19b7d7cc03d89',
 }
 
@@ -110,7 +110,8 @@ def scoped_worker_source(text):
 
 def authority_source(text, legacy_text):
     names = ('_yielded_active_goal_checkpoint', '_yielded_goal_reserves_scope',
-             'claim', '_claim_in_db', 'update_task', '_update_task_in_db', 'agent_action')
+             'claim', '_claim_in_db', 'update_task', '_update_task_in_db', 'agent_action',
+             '_control_task', 'retry_waiting')
     methods = [_function(text, 'Store', name) for name in names]
     # A paused yielded owner still owns its active Goal; a new task must not
     # consume that native conversation while the original task is paused.

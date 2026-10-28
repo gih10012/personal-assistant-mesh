@@ -50,9 +50,16 @@ def _goal_reserves(store, row):
             and (checkpoint.get('goal') or {}).get('status') == 'active'))
 
 
+def native_work_unsettled(checkpoint):
+    """A missing effect marker is not proof that an attempted native call failed."""
+    failure = checkpoint.get('runtime_failure') or {}
+    return bool(checkpoint.get('side_effect_started')
+        or (failure.get('native_start_attempted') is True and failure.get('outcome') == 'unknown'))
+
+
 def _occupied(store, row):
     checkpoint = json.loads(row['checkpoint'])
-    return bool(checkpoint.get('side_effect_started') or _goal_reserves(store, row)
+    return bool(native_work_unsettled(checkpoint) or _goal_reserves(store, row)
         or row['status'] == 'running' and row['deadline'] is not None and row['deadline'] > store.clock())
 
 
@@ -204,7 +211,7 @@ def admit(store, db, row, conflict):
                 if _raw(db, other['id']) is None and proofs.get(other['id']) != footprint:
                     return False
         checkpoint = json.loads(row['checkpoint'])
-        if checkpoint.get('side_effect_started') or _unsafe_thread(store, db, row, checkpoint, checkpoint.get('harness', 'codex')):
+        if native_work_unsettled(checkpoint) or _unsafe_thread(store, db, row, checkpoint, checkpoint.get('harness', 'codex')):
             return False
         for native in db.execute('SELECT harness,state FROM native_sessions WHERE scope=?', (grant['native_scope'],)):
             if _unsafe_thread(store, db, row, json.loads(native['state']), native['harness']):
@@ -239,7 +246,8 @@ def make_store_class(base, methods_class):
     from .task_transaction_adapter import _bind, _conflict_class
     from inspect import getattr_static
     conflict = _conflict_class(base)
-    names = ('claim', '_claim_in_db', 'update_task', '_update_task_in_db', 'session_action', 'continue_task')
+    names = ('claim', '_claim_in_db', 'update_task', '_update_task_in_db', 'session_action', 'continue_task',
+             '_control_task', 'retry_waiting')
     namespace = {name: _bind(getattr_static(methods_class, name), conflict) for name in names}
     namespace.update(__module__=__name__, _operation_isolation_version=1,
         _yielded_active_goal_checkpoint=getattr_static(methods_class, '_yielded_active_goal_checkpoint'),

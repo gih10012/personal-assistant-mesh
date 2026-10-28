@@ -1162,7 +1162,9 @@ class Worker:
                     raise CodexError('codex_native_yield_finalize_unconfirmed')
         except (ValueError, OSError, urllib.error.URLError) as exc:
             # Losing the authority must terminate the local runtime before takeover.
-            status = 'waiting_auth' if 'auth' in str(exc) else 'waiting_backend'
+            unknown_native = native_start_attempted or self.current['checkpoint'].get('side_effect_started') is True
+            status = ('needs_review' if unknown_native else
+                      'waiting_auth' if 'auth' in str(exc) else 'waiting_backend')
             code = _runtime_failure_code(exc, phase)
             failure = {'phase': phase, 'category': code,
                        'attempt_epoch': task['epoch'],
@@ -1170,13 +1172,14 @@ class Worker:
                        'outcome': 'unknown', 'automatic_history_overwrite': False,
                        'retry_authorized_by_report': False, 'recovery_policy_changed': False,
                        'native_tools_intercepted': False}
-            # Advisory only: do not clear the actual effect marker, replace
-            # identities, modify history, or change the existing recovery policy.
+            # Preserve the effect marker and original identities/history. Only
+            # preflight failures may enter automatic backend/auth retry.
             self.current['checkpoint']['runtime_failure'] = failure
             try:
                 self.client.request('/v1/task/update', {'id': task['id'], 'epoch': task['epoch'],
                     'checkpoint': {'runtime_failure': failure},
-                    'result': '任务暂未完成：' + code + '。需要恢复认证或运行环境后继续。', 'status': status})
+                    'result': '任务暂未完成：' + code + ('。原生执行结果未知，等待核对原操作。' if unknown_native
+                        else '。需要恢复认证或运行环境后继续。'), 'status': status})
             except (OSError, ValueError, urllib.error.URLError):
                 pass  # stale lease: authority owns recovery, not the abandoned worker
         finally:

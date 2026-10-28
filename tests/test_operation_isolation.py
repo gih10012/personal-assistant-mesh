@@ -96,6 +96,31 @@ class OperationIsolationTests(unittest.TestCase):
                 self.assertEqual(original_native, dict(db.execute('SELECT * FROM native_sessions WHERE scope=?', ('leader:owner',)).fetchone()))
                 self.assertEqual('paused', db.execute('SELECT status FROM tasks WHERE id=?', ('independently-paused',)).fetchone()[0])
 
+    def test_unknown_without_effect_marker_is_fenced_on_current_and_frozen_authority(self):
+        for store, conflict in self.variants():
+            old, _, _ = self.old_unknown(store)
+            failure = {'native_start_attempted': True, 'outcome': 'unknown', 'attempt_epoch': 7}
+            with store.transaction() as db:
+                checkpoint = json.loads(db.execute('SELECT checkpoint FROM tasks WHERE id=?', (old,)).fetchone()[0])
+                checkpoint.update(side_effect_started=False, runtime_failure=failure)
+                db.execute("UPDATE tasks SET status='waiting_backend',deadline=0,checkpoint=? WHERE id=?",
+                           (json.dumps(checkpoint), old))
+            candidate = self.task(store, 'independent-without-effect-marker')
+            self.assertEqual([old], [p['task_id'] for p in isolation.inspect_blockers(store, candidate)])
+            self.assertEqual({'requeued': 0}, store.retry_waiting())
+            with self.assertRaises(conflict):
+                with store.transaction() as db:
+                    store._control_task(db, old, 'resume')
+            self.assertIsNone(store.claim('node', task_ids=[old]))
+            # A distinct authorized grant isolates only the original resource.
+            self.grant(store, candidate)
+            task = store.claim('node')
+            self.assertEqual(candidate, task['id'])
+            with store.transaction() as db:
+                held = db.execute('SELECT * FROM tasks WHERE id=?', (old,)).fetchone()
+                self.assertEqual(('needs_review', 7), (held['status'], held['epoch']))
+                self.assertEqual(checkpoint, json.loads(held['checkpoint']))
+
     def test_changed_proof_and_shared_exclusive_resource_wait_without_blocking_independent_candidates(self):
         for store, conflict in self.variants():
             old, unused_task, unused_native = self.old_unknown(store)
