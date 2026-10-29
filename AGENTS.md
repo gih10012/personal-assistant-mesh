@@ -103,6 +103,14 @@ new models and configurations itself, using current official releases, actual
 account/tool access, task outcomes and marginal cost; do not wait for the owner
 to name each upgrade or turn this preference into a permanent whitelist.
 
+Current development-team override, 2026-10-29: the owner explicitly stopped the
+Terra specialist approach and asked Root to perform Computer Use directly and
+serially. Do not launch another GUI specialist for this phone/signing work.
+Keep the existing native specialist session and private signing materials;
+never run two desktop operators concurrently. This overrides the development
+delegation recommendation above, without imposing a permanent model ban on
+AMITA's autonomous future selections.
+
 Independent implementation/research/review uses separate branches/worktrees in
 parallel. Root alone writes coordination files and mutates shared production,
 accounts and desktop during development. Serialize maintenance of one resource;
