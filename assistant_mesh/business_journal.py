@@ -129,6 +129,29 @@ def seal(value):
     return value
 
 
+def hook_store_type(store_type):
+    """Install the connection hook before an incumbent constructor can write.
+
+    Persisted triggers survive restart. A ready-only instance hook would be
+    too late for a constructor's session-copy or migration transaction.
+    Subclasses retain the same constructor and business methods.
+    """
+    if not isinstance(store_type, type) or not callable(getattr(store_type, 'transaction', None)):
+        raise ValueError('business_replication_store_type_required')
+    original = store_type.transaction
+    if getattr(original, '_business_replication_connection_hook', False):
+        return
+
+    @contextlib.contextmanager
+    def transaction(self):
+        with original(self) as db:
+            db.execute('PRAGMA recursive_triggers=ON')
+            yield db
+
+    transaction._business_replication_connection_hook = True
+    store_type.transaction = transaction
+
+
 def hook_store(store):
     """Retain the original transaction/constructor; enable complete REPLACE capture.
 
@@ -136,7 +159,9 @@ def hook_store(store):
     hook. The persisted trigger guard rejects unhooked covered writes instead
     of silently omitting SQLite's secondary-UNIQUE replacement deletes.
     """
-    if getattr(store, '_business_replication_transaction_hook', False):
+    if (getattr(store, '_business_replication_transaction_hook', False)
+            or getattr(getattr(store.transaction, '__func__', store.transaction),
+                       '_business_replication_connection_hook', False)):
         return
     original = store.transaction
 

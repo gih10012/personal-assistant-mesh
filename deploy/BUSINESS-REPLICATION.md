@@ -27,7 +27,17 @@ not install/restart a service or read production configuration.
    hook_store(store)
    ```
 
-   This retains the original constructor/transaction and only enables
+   Before constructing a Store on later restarts, install the same hook on its
+   original base type (and any independent transaction implementation):
+
+   ```python
+   from assistant_mesh.business_journal import hook_store_type
+   hook_store_type(ActualIncumbentStore)
+   ```
+
+   This keeps persisted triggers compatible with the original constructor's
+   session-copy/migration writes; installing an instance hook only at ready is
+   too late on restart. It retains the original constructor/business logic and enables
    `PRAGMA recursive_triggers=ON` on each connection. It is necessary to capture
    secondary-UNIQUE `INSERT OR REPLACE` deletions. Once capture is installed,
    writes to covered rows from unhooked connections fail explicitly rather
@@ -73,10 +83,13 @@ not install/restart a service or read production configuration.
 ## Authorization and transport
 
 Give the receiving peer an independent narrowly scoped credential through the
-existing server peer configuration: role `agent_peer`, its own `node`, and
+existing server peer configuration: role `replica_reader`, its own `node`, and
 capability `business.replica.read`. Do not copy a personal account credential
 or grant an operator/worker execution role merely for replication. Operators
-may also read; only operators may refresh or suspend.
+may also read; only operators may refresh or suspend. The dedicated reader role
+is rejected by this wrapper on every unrelated route, before incumbent
+discovery/A2A/worker handling. Existing explicitly granted worker/agent_peer
+readers remain compatible, but deployment should use the narrower role.
 
 All routes are private authenticated POSTs, with no query/fragment:
 

@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 
-from assistant_mesh.business_journal import CORE, Journal, PREFIX, canonical, digest, seal
+from assistant_mesh.business_journal import CORE, Journal, PREFIX, canonical, digest, seal, hook_store_type
 from assistant_mesh.business_replica import Replica, ReplicaConflict
 from assistant_mesh.business_replica_api import attach
 from assistant_mesh.store import Store
@@ -80,6 +80,7 @@ class BusinessReplicationTests(unittest.TestCase):
                 self.assertGreater(db.execute('SELECT COUNT(*) FROM ' + PREFIX + 'events').fetchone()[0], 0)
                 raise RuntimeError('rollback')
         self.assertEqual(before, self.journal.status()['head'])
+
         # A raw unhooked connection cannot silently omit replacement deletes.
         db = sqlite3.connect(self.store.path)
         try:
@@ -96,10 +97,36 @@ class BusinessReplicationTests(unittest.TestCase):
             Replica(self.store.path)
         self.assertEqual(before, self.journal.status()['head'])
 
+    def test_persisted_capture_allows_original_constructor_writes_after_restart(self):
+        class RestartedStore(Store):
+            pass
+
+        with self.store.transaction() as db:
+            db.execute('INSERT INTO sessions VALUES(?,?,?,?,?,?)',
+                       ('restart-session', 'node', 'codex', '{}', None, 20))
+        before = self.journal.status()['head']
+        hook_store_type(RestartedStore)
+        method = RestartedStore.transaction
+        hook_store_type(RestartedStore)
+        self.assertIs(method, RestartedStore.transaction)
+        restarted = RestartedStore(self.store.path, recover_inflight=False)
+        with restarted.transaction() as db:
+            self.assertEqual(1, db.execute('PRAGMA recursive_triggers').fetchone()[0])
+            self.assertIsNotNone(db.execute(
+                "SELECT 1 FROM native_sessions WHERE scope='restart-session'").fetchone())
+            self.assertEqual(self.unknown, json.loads(db.execute(
+                "SELECT checkpoint FROM tasks WHERE id='original'").fetchone()[0]))
+            self.assertGreater(db.execute('SELECT MAX(sequence) FROM ' + PREFIX + 'events').fetchone()[0], before)
+
     def test_consistent_streamed_full_rows_blob_and_incremental_unknown_with_scoped_export(self):
         api = types.SimpleNamespace(store=self.store, dispatch=lambda *args: 'original-dispatch')
         journal = attach(api, self.config)
         reader = {'role': 'agent_peer', 'node': 'replica-node', 'capabilities': ['business.replica.read']}
+        dedicated = dict(reader, role='replica_reader')
+        self.assertFalse(api.dispatch('POST', '/v1/business-replica/status', {}, dedicated)['execution_authorized'])
+        for route in ('/v1/tasks', '/v1/mesh/send', '/v1/phone/owner/plan'):
+            with self.assertRaises(PermissionError):
+                api.dispatch('POST', route, {}, dedicated)
         for peer in ({'role': 'viewer'}, {'role': 'worker', 'node': 'node', 'capabilities': ['agent']}):
             with self.assertRaises(PermissionError):
                 api.dispatch('POST', '/v1/business-replica/status', {}, peer)

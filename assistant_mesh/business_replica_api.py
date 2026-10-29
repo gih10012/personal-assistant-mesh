@@ -20,9 +20,11 @@ def attach(api, config):
     def dispatch(method, path, payload, peer):
         parsed = urlsplit(path)
         if not parsed.path.startswith(PREFIX):
+            if peer.get('role') == 'replica_reader':
+                raise PermissionError('business_replication_reader_route_not_authorized')
             return previous(method, path, payload, peer)
         permitted = (peer.get('role') == 'operator' or
-            (peer.get('role') in ('worker', 'agent_peer') and peer.get('node')
+            (peer.get('role') in ('worker', 'agent_peer', 'replica_reader') and peer.get('node')
              and 'business.replica.read' in peer.get('capabilities', [])))
         if not permitted or method != 'POST' or parsed.query or parsed.fragment or not isinstance(payload, dict):
             raise PermissionError('business_replication_read_not_authorized')
