@@ -32,6 +32,19 @@ def attach(api, config):
         action = parsed.path[len(PREFIX):]
         if action == 'status' and not payload:
             return journal.status()
+        if action == 'configure-retention':
+            if peer.get('role') != 'operator':
+                raise PermissionError('business_replication_retention_not_authorized')
+            if {'required_peers'} <= set(payload) <= {'required_peers', 'keep_events', 'batch'}:
+                return journal.configure_retention(payload['required_peers'],
+                    payload.get('keep_events', 1000), payload.get('batch', 200))
+            raise ValueError('business_replication_request_invalid')
+        if action == 'ack':
+            if peer.get('role') != 'replica_reader' or not peer.get('node'):
+                raise PermissionError('business_replication_ack_not_authorized')
+            # No caller-selected peer: the narrow authenticated credential owns
+            # only its own progress assertion, never retention configuration.
+            return journal.acknowledge(peer['node'], payload)
         if action in ('refresh', 'suspend') and not payload:
             if peer.get('role') != 'operator':
                 raise PermissionError('business_replication_refresh_not_authorized')

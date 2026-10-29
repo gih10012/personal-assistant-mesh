@@ -338,7 +338,8 @@ def pull(client, replica, authority, pages=100, limit=100, blob_cache=None):
     if info['authority'] != authority:
         raise ReplicaConflict('business_replica_source_mismatch')
     state = replica.state(authority, info['incarnation'])
-    if not state or state['generation'] != info['generation'] or state['manifest'] != info['manifest']:
+    if (not state or state['generation'] != info['generation'] or state['manifest'] != info['manifest']
+            or state['cursor'] < info.get('retained_after', 0)):
         request = {'action': 'begin'}
         if blob_cache is not None:
             request['blob_mode'] = 'references'
@@ -366,8 +367,9 @@ def pull(client, replica, authority, pages=100, limit=100, blob_cache=None):
         replica.apply(page, authority)
         state = replica.state(authority, info['incarnation'])
         if state['caught_up_to_observed_head']:
-            return state
-    return state
+            return dict(state, ack_protocol=info.get('ack_protocol'),
+                        retained_after=info.get('retained_after', 0))
+    return dict(state, ack_protocol=info.get('ack_protocol'), retained_after=info.get('retained_after', 0))
 
 
 def main():

@@ -14,6 +14,7 @@ import threading
 import time
 
 from .business_blob_cache import BlobCache
+from .business_journal import ACK_FIELDS, ACK_PROTOCOL, digest
 from .business_replica import Replica, pull
 from .config import private_json
 from .worker import Client
@@ -37,6 +38,74 @@ def save_private(path, value):
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _remove_private(path):
+    path.unlink()
+    parent = os.open(str(path.parent), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(parent)
+    finally:
+        os.close(parent)
+
+
+def acknowledge_committed(client, result, state):
+    """Called only AFTER durable Replica apply AND save_private(last-sync).
+
+    The source receives an authenticated receiver assertion, never independent
+    remote-disk proof. Pending content/ID survives a lost response unchanged.
+    """
+    if not {'authority', 'incarnation', 'generation', 'cursor', 'manifest'} <= set(result):
+        return {'status': 'baseline_not_published'}
+    if result.get('ack_protocol') != ACK_PROTOCOL:
+        value = {'status': 'not_supported', 'source_task_claimed': False}
+        save_private(state / 'last-ack.json', value)
+        return value
+    payload = {key: result[key] for key in ('authority', 'incarnation', 'generation', 'cursor')}
+    payload['manifest_sha256'] = result['manifest']['sha256']
+    payload['receipt_id'] = digest(payload)
+    pending_path = state / 'pending-ack.json'
+    pending = private_json(pending_path)['ack'] if pending_path.exists() else None
+    if pending is not None:
+        if (not isinstance(pending, dict) or set(pending) != ACK_FIELDS | {'receipt_id'}
+                or digest({key: pending[key] for key in ACK_FIELDS}) != pending['receipt_id']):
+            raise ValueError('business_replica_pending_ack_invalid')
+        scope = ('authority', 'incarnation', 'generation', 'manifest_sha256')
+        if (any(pending[key] != payload[key] for key in scope)
+                or pending['cursor'] < result.get('retained_after', 0)):
+            # An authenticated generation/floor change requires a newly
+            # committed baseline. Preserve the old original ID as evidence;
+            # never retry it as an assertion about another source generation.
+            save_private(state / 'last-superseded-ack.json', dict(ack=pending,
+                status='new_committed_baseline_required', replacement_receipt_id=payload['receipt_id']))
+            pending = None
+
+    def send(content):
+        try:
+            response = client.request('/v1/business-replica/ack', content)
+            if (not isinstance(response, dict) or response.get('receipt_id') != content['receipt_id']
+                    or response.get('assertion') != 'authenticated_receiver_assertion'
+                    or response.get('remote_disk_independently_verified') is not False):
+                raise ValueError('business_replica_ack_response_invalid')
+            value = dict(status='acknowledged', ack=content, source_response=response,
+                         source_task_claimed=False)
+            save_private(state / 'last-ack.json', value)
+            _remove_private(pending_path)
+            return value
+        except InterruptedError:
+            raise
+        except Exception as error:
+            value = dict(status='pending', receipt_id=content['receipt_id'],
+                         category=type(error).__name__, source_task_claimed=False)
+            save_private(state / 'last-ack.json', value)
+            return value
+
+    if pending is not None:
+        previous = send(pending)
+        if previous['status'] != 'acknowledged' or pending['receipt_id'] == payload['receipt_id']:
+            return previous
+    save_private(pending_path, dict(ack=payload, protocol=ACK_PROTOCOL))
+    return send(payload)
 
 
 def run(client_path, database, authority, state_directory, seed_databases=(),
@@ -83,9 +152,13 @@ def run(client_path, database, authority, state_directory, seed_databases=(),
                                    duration_seconds=time.time() - started,
                                    cache_counts=cache.status(), source_task_claimed=False)
                     save_private(state / 'last-sync.json', receipt)
+                    # Apply committed before pull returned; both this success
+                    # receipt and the pending ACK are fsynced before network ACK.
+                    ack = acknowledge_committed(InterruptibleClient(), result, state)
+                    receipt['ack_status'] = ack['status']
                     print(json.dumps({key: receipt.get(key) for key in (
                         'authority', 'cursor', 'caught_up_to_observed_head', 'observed_at',
-                        'execution_authorized', 'source_task_claimed')}), flush=True)
+                        'execution_authorized', 'source_task_claimed', 'ack_status')}), flush=True)
                     wait = interval
                 except InterruptedError:
                     break

@@ -7,6 +7,7 @@ import base64
 import contextlib
 import hashlib
 import json
+from pathlib import Path
 import re
 import sqlite3
 import threading
@@ -23,6 +24,8 @@ DEPENDENCIES = ('workspace_files', 'external_native_history_files', 'oauth_state
 MAX_BYTES = 6 * 1024 * 1024
 # A single base64 fetch must fit the existing bounded control response too.
 MAX_BLOB_BYTES = 4 * 1024 * 1024
+ACK_PROTOCOL = 'amita-business-replica-ack/1'
+ACK_FIELDS = {'authority', 'incarnation', 'generation', 'cursor', 'manifest_sha256'}
 
 
 def canonical(value):
@@ -178,12 +181,27 @@ def hook_store(store):
 
 
 class Journal:
-    def __init__(self, store, config, snapshot_ttl=300, clock=time.monotonic):
+    def __init__(self, store, config, snapshot_ttl=300, clock=time.monotonic,
+                 timer_factory=threading.Timer):
         self.store, self.config = store, policy(config)
         if not 10 <= snapshot_ttl <= 600:
             raise ValueError('business_replication_snapshot_ttl_invalid')
         self.snapshot_ttl, self.clock = snapshot_ttl, clock
+        self.timer_factory = timer_factory
         self.snapshots, self.lock = {}, threading.Lock()
+
+    @staticmethod
+    def _head(db):
+        # AUTOINCREMENT's committed high water survives journal deletion.
+        sequence = db.execute('SELECT seq FROM sqlite_sequence WHERE name=?', (PREFIX + 'events',)).fetchone()
+        maximum = db.execute('SELECT COALESCE(MAX(sequence),0) FROM ' + PREFIX + 'events').fetchone()[0]
+        return max(maximum, sequence[0] if sequence else 0)
+
+    @staticmethod
+    def _retention(db):
+        row = db.execute('SELECT required_peers,keep_events,batch,retained_after FROM '
+                         + PREFIX + 'retention WHERE singleton=1').fetchone()
+        return dict(required_peers=json.loads(row[0]), keep_events=row[1], batch=row[2], retained_after=row[3])
 
     def _state(self, db):
         row = db.execute('SELECT * FROM ' + PREFIX + 'state WHERE singleton=1').fetchone()
@@ -196,8 +214,11 @@ class Journal:
                 'CREATE TABLE IF NOT EXISTS ' + PREFIX + 'state(singleton INTEGER PRIMARY KEY,authority TEXT NOT NULL,incarnation TEXT NOT NULL,generation INTEGER NOT NULL,start INTEGER NOT NULL,policy TEXT NOT NULL,manifest TEXT NOT NULL)',
                 'CREATE TABLE IF NOT EXISTS ' + PREFIX + 'events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,generation INTEGER NOT NULL,table_name TEXT NOT NULL,operation TEXT NOT NULL,schema_id TEXT NOT NULL)',
                 'CREATE TABLE IF NOT EXISTS ' + PREFIX + 'cells(sequence INTEGER NOT NULL,position INTEGER NOT NULL,value BLOB,PRIMARY KEY(sequence,position)) WITHOUT ROWID',
+                'CREATE TABLE IF NOT EXISTS ' + PREFIX + 'retention(singleton INTEGER PRIMARY KEY,required_peers TEXT NOT NULL,keep_events INTEGER NOT NULL,batch INTEGER NOT NULL,retained_after INTEGER NOT NULL)',
+                'CREATE TABLE IF NOT EXISTS ' + PREFIX + 'acks(peer TEXT PRIMARY KEY,authority TEXT NOT NULL,incarnation TEXT NOT NULL,generation INTEGER NOT NULL,cursor INTEGER NOT NULL,manifest_sha256 TEXT NOT NULL,receipt_id TEXT NOT NULL)',
             ):
                 db.execute(statement)
+            db.execute('INSERT OR IGNORE INTO ' + PREFIX + "retention VALUES(1,'[]',1000,200,0)")
             if db.execute('SELECT 1 FROM ' + PREFIX + 'state').fetchone():
                 if self._state(db)['authority'] != self.config['authority']:
                     raise ValueError('business_replication_authority_changed')
@@ -234,7 +255,7 @@ class Journal:
             if value is not None:
                 actual[table] = value
         generation = 1 if initial else previous['generation'] + 1
-        head = db.execute('SELECT COALESCE(MAX(sequence),0) FROM ' + PREFIX + 'events').fetchone()[0]
+        head = self._head(db)
         manifest = dict(tables=actual, meta_keys=self.config['meta_keys'], excluded=self.config['excluded'],
                         external_dependencies=list(DEPENDENCIES))
         manifest['sha256'] = digest(manifest)
@@ -301,15 +322,99 @@ class Journal:
                 if not db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
                     (PREFIX + table + '_' + action,)).fetchone():
                     issues.append('missing_trigger:' + table + ':' + action)
-        head = db.execute('SELECT COALESCE(MAX(sequence),0) FROM ' + PREFIX + 'events').fetchone()[0]
+        head = self._head(db)
+        retention = self._retention(db)
         return dict(format=FORMAT, authority=state['authority'], incarnation=state['incarnation'],
             generation=state['generation'], generation_start=state['start'], head=head, manifest=manifest,
+            retained_after=retention['retained_after'], ack_protocol=ACK_PROTOCOL,
             coverage_issues=issues, ledger_coverage='declared_tables_current' if not issues else 'degraded',
             redundancy='degraded', execution_authorized=False)
 
     def status(self):
         with self.store.transaction() as db:
             return self._description(db)
+
+    def configure_retention(self, required_peers, keep_events=1000, batch=200):
+        if (not isinstance(required_peers, list) or len(required_peers) > 128
+                or any(not isinstance(peer, str) or not 1 <= len(peer) <= 200
+                       or any(ord(character) < 32 for character in peer) for peer in required_peers)
+                or len(set(required_peers)) != len(required_peers)
+                or type(keep_events) is not int or not 1 <= keep_events <= 2147483647
+                or type(batch) is not int or not 1 <= batch <= 2000):
+            raise ValueError('business_replication_retention_config_invalid')
+        with self.store.transaction() as db:
+            db.execute('UPDATE ' + PREFIX + 'retention SET required_peers=?,keep_events=?,batch=? WHERE singleton=1',
+                       (canonical(sorted(required_peers)), keep_events, batch))
+            return dict(self._retention(db), ack_protocol=ACK_PROTOCOL, coverage_generation_changed=False,
+                        execution_authorized=False)
+
+    def acknowledge(self, peer, payload):
+        if (not isinstance(peer, str) or not peer or not isinstance(payload, dict)
+                or set(payload) != ACK_FIELDS | {'receipt_id'}):
+            raise ValueError('business_replication_ack_invalid')
+        content = {key: payload[key] for key in ACK_FIELDS}
+        if digest(content) != payload['receipt_id']:
+            raise ValueError('business_replication_ack_receipt_invalid')
+        with self.lock:
+            self._cleanup()
+            with self.store.transaction() as db:
+                current = self._description(db)
+                if (payload['authority'] != current['authority']
+                        or payload['incarnation'] != current['incarnation']
+                        or type(payload['generation']) is not int
+                        or payload['generation'] != current['generation']
+                        or payload['manifest_sha256'] != current['manifest']['sha256']):
+                    raise ValueError('business_replication_ack_source_mismatch')
+                cursor = payload['cursor']
+                if (type(cursor) is not int or not current['generation_start'] <= cursor <= current['head']):
+                    raise ValueError('business_replication_ack_cursor_invalid')
+                if cursor < current['retained_after']:
+                    raise ValueError('business_replication_bootstrap_required')
+                known = db.execute('SELECT incarnation,generation,manifest_sha256,cursor,receipt_id FROM '
+                                   + PREFIX + 'acks WHERE peer=?', (peer,)).fetchone()
+                same_source = known and tuple(known[:3]) == (
+                    current['incarnation'], current['generation'], current['manifest']['sha256'])
+                if same_source and cursor < known[3]:
+                    raise ValueError('business_replication_ack_would_regress')
+                duplicate = bool(same_source and known[4] == payload['receipt_id'])
+                db.execute('INSERT OR REPLACE INTO ' + PREFIX + 'acks VALUES(?,?,?,?,?,?,?)',
+                    (peer, current['authority'], current['incarnation'], current['generation'], cursor,
+                     current['manifest']['sha256'], payload['receipt_id']))
+                result = self._prune(db, current)
+                return dict(result, receipt_id=payload['receipt_id'], duplicate=duplicate,
+                    assertion='authenticated_receiver_assertion', remote_disk_independently_verified=False,
+                    execution_authorized=False)
+
+    def _prune(self, db, current):
+        config = self._retention(db)
+        result = dict(pruned_events=0, retained_after=config['retained_after'], head=current['head'])
+        if not config['required_peers']:
+            return dict(result, retention='disabled')
+        cursors = []
+        for peer in config['required_peers']:
+            row = db.execute('SELECT cursor FROM ' + PREFIX + 'acks WHERE peer=? AND authority=? '
+                             'AND incarnation=? AND generation=? AND manifest_sha256=?',
+                (peer, current['authority'], current['incarnation'], current['generation'],
+                 current['manifest']['sha256'])).fetchone()
+            if row is None:
+                return dict(result, retention='required_ack_missing')
+            cursors.append(row[0])
+        boundary = db.execute('SELECT sequence FROM ' + PREFIX + 'events ORDER BY sequence DESC LIMIT 1 OFFSET ?',
+                              (config['keep_events'] - 1,)).fetchone()
+        if boundary is None:
+            return dict(result, retention='minimum_events_retained')
+        ceiling = min(min(cursors), boundary[0] - 1)
+        if self.snapshots:
+            ceiling = min(ceiling, min(value['description']['baseline_cursor'] for value in self.snapshots.values()))
+        rows = db.execute('SELECT sequence FROM ' + PREFIX + 'events WHERE sequence<=? ORDER BY sequence LIMIT ?',
+                          (ceiling, config['batch'])).fetchall()
+        if not rows:
+            return dict(result, retention='watermark_retained')
+        floor = rows[-1][0]
+        db.execute('DELETE FROM ' + PREFIX + 'cells WHERE sequence<=?', (floor,))
+        db.execute('DELETE FROM ' + PREFIX + 'events WHERE sequence<=?', (floor,))
+        db.execute('UPDATE ' + PREFIX + 'retention SET retained_after=? WHERE singleton=1', (floor,))
+        return dict(pruned_events=len(rows), retained_after=floor, head=current['head'], retention='bounded_prune')
 
     @staticmethod
     def _bounds(limit, max_bytes):
@@ -324,6 +429,8 @@ class Journal:
             output = self._description(db)
             if incarnation != output['incarnation'] or generation != output['generation']:
                 raise ValueError('business_replication_bootstrap_required')
+            if after < output['retained_after']:
+                raise ValueError('business_replication_bootstrap_required')
             if not output['generation_start'] <= after <= output['head']:
                 raise ValueError('business_replication_cursor_out_of_range')
             output.update(kind='changes', after=after, cursor=after, records=[])
@@ -331,6 +438,8 @@ class Journal:
             manifest = output['manifest']
             for row in db.execute('SELECT * FROM ' + PREFIX + 'events WHERE sequence>? ORDER BY sequence LIMIT ?', (after, limit)):
                 sequence, gen, table, operation, sid = row
+                if sequence != output['cursor'] + 1:
+                    raise ValueError('business_replication_bootstrap_required')
                 if gen != generation:
                     raise ValueError('business_replication_bootstrap_required')
                 info = manifest['tables'][table]
@@ -346,15 +455,73 @@ class Journal:
                     break
                 output['records'].append(record)
                 output['cursor'], size = sequence, size + length
+            if not output['records'] and after < output['head']:
+                raise ValueError('business_replication_bootstrap_required')
             return seal(output)
 
     def _cleanup(self):
         now = self.clock()
         for identity, value in list(self.snapshots.items()):
             if value['expires'] <= now:
+                self._close_snapshot(identity)
+
+    def _close_snapshot(self, identity):
+        value = self.snapshots.pop(identity, None)
+        if value is None:
+            return
+        timer = value.get('timer')
+        if timer is not None:
+            timer.cancel()
+        try:
+            if value['iterator'] is not None:
+                value['iterator'].close()
+        finally:
+            try:
                 if value['db'] is not None:
                     value['db'].close()
-                del self.snapshots[identity]
+            finally:
+                value.clear()  # release pending rows, last wire page and raw BLOB cache
+
+    def _schedule_expiry(self, identity):
+        value = self.snapshots[identity]
+        timer = self.timer_factory(max(0, value['expires'] - self.clock()),
+                                   lambda: self._expire_snapshot(identity))
+        timer.daemon = True
+        value['timer'] = timer
+        timer.start()
+
+    def _expire_snapshot(self, identity):
+        with self.lock:
+            value = self.snapshots.get(identity)
+            if value is None:
+                return
+            if value['expires'] > self.clock():
+                # An early timer wake retains the SAME absolute deadline.
+                self._schedule_expiry(identity)
+            else:
+                self._close_snapshot(identity)
+
+    def close(self):
+        with self.lock:
+            for identity in list(self.snapshots):
+                self._close_snapshot(identity)
+
+    def _snapshot_owned(self, owner, snapshot_id):
+        value = self.snapshots.get(snapshot_id)
+        if not value or value['owner'] != owner:
+            raise ValueError('business_replication_snapshot_expired_or_unowned')
+        # Another Journal instance may prune the same source. Never finish an
+        # unreadable bridge silently, even when that instance cannot see our
+        # in-memory reader lease. This read is outside the pinned snapshot.
+        db = sqlite3.connect(Path(self.store.path).absolute().as_uri() + '?mode=ro', uri=True, timeout=10)
+        try:
+            floor = self._retention(db)['retained_after']
+        finally:
+            db.close()
+        if floor > value['description']['baseline_cursor']:
+            self._close_snapshot(snapshot_id)
+            raise ValueError('business_replication_bootstrap_required')
+        return value
 
     def snapshot_begin(self, owner, blob_mode='inline'):
         if blob_mode not in ('inline', 'references'):
@@ -364,6 +531,7 @@ class Journal:
             if len(self.snapshots) >= 2:
                 raise ValueError('business_replication_snapshot_capacity')
             db = sqlite3.connect('file:' + self.store.path + '?mode=ro', uri=True, timeout=10, check_same_thread=False)
+            identity = None
             try:
                 db.execute('PRAGMA query_only=ON')
                 db.execute('BEGIN')
@@ -384,21 +552,23 @@ class Journal:
                 self.snapshots[identity] = dict(db=db, description=description, owner=owner,
                     expires=self.clock() + self.snapshot_ttl, after=0, table=0, offset=0,
                     iterator=None, pending=None, last=None, blobs={})
+                self._schedule_expiry(identity)
                 output = dict(description, after=0, cursor=0, rows=[], done=False)
                 if blob_mode == 'references':
                     output['blob_sizes'] = {}
                 return seal(output)
             except BaseException:
-                db.close()
+                if identity in self.snapshots:
+                    self._close_snapshot(identity)
+                else:
+                    db.close()
                 raise
 
     def snapshot_page(self, owner, snapshot_id, after, limit=100, max_bytes=MAX_BYTES):
         self._bounds(limit, max_bytes)
         with self.lock:
             self._cleanup()
-            value = self.snapshots.get(snapshot_id)
-            if not value or value['owner'] != owner:
-                raise ValueError('business_replication_snapshot_expired_or_unowned')
+            value = self._snapshot_owned(owner, snapshot_id)
             if value['last'] and value['last']['after'] == after:
                 return value['last']
             if type(after) is not int or after != value['after'] or value['db'] is None:
@@ -462,6 +632,9 @@ class Journal:
             value['after'] = output['cursor']
             output['done'] = output['cursor'] == output['total_rows']
             if output['done']:
+                if value['iterator'] is not None:
+                    value['iterator'].close()
+                    value['iterator'] = None
                 value['db'].close()
                 value['db'] = None
             value['last'] = seal(output)
@@ -474,9 +647,8 @@ class Journal:
             self._cleanup()
             if not isinstance(snapshot_id, str):
                 raise ValueError('business_replication_snapshot_expired_or_unowned')
-            value = self.snapshots.get(snapshot_id)
-            if (not value or value['owner'] != owner
-                    or value['description'].get('blob_mode') != 'references'):
+            value = self._snapshot_owned(owner, snapshot_id)
+            if value['description'].get('blob_mode') != 'references':
                 raise ValueError('business_replication_snapshot_expired_or_unowned')
             if not isinstance(sha256, str) or sha256 not in value['blobs']:
                 raise ValueError('business_replication_blob_not_in_current_page')
@@ -488,7 +660,5 @@ class Journal:
         with self.lock:
             value = self.snapshots.get(snapshot_id)
             if value and value['owner'] == owner:
-                if value['db'] is not None:
-                    value['db'].close()
-                del self.snapshots[snapshot_id]
+                self._close_snapshot(snapshot_id)
             return {'closed': True}
