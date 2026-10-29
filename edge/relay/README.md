@@ -78,8 +78,12 @@ code. Root must keep the deployed account on Free and confirm actual limits.
    local proxy for CF HTTPS/WSS; upstream loopback remains direct. Omit it on
    the VPS or other hosts without that proxy. Do not point at a remote generic
    API or add wildcard/upstream routes. `relay-host.service.example` is optional
-   Linux supervisor wiring over the portable host client; no deployment occurs
+   Linux supervisor wiring over the host client; no deployment occurs
    merely by building/importing it.
+
+   The wire protocol is platform independent. This Node host currently uses
+   POSIX owner/mode checks and directory fsync; another OS needs its own private
+   storage adapter rather than assuming this exact host is already verified there.
 
    ```sh
    node /PRIVATE/RELAY-RELEASE/host.mjs /PRIVATE/relay-host.json
@@ -103,6 +107,12 @@ retry an unknown mutation. The data is sent to the host over its outbound WSS,
 not through a generic reverse proxy to a fixed VPS address. Root can select a
 qualified authorized member explicitly after a safe maintenance handoff; this
 transport does not make that handoff safe by itself.
+
+Native HTTP clients should identify themselves with a descriptive application
+`User-Agent`, for example `AMITA-Owner-Relay/0.1`. The default Python urllib
+agent can receive 403/1010 from the managed workers.dev layer before this Worker
+runs. [Cloudflare's official 1010 guidance](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/)
+recommends an application identity; a browser user agent is unnecessary.
 
 Authenticated `GET /_mesh/relay/receipt/ORIGINAL_REQUEST_ID` exposes only the
 transport state/status/response hash, with `execution_verified=false`. Raw

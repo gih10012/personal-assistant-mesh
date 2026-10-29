@@ -31,6 +31,9 @@
     "readiness_complete": false,
     "runtime_control_20261028": "both parents updated with original worker PIDs retained; laptop heartbeat restored; unresolved native work not replayed",
     "business_replica_20261029": "two source writers deployed with transactional capture; real 33753-row full-payload baseline stored privately on laptop and caught observed journal head76156; model-independent periodic passive sync deployed and accepted; execution unauthorized, metadata/external-file/OAuth/channel/role/lifecycle dependencies still incomplete",
+    "business_replica_maintenance_20261030": "source snapshot timers and durable peer ACK retention deployed; source generation2 explicitly covers78 tables; passive laptop caught observed head; external recovery dependencies still incomplete",
+    "native_partial_delivery_20261030": "additive maintenance receiver deployed; delivered phone owner-tools task completed along original identity after trusted local-effect/normal-close review; immutable before unknown and full history replicated; S2 remaining waits for selected modern Goal-aware worker",
+    "cloudflare_transport_20261030": "owner GitHub login and official scoped Wrangler OAuth complete; Free Worker/SQLite DO plus independent VPS outbound member deployed; actual original MCP401/challenge and transport receipt verified; ordinary Chat OAuth migration and quorum failover remain incomplete",
     "quorum_network_task_20261029": "actual laptop native Sol task created original worktree then stopped on quota after three tool calls; effort metadata null, needs_review preserved, no zero-effect replay",
     "owner_progress_report_20261028_2000": "Claw accepted; original send ID queried only; delivery not independently verified",
     "school_evaluation": "paused"
