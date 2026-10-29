@@ -156,6 +156,18 @@ observed head, coverage and non-execution status. An intermediate cursor can
 be a prefix of a source transaction; only catch-up to the observed head closes
 that prefix. Catch-up does not attest the live source's current head or HA.
 
+For a Linux host's model-independent background adapter, freeze
+`business_replica_service.py` with the replica modules and the incumbent Client
+dependencies, then use the adjacent service example. It keeps the seed index
+open instead of rescanning the whole historical snapshot every interval. A
+private writer lock prevents two service instances writing one target; each
+cycle reloads the existing scoped client credential. Success/failure receipts
+are private atomic files, and a failed pull retains the last published view.
+Normal shutdown interrupts between requests but still ends the original source
+snapshot. No model, task claim, source role mutation or automatic failover is
+performed. Other host platforms should use their own supervisor adapter over
+the same replica protocol, not depend on systemd or this Linux writer lock.
+
 ## Coverage, refresh and rollback
 
 The manifest includes every covered column/type/default/PK and explicit

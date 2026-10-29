@@ -1,0 +1,15 @@
+[Unit]
+Description=AMITA passive business replica
+After=network-online.target
+
+[Service]
+Type=simple
+# Install an immutable namespace containing the replica service and its dependencies.
+ExecStart=/usr/bin/python3 /PRIVATE/IMMUTABLE-REPLICA/launch_replica.py --client /PRIVATE/client.json --database /PRIVATE/passive.sqlite3 --authority SOURCE_AUTHORITY --state-directory /PRIVATE/state --seed-db /PRIVATE/COMPLETE-OLD-SNAPSHOT.sqlite3 --blob-cache-dir /PRIVATE/blob-cache --interval 15
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=40
+UMask=0077
+
+[Install]
+WantedBy=default.target
