@@ -1,0 +1,15 @@
+{
+  "format": "amita-reverse-relay/1",
+  "client_token_sha256": "REPLACE_WITH_64_LOWERCASE_HEX_SHA256_OF_INDEPENDENT_RELAY_CLIENT_TOKEN",
+  "members": [
+    {"id": "REPLACE_MEMBER_ID", "token_sha256": "REPLACE_WITH_64_LOWERCASE_HEX_SHA256_OF_INDEPENDENT_MEMBER_TOKEN"}
+  ],
+  "routes": [
+    {"method": "POST", "path": "/mcp", "member_id": "REPLACE_MEMBER_ID"},
+    {"method": "OPTIONS", "path": "/mcp", "member_id": "REPLACE_MEMBER_ID"},
+    {"method": "GET", "path": "/.well-known/oauth-protected-resource/mcp", "member_id": "REPLACE_MEMBER_ID"}
+  ],
+  "daily_limit": 2000,
+  "max_receipts": 100000,
+  "timeout_ms": 25000
+}

@@ -1,0 +1,14 @@
+{
+  "format": "amita-reverse-relay/1",
+  "edge_origin": "https://REPLACE-WORKER.REPLACE-SUBDOMAIN.workers.dev",
+  "member_id": "REPLACE_MEMBER_ID",
+  "token_file": "/PRIVATE/independent-relay-member-token.json",
+  "state_directory": "/PRIVATE/relay-attempts",
+  "upstream_origin": "http://127.0.0.1:REPLACE_MCP_PORT",
+  "upstream_host": "REPLACE_ORIGINAL_MCP_RESOURCE_HOST_HEADER",
+  "routes": [
+    {"method": "POST", "path": "/mcp"},
+    {"method": "OPTIONS", "path": "/mcp"},
+    {"method": "GET", "path": "/.well-known/oauth-protected-resource/mcp"}
+  ]
+}

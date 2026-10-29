@@ -1,0 +1,18 @@
+name = "amita-reverse-relay"
+main = "worker.mjs"
+compatibility_date = "2026-10-29"
+workers_dev = true
+
+[vars]
+PUBLIC_ORIGIN = "https://REPLACE-WORKER.REPLACE-SUBDOMAIN.workers.dev"
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "ReverseRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ReverseRelay"]
+
+# Root supplies RELAY_POLICY using wrangler secret put, never source [vars].
+# Keep the account on Workers Free. No paid plan, KV DO, queue or extra service.

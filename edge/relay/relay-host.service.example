@@ -1,0 +1,16 @@
+[Unit]
+Description=AMITA authenticated outbound transport member
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/ABSOLUTE/NODE /PRIVATE/RELAY-RELEASE/host.mjs /PRIVATE/relay-host.json
+WorkingDirectory=/PRIVATE/RELAY-RELEASE
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=35
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
