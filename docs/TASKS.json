@@ -30,6 +30,8 @@
     "phone_certificate_ready_report_20261029": "Claw accepted; same-ID query only; owner asked to connect USB and authorize debugging, not campus wireless HDC; phone currently absent",
     "readiness_complete": false,
     "runtime_control_20261028": "both parents updated with original worker PIDs retained; laptop heartbeat restored; unresolved native work not replayed",
+    "business_replica_20261029": "two source writers deployed with transactional capture; real 33753-row full-payload baseline stored privately on laptop and caught observed journal head76156; model-independent periodic passive sync deployed and accepted; execution unauthorized, metadata/external-file/OAuth/channel/role/lifecycle dependencies still incomplete",
+    "quorum_network_task_20261029": "actual laptop native Sol task created original worktree then stopped on quota after three tool calls; effort metadata null, needs_review preserved, no zero-effect replay",
     "owner_progress_report_20261028_2000": "Claw accepted; original send ID queried only; delivery not independently verified",
     "school_evaluation": "paused"
   },
