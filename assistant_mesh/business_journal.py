@@ -21,6 +21,8 @@ CORE = ('tasks', 'task_continuations', 'interactions', 'steering', 'agent_action
 DEPENDENCIES = ('workspace_files', 'external_native_history_files', 'oauth_state_and_writer',
                 'channel_state_and_fenced_carrier')
 MAX_BYTES = 6 * 1024 * 1024
+# A single base64 fetch must fit the existing bounded control response too.
+MAX_BLOB_BYTES = 4 * 1024 * 1024
 
 
 def canonical(value):
@@ -354,7 +356,9 @@ class Journal:
                     value['db'].close()
                 del self.snapshots[identity]
 
-    def snapshot_begin(self, owner):
+    def snapshot_begin(self, owner, blob_mode='inline'):
+        if blob_mode not in ('inline', 'references'):
+            raise ValueError('business_replication_blob_mode_invalid')
         with self.lock:
             self._cleanup()
             if len(self.snapshots) >= 2:
@@ -375,10 +379,15 @@ class Journal:
                 identity = uuid.uuid4().hex
                 description.update(kind='snapshot', snapshot_id=identity, baseline_cursor=description['head'],
                                    counts=counts, total_rows=sum(counts.values()))
+                if blob_mode == 'references':
+                    description['blob_mode'] = blob_mode
                 self.snapshots[identity] = dict(db=db, description=description, owner=owner,
                     expires=self.clock() + self.snapshot_ttl, after=0, table=0, offset=0,
-                    iterator=None, pending=None, last=None)
-                return seal(dict(description, after=0, cursor=0, rows=[], done=False))
+                    iterator=None, pending=None, last=None, blobs={})
+                output = dict(description, after=0, cursor=0, rows=[], done=False)
+                if blob_mode == 'references':
+                    output['blob_sizes'] = {}
+                return seal(output)
             except BaseException:
                 db.close()
                 raise
@@ -395,6 +404,10 @@ class Journal:
             if type(after) is not int or after != value['after'] or value['db'] is None:
                 raise ValueError('business_replication_snapshot_cursor_invalid')
             output = dict(value['description'], after=after, cursor=after, rows=[], done=False)
+            references = output.get('blob_mode') == 'references'
+            blobs, blob_bytes = {}, 0
+            if references:
+                output['blob_sizes'] = {}
             tables = sorted(output['manifest']['tables'])
             size = len(canonical(output))
             while value['table'] < len(tables) and len(output['rows']) < limit:
@@ -413,15 +426,36 @@ class Journal:
                         + self._filter(table, quote(table), db, output['manifest']['meta_keys']) + ' ORDER BY ' + order)
                 row = value['pending'] if value['pending'] is not None else value['iterator'].fetchone()
                 value['pending'] = row
+                if references and any(isinstance(item, bytes) and len(item) > MAX_BLOB_BYTES for item in row):
+                    if output['rows']:
+                        break
+                    raise ValueError('business_replication_blob_exceeds_fetch_budget')
                 values = [cell(item) for item in row]
                 row_key(info, values)
+                row_blobs = {}
+                if references:
+                    for index, item in enumerate(row):
+                        if isinstance(item, bytes):
+                            identity = hashlib.sha256(item).hexdigest()
+                            values[index] = ['blob_ref', identity]
+                            row_blobs[identity] = item
                 record = dict(index=output['cursor'] + 1, table=table, row=values)
                 length = len(canonical(record))
-                if size + length > max_bytes:
+                new_blobs = {key: item for key, item in row_blobs.items() if key not in blobs}
+                added_bytes = sum(map(len, new_blobs.values()))
+                # Account for the per-page digest/size map on the wire as well.
+                if references:
+                    length += sum(len(canonical(key)) + len(str(len(item))) + 2
+                                  for key, item in new_blobs.items())
+                if size + length > max_bytes or blob_bytes + added_bytes > MAX_BYTES:
                     if not output['rows']:
                         raise ValueError('business_replication_row_exceeds_page_budget')
                     break
                 output['rows'].append(record)
+                blobs.update(new_blobs)
+                blob_bytes += added_bytes
+                if references:
+                    output['blob_sizes'].update({key: len(item) for key, item in new_blobs.items()})
                 output['cursor'], size = record['index'], size + length
                 value['offset'] += 1
                 value['pending'] = None
@@ -431,7 +465,24 @@ class Journal:
                 value['db'].close()
                 value['db'] = None
             value['last'] = seal(output)
+            # Only this exact admitted page may service authenticated fetches.
+            value['blobs'] = blobs
             return value['last']
+
+    def snapshot_blob(self, owner, snapshot_id, sha256):
+        with self.lock:
+            self._cleanup()
+            if not isinstance(snapshot_id, str):
+                raise ValueError('business_replication_snapshot_expired_or_unowned')
+            value = self.snapshots.get(snapshot_id)
+            if (not value or value['owner'] != owner
+                    or value['description'].get('blob_mode') != 'references'):
+                raise ValueError('business_replication_snapshot_expired_or_unowned')
+            if not isinstance(sha256, str) or sha256 not in value['blobs']:
+                raise ValueError('business_replication_blob_not_in_current_page')
+            raw = value['blobs'][sha256]
+            return dict(snapshot_id=snapshot_id, sha256=sha256, size=len(raw),
+                        base64=base64.b64encode(raw).decode('ascii'))
 
     def snapshot_end(self, owner, snapshot_id):
         with self.lock:

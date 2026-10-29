@@ -41,13 +41,15 @@ def attach(api, config):
                                   payload.get('limit', 100), payload.get('max_bytes', MAX_BYTES))
         if action == 'snapshot':
             verb = payload.get('action')
-            if verb == 'begin' and set(payload) == {'action'}:
-                return journal.snapshot_begin(owner)
+            if verb == 'begin' and {'action'} <= set(payload) <= {'action', 'blob_mode'}:
+                return journal.snapshot_begin(owner, payload.get('blob_mode', 'inline'))
             if verb == 'page' and {'action', 'snapshot_id', 'after'} <= set(payload) <= {'action', 'snapshot_id', 'after', 'limit', 'max_bytes'}:
                 return journal.snapshot_page(owner, payload['snapshot_id'], payload['after'],
                     payload.get('limit', 100), payload.get('max_bytes', MAX_BYTES))
             if verb == 'end' and set(payload) == {'action', 'snapshot_id'}:
                 return journal.snapshot_end(owner, payload['snapshot_id'])
+            if verb == 'blob' and set(payload) == {'action', 'snapshot_id', 'sha256'}:
+                return journal.snapshot_blob(owner, payload['snapshot_id'], payload['sha256'])
         raise ValueError('business_replication_request_invalid')
 
     api.dispatch = dispatch

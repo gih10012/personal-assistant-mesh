@@ -4,13 +4,15 @@ No replica row, status, epoch or merged metadata can claim work or authorize an
 external effect. Incarnations and conflicting inputs remain separate evidence.
 """
 import argparse
+import base64
 import contextlib
+import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
 
-from .business_journal import FORMAT, canonical, digest, row_key, uncell
+from .business_journal import FORMAT, MAX_BYTES, MAX_BLOB_BYTES, canonical, cell, digest, row_key, uncell
 
 
 class ReplicaConflict(ValueError):
@@ -31,6 +33,45 @@ def checked_page(page, authority):
     if any(type(page.get(key)) is not int or page[key] < 0 for key in ('generation', 'head', 'after', 'cursor')):
         raise ReplicaConflict('business_replica_cursor_invalid')
     return page
+
+
+def checked_blob(raw, sha256, size):
+    if (not isinstance(raw, bytes) or len(raw) != size
+            or hashlib.sha256(raw).hexdigest() != sha256):
+        raise ReplicaConflict('business_replica_blob_content_conflict')
+    return raw
+
+
+def resolved_snapshot_rows(page, resolver):
+    """Resolve only after checking the original wire hash; never reseal a page."""
+    sizes = page.get('blob_sizes')
+    if (not isinstance(sizes, dict) or not isinstance(page.get('rows'), list)
+            or len(page['rows']) > 500
+            or any(not isinstance(key, str) or len(key) != 64
+                   or any(character not in '0123456789abcdef' for character in key)
+                   or type(size) is not int or not 0 <= size <= MAX_BLOB_BYTES
+                   for key, size in sizes.items())
+            or sum(sizes.values()) > MAX_BYTES):
+        raise ReplicaConflict('business_replica_blob_description_invalid')
+    referenced = set()
+    for item in page['rows']:
+        info, row = page['manifest']['tables'][item['table']], item['row']
+        if not isinstance(row, list) or len(row) != len(info['columns']):
+            raise ReplicaConflict('business_replica_blob_row_invalid')
+        for value in row:
+            if not isinstance(value, list) or len(value) != 2:
+                raise ReplicaConflict('business_replica_blob_row_invalid')
+            if value[0] == 'blob_ref':
+                if not isinstance(value[1], str) or value[1] not in sizes:
+                    raise ReplicaConflict('business_replica_blob_description_invalid')
+                referenced.add(value[1])
+    if referenced != set(sizes):
+        raise ReplicaConflict('business_replica_blob_description_invalid')
+    if referenced and not callable(resolver):
+        raise ReplicaConflict('business_replica_blob_dependency_missing')
+    blobs = {key: cell(checked_blob(resolver(key, sizes[key]), key, sizes[key])) for key in referenced}
+    return [dict(item, row=[blobs[value[1]] if value[0] == 'blob_ref' else value
+                            for value in item['row']]) for item in page['rows']]
 
 
 class Replica:
@@ -101,12 +142,22 @@ class Replica:
                      execution_authorized=False, redundancy='degraded')
         return value
 
-    def apply(self, page, authority):
+    def apply(self, page, authority, blob_resolver=None):
         try:
             checked_page(page, authority)
+            rows = None
+            if page['kind'] == 'snapshot' and page.get('blob_mode', 'inline') == 'references':
+                # A lost apply response must replay without fetching dependencies
+                # from an expired source page. Network/cache reads take place
+                # outside the SQLite write transaction.
+                with self.transaction() as db:
+                    duplicate = self._snapshot_duplicate(db, page)
+                if duplicate is not None:
+                    return duplicate
+                rows = resolved_snapshot_rows(page, blob_resolver)
             with self.transaction() as db:
                 if page['kind'] == 'snapshot':
-                    return self._snapshot(db, page)
+                    return self._snapshot(db, page, rows)
                 if page['kind'] == 'changes':
                     return self._changes(db, page)
                 raise ReplicaConflict('business_replica_page_kind_invalid')
@@ -119,9 +170,21 @@ class Replica:
                            (authority, reason, canonical(page)))
             raise ReplicaConflict(reason) from None
 
-    def _snapshot(self, db, page):
+    @staticmethod
+    def _snapshot_duplicate(db, page):
+        receipt = db.execute('SELECT fingerprint FROM replica_snapshot_receipts WHERE snapshot_id=? AND after_cursor=?',
+                             (page['snapshot_id'], page['after'])).fetchone()
+        if receipt:
+            if receipt[0] != page['sha256']:
+                raise ReplicaConflict('business_replica_snapshot_replay_conflict')
+            return {'applied': False, 'duplicate': True, 'cursor': page['cursor']}
+        return None
+
+    def _snapshot(self, db, page, resolved_rows=None):
         authority, incarnation, identity = page['authority'], page['incarnation'], page['snapshot_id']
-        if (type(page['done']) is not bool or type(page['baseline_cursor']) is not int
+        mode = page.get('blob_mode', 'inline')
+        if (mode not in ('inline', 'references')
+                or type(page['done']) is not bool or type(page['baseline_cursor']) is not int
                 or type(page['total_rows']) is not int or page['baseline_cursor'] != page['head']
                 or set(page['counts']) != set(page['manifest']['tables'])
                 or any(type(count) is not int or count < 0 for count in page['counts'].values())
@@ -129,17 +192,15 @@ class Replica:
             raise ReplicaConflict('business_replica_snapshot_description_invalid')
         if db.execute('SELECT 1 FROM replica_sources WHERE authority=? AND incarnation<>?', (authority, incarnation)).fetchone():
             raise ReplicaConflict('business_replica_incarnation_changed_requires_separate_replica')
-        receipt = db.execute('SELECT fingerprint FROM replica_snapshot_receipts WHERE snapshot_id=? AND after_cursor=?',
-                             (identity, page['after'])).fetchone()
-        if receipt:
-            if receipt[0] != page['sha256']:
-                raise ReplicaConflict('business_replica_snapshot_replay_conflict')
-            return {'applied': False, 'duplicate': True, 'cursor': page['cursor']}
+        duplicate = self._snapshot_duplicate(db, page)
+        if duplicate is not None:
+            return duplicate
         source = self._source(db, authority, incarnation)
         if source and (page['baseline_cursor'] < source['cursor'] or page['head'] < source['head']):
             raise ReplicaConflict('business_replica_snapshot_would_regress')
         description = {key: page[key] for key in ('authority', 'incarnation', 'snapshot_id', 'generation',
             'baseline_cursor', 'manifest', 'counts', 'total_rows')}
+        description['blob_mode'] = mode
         staging = db.execute('SELECT * FROM replica_snapshots WHERE authority=? AND incarnation=?', (authority, incarnation)).fetchone()
         if not staging or staging['snapshot_id'] != identity:
             if page['after'] != 0:
@@ -154,7 +215,7 @@ class Replica:
             cursor = staging['cursor']
         if page['after'] != cursor:
             raise ReplicaConflict('business_replica_snapshot_cursor_gap')
-        for item in page['rows']:
+        for item in (page['rows'] if resolved_rows is None else resolved_rows):
             if type(item['index']) is not int or item['index'] != cursor + 1:
                 raise ReplicaConflict('business_replica_snapshot_row_gap')
             info = page['manifest']['tables'][item['table']]
@@ -246,7 +307,30 @@ class Replica:
         return canonical(dict(columns=[col['name'] for col in info['columns']], row=row))
 
 
-def pull(client, replica, authority, pages=100, limit=100):
+def snapshot_blob_resolver(client, cache, snapshot_id):
+    def resolve(sha256, size):
+        raw = cache.get(sha256, size)
+        if raw is not None:
+            return checked_blob(raw, sha256, size)
+        result = client.request('/v1/business-replica/snapshot',
+            dict(action='blob', snapshot_id=snapshot_id, sha256=sha256))
+        if (not isinstance(result, dict) or set(result) != {'snapshot_id', 'sha256', 'size', 'base64'}
+                or result['snapshot_id'] != snapshot_id or result['sha256'] != sha256
+                or type(result['size']) is not int or result['size'] != size
+                or not isinstance(result['base64'], str)
+                or len(result['base64']) > ((MAX_BLOB_BYTES + 2) // 3) * 4):
+            raise ReplicaConflict('business_replica_blob_response_invalid')
+        try:
+            raw = base64.b64decode(result['base64'], validate=True)
+        except ValueError:
+            raise ReplicaConflict('business_replica_blob_response_invalid') from None
+        checked_blob(raw, sha256, size)
+        cache.put(sha256, raw)
+        return raw
+    return resolve
+
+
+def pull(client, replica, authority, pages=100, limit=100, blob_cache=None):
     """One bounded authenticated synchronization; no task/model health requests."""
     if type(pages) is not int or not 1 <= pages <= 10000:
         raise ValueError('business_replica_page_count_invalid')
@@ -255,12 +339,20 @@ def pull(client, replica, authority, pages=100, limit=100):
         raise ReplicaConflict('business_replica_source_mismatch')
     state = replica.state(authority, info['incarnation'])
     if not state or state['generation'] != info['generation'] or state['manifest'] != info['manifest']:
-        start = client.request('/v1/business-replica/snapshot', {'action': 'begin'})
+        request = {'action': 'begin'}
+        if blob_cache is not None:
+            request['blob_mode'] = 'references'
+        start = client.request('/v1/business-replica/snapshot', request)
         cursor = 0
         try:
+            checked_page(start, authority)
+            if blob_cache is not None and start.get('blob_mode') != 'references':
+                raise ReplicaConflict('business_replica_blob_mode_not_accepted')
             for _ in range(pages):
                 page = client.request('/v1/business-replica/snapshot', dict(action='page', snapshot_id=start['snapshot_id'], after=cursor, limit=limit))
-                replica.apply(page, authority)
+                resolver = (snapshot_blob_resolver(client, blob_cache, start['snapshot_id'])
+                            if blob_cache is not None else None)
+                replica.apply(page, authority, blob_resolver=resolver)
                 cursor = page['cursor']
                 if page['done']:
                     break
@@ -286,12 +378,22 @@ def main():
     parser.add_argument('--table')
     parser.add_argument('--client', help='private read-only replication client JSON; absent means local query')
     parser.add_argument('--pages', type=int, default=100)
+    parser.add_argument('--seed-db', action='append', default=[],
+                        help='owned read-only SQLite seed; indexes only session_chunks(id,part,body)')
+    parser.add_argument('--blob-cache-dir', help='private local cache directory for fetched snapshot BLOBs')
     args = parser.parse_args()
     replica = Replica(args.database)
     if args.client:
         from .config import private_json
         from .worker import Client
-        result = pull(Client(private_json(args.client)), replica, args.authority, args.pages)
+        if args.seed_db or args.blob_cache_dir:
+            from .business_blob_cache import BlobCache
+            with BlobCache(args.seed_db, args.blob_cache_dir) as cache:
+                result = pull(Client(private_json(args.client)), replica, args.authority,
+                              args.pages, blob_cache=cache)
+                result = dict(result, blob_cache=cache.status())
+        else:
+            result = pull(Client(private_json(args.client)), replica, args.authority, args.pages)
     elif args.table and args.incarnation:
         # CLI serializes BLOB values back to explicit typed cells for safe JSON.
         from .business_journal import cell
