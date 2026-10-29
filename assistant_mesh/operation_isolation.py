@@ -247,7 +247,7 @@ def make_store_class(base, methods_class):
     from inspect import getattr_static
     conflict = _conflict_class(base)
     names = ('claim', '_claim_in_db', 'update_task', '_update_task_in_db', 'session_action', 'continue_task',
-             '_control_task', 'retry_waiting')
+             '_control_task', 'retry_waiting', '_assert_continuation_quiescent')
     namespace = {name: _bind(getattr_static(methods_class, name), conflict) for name in names}
     namespace.update(__module__=__name__, _operation_isolation_version=1,
         _yielded_active_goal_checkpoint=getattr_static(methods_class, '_yielded_active_goal_checkpoint'),

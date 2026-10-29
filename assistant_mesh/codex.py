@@ -757,6 +757,8 @@ class Codex:
             raise CodexError('codex_native_goal_snapshot_invalid')
         self._validate_goal_snapshot(response['goal'])
         goal = response['goal']
+        from .native_partial_continuation import validate_resume_goal
+        validate_resume_goal(checkpoint, goal)
         expected = self.native_lifecycle.get('expected_goal_objective')
         if goal is not None and expected is not None and goal['objective'] != expected:
             raise CodexError('codex_native_goal_objective_conflict')

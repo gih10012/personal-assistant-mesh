@@ -34,6 +34,9 @@ class API:
         if ingress_config is not None and not config.get('node_id'):
             raise ValueError('ingress_requires_authority_identity')
         for peer in config['peers']:
+            if peer.get('role') == 'native_maintenance':
+                from .native_partial_continuation import maintainer
+                maintainer(peer)
             if peer.get('role') == 'channel_carrier':
                 if carrier_config is None:
                     raise ValueError('channel_carrier_not_configured')
@@ -45,6 +48,9 @@ class API:
         self.peers = [(read_secret(peer['token_file']), peer) for peer in config['peers']]
         for index, (secret, peer) in enumerate(self.peers):
             for previous_secret, previous_peer in self.peers[:index]:
+                if ('native_maintenance' in (peer.get('role'), previous_peer.get('role'))
+                        and hmac.compare_digest(secret, previous_secret)):
+                    raise ValueError('ambiguous_native_maintenance_credential')
                 if ('channel_carrier' in (peer.get('role'), previous_peer.get('role'))
                         and hmac.compare_digest(secret, previous_secret)):
                     raise ValueError('ambiguous_channel_carrier_credential')
@@ -122,6 +128,10 @@ class API:
 
     def dispatch(self, method, path, payload, peer):
         role, node = peer.get('role'), peer.get('node')
+        from .native_partial_continuation import dispatch as partial_dispatch
+        partial = partial_dispatch(self, method, path, payload, peer)
+        if partial is not NotImplemented:
+            return partial
         worker = role == 'worker' and bool(node)
         parsed = urlsplit(path)
         query = parse_qs(parsed.query, keep_blank_values=True)

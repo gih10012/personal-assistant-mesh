@@ -157,6 +157,10 @@ def validate_spec(spec):
 
 class RuntimeStore:
     def __init__(self, directory):
+        # Installed deployment code may resolve an immutable acceptance from
+        # the dedicated native maintenance authority. Never load a resolver,
+        # credential or receipt body supplied by a model/socket request.
+        self.retirement_resolver = None
         self.directory = private_directory(directory)
         self.path = self.directory / 'runtime.sqlite3'
         if self.path.is_symlink():
@@ -306,6 +310,11 @@ class RuntimeStore:
                     raise ValueError('runtime_runner_not_registered')
                 db.execute('UPDATE runners SET heartbeat=? WHERE id=?', (time.time(), runner))
                 work = json.loads(row['work']) if row['work'] else None
+                if (action == 'heartbeat' and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='native_closed_runner_retirements'").fetchone()
+                        and db.execute('SELECT 1 FROM native_closed_runner_retirements WHERE runner=?', (runner,)).fetchone()):
+                    # A closed-runtime owner retirement ends only this adapter.
+                    # Its unknown work remains byte-for-byte in the journal.
+                    return {'state': 'stopped', 'busy': work is not None, 'protocol': PROTOCOL}
                 if action == 'admit':
                     if work and work.get('phase') == 'claiming' and work.get('claim') == payload.get('claim'):
                         return {'admitted': True, 'claim': work['claim']}
@@ -360,6 +369,71 @@ class RuntimeStore:
                     raise ValueError('runtime_action_unknown')
             found = self._runner(db, runner)
             return {'state': found['state'], 'busy': found['work'] is not None, 'protocol': PROTOCOL}
+
+    def retire_closed_runner(self, operation, runner, acceptance_id):
+        """Cooperative exit, never a checkpoint, signal, or business settlement.
+
+        A trusted resolver is REQUIRED and default-off. A JSON completed=true
+        or caller-supplied acceptance body cannot authorize retirement.
+        """
+        _name(operation); _name(runner); _name(acceptance_id)
+        original_request = {'runner': runner, 'acceptance_id': acceptance_id}
+        with self.transaction() as db:
+            previous = db.execute('SELECT * FROM operations WHERE id=?', (operation,)).fetchone()
+            if previous:
+                if previous['kind'] != 'retire_closed' or previous['request'] != _json(original_request):
+                    raise ValueError('runtime_operation_conflict')
+                return json.loads(previous['result'])
+        if not callable(self.retirement_resolver):
+            raise ValueError('runtime_retirement_authority_not_installed')
+        proof = self.retirement_resolver(acceptance_id)
+        if (not isinstance(proof, dict) or proof.get('protocol') != 'owner-native-partial-continuation/1'
+                or proof.get('acceptance_id') != acceptance_id or proof.get('accepted') is not True
+                or proof.get('evidence_basis') != 'trusted-owner-reviewed-local-effects-and-runtime-closure'):
+            raise ValueError('runtime_retirement_acceptance_required')
+        closure = proof.get('closure')
+        if (not isinstance(closure, dict) or closure.get('runner_id') != runner
+                or closure.get('kind') != 'owner-observed-native-runtime-closed'
+                or closure.get('native_owner_live') is not False
+                or closure.get('owned_children_closed') is not True or closure.get('forced_cleanup') is not False
+                or closure.get('thread_id') != proof.get('source_thread_id')
+                or closure.get('turn_id') != proof.get('source_turn_id')):
+            raise ValueError('runtime_retirement_closure_required')
+
+        def apply(db):
+            import hashlib
+            row = self._runner(db, runner)
+            work = json.loads(row['work']) if row['work'] else None
+            if (not isinstance(work, dict) or work.get('phase') != 'unknown'
+                    or work.get('task') != {'id': proof.get('task_id'), 'epoch': proof.get('source_epoch')}
+                    or row['pid'] != closure.get('runner_pid') or row['birth'] != closure.get('runner_birth')
+                    or hashlib.sha256(_json(work).encode('utf8')).hexdigest() != closure.get('runtime_work_sha256')
+                    or row['state'] not in ('active', 'retained', 'draining')):
+                raise ValueError('runtime_retirement_original_work_changed')
+            if LinuxProcess.observe(row['pid'], row['birth']) != 'alive':
+                raise ValueError('runtime_retirement_process_identity_unavailable')
+            try:
+                children = Path('/proc/{}/task/{}/children'.format(row['pid'], row['pid'])).read_text().split()
+            except OSError:
+                raise ValueError('runtime_retirement_children_unavailable') from None
+            if children:
+                raise ValueError('runtime_retirement_owned_children_live')
+            db.execute('''CREATE TABLE IF NOT EXISTS native_closed_runner_retirements(
+                runner TEXT PRIMARY KEY,acceptance_id TEXT NOT NULL UNIQUE,
+                original_work TEXT NOT NULL,original_state TEXT NOT NULL,
+                receipt TEXT NOT NULL,created REAL NOT NULL)''')
+            for action in ('UPDATE', 'DELETE'):
+                db.execute('CREATE TRIGGER IF NOT EXISTS native_closed_runner_retirements_no_' + action.lower()
+                           + ' BEFORE ' + action + ' ON native_closed_runner_retirements'
+                           + " BEGIN SELECT RAISE(ABORT,'runtime retirement receipts are append only'); END")
+            db.execute('INSERT INTO native_closed_runner_retirements VALUES(?,?,?,?,?,?)',
+                       (runner, acceptance_id, row['work'], row['state'], _json(proof), time.time()))
+            db.execute("UPDATE runners SET state='draining',note='owner_closed_runtime_retirement' WHERE id=?", (runner,))
+            db.execute('UPDATE recovery SET enabled=0,next_attempt=NULL WHERE component=? AND (source=? OR pending=?)',
+                       (row['component'], runner, runner))
+            return {'runner': runner, 'acceptance_id': acceptance_id, 'cooperative_exit_requested': True,
+                    'original_work_retained': True, 'business_guard_changed': False, 'signals_sent': False}
+        return self.operation(operation, 'retire_closed', original_request, apply)
 
     def status(self):
         # Also usable when the supervisor/runner is down. No model/account IO.
@@ -466,6 +540,8 @@ class Supervisor:
             return self.store.activate(body['operation'], body['runner'])
         if action == 'drain':
             return self.store.drain(body['operation'], body['runner'])
+        if action == 'retire_closed':
+            return self.store.retire_closed_runner(body['operation'], body['runner'], body['acceptance_id'])
         raise ValueError('runtime_action_unknown')
 
     def _launch_one(self):

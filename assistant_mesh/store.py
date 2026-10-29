@@ -652,6 +652,53 @@ class Store:
         with self.transaction() as db:
             return self._control_task(db, task_id, command)
 
+    def _assert_continuation_quiescent(self, db, row):
+        """Shared exact-resource checks for settled and owner-reviewed continuation."""
+        related = isolation.related(db, row, Conflict)
+        busy = [other for other in related if other['id'] != row['id'] and other['status'] != 'completed']
+        if any((other['status'] == 'running' and other['deadline'] is not None
+                and other['deadline'] > self.clock())
+               or isolation.native_work_unsettled(json.loads(other['checkpoint']))
+               for other in busy):
+            raise Conflict('continuation_scope_not_quiescent')
+        # A completed task with a false checkpoint can still own a managed
+        # hold. Check the original family AND all tasks in the shared native
+        # scope, including completed peers, without blocking unrelated scopes.
+        # UNION also terminates accidental parent cycles.
+        family = '''WITH RECURSIVE family(id) AS (
+            SELECT ? UNION SELECT t.id FROM tasks t JOIN family f ON t.parent_id=f.id) '''
+        children = db.execute(family + '''SELECT t.id,t.status,t.checkpoint FROM tasks t
+            JOIN family f ON f.id=t.id WHERE t.id<>?''', (row['id'], row['id'])).fetchall()
+        if any(child['status'] not in ('completed', 'failed')
+               or isolation.native_work_unsettled(json.loads(child['checkpoint'])) for child in children):
+            raise Conflict('continuation_children_not_settled')
+        linked = family + ''', linked(id) AS (
+            SELECT id FROM family UNION SELECT id FROM tasks WHERE id IN (''' + ','.join('?' for other in related) + ')) '
+        linked_parameters = (row['id'],) + tuple(other['id'] for other in related)
+        tables = {item[0] for item in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'managed_allocations' in tables:
+            # Allocations settle as completed; stopped is a dispatch outcome
+            # with a provider-reported quiescence settlement, not a timeout.
+            if db.execute(linked + '''SELECT 1 FROM managed_allocations a JOIN linked l ON l.id=a.task_id
+                    WHERE a.state NOT IN ('completed','cancelled','expired') LIMIT 1''',
+                          linked_parameters).fetchone():
+                raise Conflict('continuation_managed_effect_not_settled')
+            if ('managed_dispatch' in tables and db.execute(linked + '''SELECT 1 FROM managed_dispatch d
+                    JOIN managed_allocations a ON a.operation_id=d.operation_id
+                    JOIN linked l ON l.id=a.task_id
+                    WHERE (d.state NOT IN ('completed','stopped','cancelled','expired')
+                    OR (d.state IN ('completed','stopped') AND d.settlement IS NULL)) LIMIT 1''',
+                    linked_parameters).fetchone()):
+                raise Conflict('continuation_managed_effect_not_settled')
+        if ('remote_delegations' in tables and db.execute(
+                linked + '''SELECT 1 FROM remote_delegations d JOIN linked l ON l.id=d.parent_id
+                    WHERE d.terminal<>1 LIMIT 1''',
+                linked_parameters).fetchone()):
+            raise Conflict('continuation_remote_child_not_settled')
+        if db.execute("SELECT 1 FROM steering WHERE task_id=? AND state<>'submitted' LIMIT 1",
+                      (row['id'],)).fetchone():
+            raise Conflict('continuation_steering_not_settled')
+
     def continue_task(self, payload):
         """Owner-authorized NEW work on a settled task, never retry an old turn.
 
@@ -706,50 +753,7 @@ class Store:
             context = json.loads(row['context'])
             if context.get('remote_proxy'):
                 raise Conflict('remote_proxy_requires_remote_control_protocol')
-            related = isolation.related(db, row, Conflict)
-            busy = [other for other in related if other['id'] != row['id'] and other['status'] != 'completed']
-            if any((other['status'] == 'running' and other['deadline'] is not None
-                    and other['deadline'] > self.clock())
-                   or json.loads(other['checkpoint']).get('side_effect_started')
-                   for other in busy):
-                raise Conflict('continuation_scope_not_quiescent')
-            # A completed task with a false checkpoint can still own a managed
-            # hold. Check the original family AND all tasks in the shared native
-            # scope, including completed peers, without blocking unrelated scopes.
-            # UNION also terminates accidental parent cycles.
-            family = '''WITH RECURSIVE family(id) AS (
-                SELECT ? UNION SELECT t.id FROM tasks t JOIN family f ON t.parent_id=f.id) '''
-            children = db.execute(family + '''SELECT t.id,t.status,t.checkpoint FROM tasks t
-                JOIN family f ON f.id=t.id WHERE t.id<>?''', (row['id'], row['id'])).fetchall()
-            if any(child['status'] not in ('completed', 'failed')
-                   or json.loads(child['checkpoint']).get('side_effect_started') for child in children):
-                raise Conflict('continuation_children_not_settled')
-            linked = family + ''', linked(id) AS (
-                SELECT id FROM family UNION SELECT id FROM tasks WHERE id IN (''' + ','.join('?' for other in related) + ')) '
-            linked_parameters = (row['id'],) + tuple(other['id'] for other in related)
-            tables = {item[0] for item in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if 'managed_allocations' in tables:
-                # Allocations settle as completed; stopped is a dispatch outcome
-                # with a provider-reported quiescence settlement, not a timeout.
-                if db.execute(linked + '''SELECT 1 FROM managed_allocations a JOIN linked l ON l.id=a.task_id
-                        WHERE a.state NOT IN ('completed','cancelled','expired') LIMIT 1''',
-                              linked_parameters).fetchone():
-                    raise Conflict('continuation_managed_effect_not_settled')
-                if ('managed_dispatch' in tables and db.execute(linked + '''SELECT 1 FROM managed_dispatch d
-                        JOIN managed_allocations a ON a.operation_id=d.operation_id
-                        JOIN linked l ON l.id=a.task_id
-                        WHERE (d.state NOT IN ('completed','stopped','cancelled','expired')
-                        OR (d.state IN ('completed','stopped') AND d.settlement IS NULL)) LIMIT 1''',
-                        linked_parameters).fetchone()):
-                    raise Conflict('continuation_managed_effect_not_settled')
-            if ('remote_delegations' in tables and db.execute(
-                    linked + '''SELECT 1 FROM remote_delegations d JOIN linked l ON l.id=d.parent_id
-                        WHERE d.terminal<>1 LIMIT 1''',
-                    linked_parameters).fetchone()):
-                raise Conflict('continuation_remote_child_not_settled')
-            if db.execute("SELECT 1 FROM steering WHERE task_id=? AND state<>'submitted' LIMIT 1",
-                          (row['id'],)).fetchone():
-                raise Conflict('continuation_steering_not_settled')
+            self._assert_continuation_quiescent(db, row)
             harness, thread = checkpoint.get('harness'), checkpoint.get('thread_id')
             if (harness not in ('codex', 'pi') or not isinstance(thread, str)
                     or not thread or len(thread.encode('utf8')) > 256):
