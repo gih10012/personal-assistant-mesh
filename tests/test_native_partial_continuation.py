@@ -208,6 +208,37 @@ class NativePartialContinuationTests(unittest.TestCase):
         with self.assertRaisesRegex(Conflict, 'actual_native_goal_changed'):
             partial.validate_resume_goal(checkpoint, {'status': 'active', 'threadId': self.thread})
 
+    def test_native_exec_children_keep_outer_receipts_and_require_known_terminal_schema(self):
+        command = {'type': 'CommandExecution', 'id': 'exec-synthetic-command', 'process_id': None,
+                   'command': 'synthetic local command', 'cwd': '/synthetic/worktree', 'parsed_cmd': [],
+                   'source': 'unified_exec_startup', 'status': 'completed', 'aggregated_output': 'synthetic output',
+                   'exit_code': 0, 'duration': {'secs': 0, 'nanos': 1}}
+        extension = {'type': 'Extension', 'id': 'exec-synthetic-search', 'kind': 'web.search',
+                     'query': 'synthetic query', 'action': 'search', 'results': []}
+        def event(item, kind='item_completed'):
+            return {'type': 'event_msg', 'payload': {'type': kind, 'thread_id': self.thread,
+                                                  'turn_id': self.turn, 'item': item}}
+        before = self.prefix + [self.records[len(self.prefix)], self.call]
+        # Internal completion may arrive after the outer output. It is still
+        # original native metadata, never a second model-call receipt.
+        records = before + [event(command), self.output, event(extension), self.records[-1]]
+        expected = {'original-call': {'call_sha256': hashlib.sha256(self.line(self.call)).hexdigest(),
+                                      'output_sha256': hashlib.sha256(self.line(self.output)).hexdigest()}}
+        self.assertEqual(expected, partial.history_receipts(self.raw(records), self.thread, self.turn))
+        for changes in ({'status': 'in_progress', 'exit_code': None}, {'source': 'unknown-executor'},
+                        {'type': 'UnknownExecution'}):
+            changed = dict(command, **changes)
+            with self.subTest(changes=changes), self.assertRaises(Conflict):
+                partial.history_receipts(self.raw(before + [event(changed), self.output, self.records[-1]]), self.thread, self.turn)
+        running = dict(command, status='in_progress', exit_code=None)
+        for unfinished in (before + [event(running, 'item_started'), self.output, self.records[-1]],
+                           before + [event(command), self.records[-1]]):
+            with self.assertRaises(Conflict):
+                partial.history_receipts(self.raw(unfinished), self.thread, self.turn)
+        unknown = dict(extension, kind='unknown.background.extension')
+        with self.assertRaises(Conflict):
+            partial.history_receipts(self.raw(before + [event(unknown), self.output, self.records[-1]]), self.thread, self.turn)
+
     def test_goal_accounting_and_unknown_managed_hold_are_not_silently_discarded(self):
         goal = {'status': 'complete', 'threadId': self.thread, 'objective': 'original goal',
                 'createdAt': 10, 'tokensUsed': 120, 'timeUsedSeconds': 8, 'tokenBudget': 300}

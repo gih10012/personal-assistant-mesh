@@ -211,6 +211,31 @@ def _unique(pairs):
     return result
 
 
+def _execution_child(item, event, calls):
+    """Known native UI children of an outer exec tool, not new model calls.
+
+    No Shell safety or effect settlement is inferred here. The owner still
+    reviews the original outer call/output and the COMPLETE native history.
+    """
+    if item.get('type') not in ('CommandExecution', 'Extension') or item.get('call_id') is not None:
+        return False
+    identity = item.get('id')
+    require(isinstance(identity, str) and identity.startswith('exec-') and calls, 'unbound_execution_child')
+    if item['type'] == 'CommandExecution':
+        shape(item, ('type', 'id', 'process_id', 'command', 'cwd', 'parsed_cmd', 'source',
+                     'status', 'aggregated_output', 'exit_code', 'duration'))
+        require(item['source'] == 'unified_exec_startup', 'unknown_execution_child_source')
+        if event == 'item_completed':
+            require(item['status'] in ('completed', 'failed') and type(item['exit_code']) is int,
+                    'execution_child_not_terminal')
+        else:
+            require(item['status'] == 'in_progress', 'execution_child_start_invalid')
+    else:
+        shape(item, ('type', 'kind', 'id', 'query', 'action', 'results'))
+        require(item['kind'] == 'web.search', 'unknown_execution_extension')
+    return True
+
+
 def history_receipts(raw, thread, turn):
     """Bind complete native bytes and receipt pairing; do not interpret Shell."""
     require(raw.endswith(b'\n'), 'history_incomplete_line')
@@ -246,7 +271,8 @@ def history_receipts(raw, thread, turn):
             elif event in ('item_started', 'item_completed'):
                 native = item.get('item'); require(isinstance(native, dict), 'unknown_native_item')
                 key = native.get('id')
-                if native.get('type') not in ('UserMessage', 'AgentMessage', 'Reasoning', 'Plan', 'ContextCompaction'):
+                if (native.get('type') not in ('UserMessage', 'AgentMessage', 'Reasoning', 'Plan', 'ContextCompaction')
+                        and not _execution_child(native, event, calls)):
                     tool = native.get('call_id') or key
                     name(tool); event_tools.add(tool)
                 if key is not None:
