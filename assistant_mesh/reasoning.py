@@ -152,20 +152,25 @@ def observed_turn(records, thread_id, turn_id):
     return result
 
 
-def make_codex(base_class, profile_loader, receipt_callback=None):
-    """Overlay ONLY explicit turn/start on an unchanged frozen Codex class.
+def make_codex(base_class, profile_loader, receipt_callback=None, thread_profile=False):
+    """Overlay explicit turn/start, optionally qualified modern thread config.
 
     profile_loader(agent) supplies an owner-verified per-agent snapshot (or
     None). The loader owns file/identity policy; this module never finds files
     or guesses agent identities. Changes apply to the next explicit turn, not
-    the active turn or an autonomous native-goal continuation.
+    the active turn. thread_profile is default-off for legacy backends; a
+    qualified modern release can also set/verify persisted native model/effort
+    at thread start/resume for subsequent autonomous native-goal work.
     """
     if not callable(profile_loader):
         raise ReasoningError('codex_reasoning_profile_loader_required')
+    if type(thread_profile) is not bool:
+        raise ReasoningError('codex_reasoning_thread_profile_invalid')
 
     class ProfiledCodex(base_class):
         def rpc(self, method, params, timeout=30):
-            if method != 'turn/start':
+            configuring = thread_profile and method in ('thread/start', 'thread/resume')
+            if method != 'turn/start' and not configuring:
                 return super(ProfiledCodex, self).rpc(method, params, timeout=timeout)
             profile = profile_loader(self)
             if profile is None:
@@ -182,13 +187,35 @@ def make_codex(base_class, profile_loader, receipt_callback=None):
             # be bypassed by an overlay selecting a different model.
             if getattr(self, 'provider', None) and model != self.config.get('model'):
                 raise ReasoningError('codex_reasoning_profile_provider_model_mismatch')
-            request, receipt = prepare_turn(self.rpc, params, model, effort)
+            if configuring:
+                receipt = validate_selection(read_model_catalog(self.rpc), model, effort)
+                request = copy.deepcopy(params)
+                request['model'] = model
+                request['config'] = dict(request.get('config') or {}, model_reasoning_effort=effort)
+                receipt.update(status='prepared', thread_id=params.get('threadId'), turn_id=None,
+                               effective_verified=False, phase='thread_configuration')
+            else:
+                request, receipt = prepare_turn(self.rpc, params, model, effort)
             receipt['profile_revision'] = profile.get('revision')
             self.reasoning_selection = receipt
             if receipt_callback:
                 receipt_callback(self, copy.deepcopy(receipt))
             try:
                 result = super(ProfiledCodex, self).rpc(method, request, timeout=timeout)
+                if configuring:
+                    provider = getattr(self, 'provider', None)
+                    verified = verify_thread_selection(result, dict(model=model,
+                        reasoning_effort=effort, provider=provider['id'] if provider else 'openai'))
+                    thread = result.get('thread')
+                    if not isinstance(thread, dict) or not isinstance(thread.get('id'), str) or not thread['id']:
+                        raise ReasoningError('codex_reasoning_thread_receipt_invalid')
+                    receipt.update(status='configured', thread_id=thread['id'],
+                                   native_configuration_verified=True, native_configuration=verified)
+                    self.thread_reasoning_selection = copy.deepcopy(receipt)
+                    self.model = model
+                    if receipt_callback:
+                        receipt_callback(self, copy.deepcopy(receipt))
+                    return result
                 turn = result.get('turn') if isinstance(result, dict) else None
                 if (not isinstance(turn, dict) or not isinstance(turn.get('id'), str)
                         or not turn['id']):

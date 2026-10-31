@@ -626,7 +626,7 @@ class Codex:
             if transition is not None:
                 transition.update(status='native_configuration_verified', native_configuration_verified=True)
         self.rollout_path = value['thread'].get('path')
-        self.model = parameters.get('model') or value['thread'].get('model')
+        self.model = value.get('model') or parameters.get('model') or value['thread'].get('model')
         self.native_lifecycle['thread_id'] = self.thread_id
         self.native_lifecycle['thread_status'] = copy.deepcopy(value['thread'].get('status'))
         self.native_observations = {'thread_id': self.thread_id, 'turn_id': None}
@@ -669,6 +669,12 @@ class Codex:
             self._release_resume_requests()
             return self._start_state(mode)
         self._release_resume_requests()
+        if checkpoint.get('thread_id'):
+            # A node's default Goal is only for a NEW native thread. Resuming
+            # an original goal=None session must not create/reset a Goal just
+            # because current deployment config contains a default objective.
+            requested_goal = None
+            self.native_lifecycle['goal_managed'] = actual_goal is not None
         turn = {'threadId': self.thread_id, 'input': [{'type': 'text', 'text': text}]}
         if self.model:
             turn['collaborationMode'] = {'mode': mode, 'settings': {
