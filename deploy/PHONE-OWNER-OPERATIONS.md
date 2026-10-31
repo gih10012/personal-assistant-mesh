@@ -10,8 +10,11 @@ without restarting the receiver for each enrollment.
 
 Keep the commercial unsigned HAP, its build receipt and the same private signing
 key/CSR. Obtain the Huawei debug certificate when the account permits it. The
-device-specific Profile, signing, installation and real enrollment still require
-the actual device. Do not manufacture its node identity, UDID or byte result.
+device-specific Profile requires the real device UDID, which may already be
+privately captured during an earlier authorized USB connection. In that case,
+prepare the Profile and sign offline before asking the owner to reconnect.
+Installation and real enrollment require the phone. Do not manufacture its
+application node identity, UDID or byte result.
 
 Deploy `phone_owner.py` with `phone_authority.py`, `phone_http.py` and the existing
 phone dependencies. `phone_http.start` attaches the operator dispatch wrapper.

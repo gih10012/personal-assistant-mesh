@@ -1,5 +1,12 @@
 # HarmonyOS native Mesh node
 
+当前集成状态（2026-11-01）：官方商业CLT26/API26/arm64构建已实际通过；
+复用原Huawei调试证书与密钥，真实设备Profile已生效，签名工具已成功生成
+同密钥HAP。独立验签被Click工具识别审核拒绝，未执行。手机尚未安装、
+登记或发生后台回调，完整状态见[当前进度](../../docs/STATUS-2026-11-01.md)。
+以下2026-10-15首片记录保留为历史，不覆盖后续构建、Asset凭据、出站任务
+和维护模块的集成结果。
+
 2026-10-15：原生 Stage/ArkTS/HAP 工程源码，**尚未通过 Harmony SDK 编译或
 真机验证**。宿主没有全局 Hvigor、ohpm、hdc、Harmony SDK；首片之后仅在
 私有临时目录核验官方构建工具/公开 OpenHarmony SDK，见
