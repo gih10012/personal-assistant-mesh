@@ -96,7 +96,9 @@ retain the current ledger, enrollment journal and original unknown operations.
 It must not restore an old database or reissue old challenges to replay work.
 
 The initial implementation was written in the actual network task's worktree.
-Its native turn stopped on a usage limit; Root retained the original task,
-thread and unknown checkpoint, reviewed the code, ran the focused checks and
-prepared this deployment handoff. Source delivery is not a claim that that
-native task's unresolved execution record has been settled.
+Its native turn stopped on a usage limit. Root retained the original task,
+thread, full history and unknown before-state, reviewed the actual effects and
+normal close, and completed that tools-development task through the trusted
+maintenance path on 2026-10-30. The old runner retired cooperatively on
+2026-10-31; its raw unknown work remains preserved. This tools completion is
+not phone enrollment and must not be reused as a live enrollment task.
