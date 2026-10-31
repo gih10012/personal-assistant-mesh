@@ -75,8 +75,9 @@ server.py:168–169 与 phone 部署加载链 pin 一致，SHA256 为
 不是拿现代 CLI 的字段限制推断旧服务不支持 context。原 scope 专用 profile
 也已由原 worker 装配保留。无需新接口、重复 Store 或重开已完成任务。
 
-Root 后续真正开始入网业务时，在 Git 外 owned-0600 私有 payload 文件保存
-一次完整请求；下列均为待替换模板，未创建任何新 ID/任务：
+Root 拿到手机真实首启 app node_id 后，才在本次真实入网操作中创建/取得任务和
+领取回执。在此之前仅保留模板，不创建或认领任务。在 Git 外 owned-0600 私有
+payload 文件保存一次完整请求；下列均为待替换模板，未创建任何新 ID/任务：
 
 ```json
 {
@@ -127,10 +128,11 @@ context.request_id；若该 task 已有原 ingress 行，则以其原 request_id
 边界/现有可用 worker；任务可先 pending，不能伪造 running。
 
 原 claim 给 90 秒任务租约；原 worker tick 持续发送 `/v1/heartbeat` 和
-`/v1/task/update {id:实际任务,epoch:实际领取epoch}` 维持活跃，省略 terminal
-status 和 checkpoint，不制造 safe/native_close。若 required 含 leader，还须
+`/v1/task/update` 维持其实际任务，不替换其真实 checkpoint 逻辑，不制造
+safe/native_close。若 required 含 leader，还须
 原 Leader 任期/租约有效。只发 node heartbeat 不会续 task deadline。真正正在
-承担此任务的已认证 worker，其原续租消息形状为：
+承担此任务的已认证 worker，最小续租消息形状为（省略 terminal status 和新
+checkpoint，不是手工伪造任务状态的接口）：
 
 ```python
 worker.request('/v1/heartbeat', {'capabilities': existing_worker_config['capabilities']})
@@ -138,8 +140,10 @@ worker.request('/v1/task/update', {'id': claimed_task['id'], 'epoch': claimed_ta
 ```
 
 这不是额外保活脚本或另一个假 worker；优先复用原 tick。状态不是 running、
-租约丢失、epoch/Leader 变化时停在等待，重新从原 authority 取得有效状态再
-绑定，不沿旧 epoch 准备挑战。人工独占“按 ID 原子领取”的 owner 命令当前没有，
+租约丢失、epoch/Leader 变化时停在等待。待模型/owner 导致 waiting 状态或不再
+running 时，先沿原支持的续接/领取流程恢复真实任务，再从原 authority 取得
+真实有效 epoch；不能手填 running、deadline 或 epoch，更不能直接改 SQLite。
+恢复后再绑定，不沿旧 epoch 准备挑战。人工独占“按 ID 原子领取”的 owner 命令当前没有，
 但正常 worker 领取足以完成本方案，不能据此声称现有任务创建/入网存在代码
 缺口。现在停在等待真实 app node_id；仍不创建 binding/challenge/nonce。
 
