@@ -118,6 +118,15 @@ Root已协调：先在同一独立分支做下面的局部构建/恢复，暂不
 截至本文初稿：只完成官方来源调研，没有编译、部署或真三票验收。后续实物证据追加
 在本文件独立小节；cargo check不能冒充DO启动或部署证明。
 
+### 构建切片停点
+
+Root随后授权准备同核最小构建/宿主样例，源码在`deploy/raft-portability`，没有接入
+任何已有入口。真实RawNode投票/耐久恢复用例和DO持久屏障样例已写，但全部未编译。
+Click拒绝`cargo build --release` batch：`neither read-only nor a recognized check`，
+未启动任何build/test。带局部代理前缀的先前调用未被host改写，报`click-gate: command
+not found`，同样没有Cargo执行。未包装绕过；exact argv和限制见该目录README。
+设计文档首提交`464c631`可独立采用，未编译切片需要宿主开放正式Cargo检查能力后继续。
+
 若该切片需要fork共识核心/改写安全算法，或有界恢复无法满足Free限制，则停止此
 路线。零新支出替代是继续现有S1双完整副本和受控交接，等待现有合法独立计算节点
 承载第三个etcd member；没有该节点时保持单票故障不自动授唯一权，不冒称自动HA。
