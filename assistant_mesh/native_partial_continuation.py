@@ -192,8 +192,9 @@ def _history(source, count, parts):
     return raw, parts
 
 
-def _prior_history(raw, old_parts):
+def _prior_history(raw, old_parts, complete=False):
     if not old_parts:
+        require(not complete, 'completed_history_not_committed')
         return
     try:
         with gzip.GzipFile(fileobj=io.BytesIO(b''.join(part['body'] for part in old_parts))) as archive:
@@ -201,6 +202,8 @@ def _prior_history(raw, old_parts):
     except (OSError, EOFError, ValueError):
         raise Conflict('native_partial_prior_history_invalid') from None
     require(len(prior) <= MAX_HISTORY and raw.startswith(prior), 'complete_prior_history_required')
+    if complete:
+        require(raw == prior, 'completed_history_differs_from_committed_artifact')
 
 
 def _unique(pairs):
@@ -332,6 +335,61 @@ def _progress(value, operation, receipts):
     require(reviewed == set(receipts), 'all_tool_receipts_must_be_reviewed')
 
 
+def _completed_attempt(row, checkpoint, session, state, old, source, disposition, result):
+    """Review a sealed completed attempt without rewriting its live guard/state.
+
+    An older qualified converter omitted outcome after its full history seal.
+    Absence of that field alone is allowed; an explicit unknown is never fixed.
+    The committed session may intentionally retain side_effect_started=True.
+    """
+    require(disposition == 'owner_reviewed_completion' and result == row['result'],
+            'completed_result_must_be_preserved')
+    require(checkpoint.get('side_effect_started') is False
+            and not isolation.native_work_unsettled(checkpoint), 'completed_attempt_not_settled')
+    intent = checkpoint.get('native_execution_intent')
+    require(isinstance(intent, dict) and intent.get('task_id') == row['id']
+            and intent.get('task_epoch') == row['epoch'] and intent.get('harness') == 'codex'
+            and intent.get('thread_id') == source['thread_id'] and intent.get('settled') is True
+            and state.get('native_execution_intent') == intent, 'completed_execution_intent_changed')
+    lifecycle = checkpoint.get('native_lifecycle')
+    require(isinstance(lifecycle, dict) and state.get('native_lifecycle') == lifecycle
+            and all(lifecycle.get(key) is True for key in
+                    ('controller_enabled', 'settled', 'quiescent', 'runtime_closed'))
+            and type(lifecycle.get('goal_managed')) is bool
+            and lifecycle.get('thread_id') == source['thread_id']
+            and lifecycle.get('turn_id') == source['turn_id']
+            and lifecycle.get('thread_status') == {'type': 'idle'}
+            and ('outcome' not in lifecycle or lifecycle['outcome'] == 'terminal'),
+            'completed_lifecycle_not_sealed')
+    turns = lifecycle.get('turn_ids')
+    completed = lifecycle.get('completed_turn_ids')
+    require(isinstance(turns, list) and isinstance(completed, list)
+            and turns and all(isinstance(turn, str) for turn in turns + completed)
+            and len(turns) == len(set(turns)) and len(completed) == len(set(completed))
+            and source['turn_id'] in turns and set(completed) == set(turns)
+            and lifecycle.get('completion_statuses') == {turn: 'completed' for turn in turns},
+            'completed_native_turns_not_settled')
+    for turn in turns:
+        native_id(turn)
+    goal = checkpoint.get('goal')
+    require('goal' in checkpoint and 'goal' in state and 'goal' in lifecycle
+            and lifecycle['goal'] == state['goal'] == goal
+            and (goal is None or isinstance(goal, dict) and goal.get('status') == 'complete'
+                 and goal.get('threadId') == source['thread_id'])
+            and (lifecycle['goal_managed'] or goal is None), 'completed_actual_goal_changed')
+    fingerprint = lifecycle.get('history_fingerprint')
+    fields = ('dev', 'ino', 'uid', 'mode', 'size', 'mtime_ns', 'ctime_ns', 'sha256')
+    shape(fingerprint, fields)
+    for field in fields[:-1]:
+        integer(fingerprint[field], 0)
+    require(fingerprint['mode'] <= 0o7777 and fingerprint['sha256'] == source['sha256']
+            and fingerprint['size'] == source['size'], 'completed_history_fingerprint_changed')
+    artifact = hashlib.sha256(json.dumps([row['id'], row['epoch'], 'codex'], separators=(',', ':')).encode()).hexdigest()
+    require(old['artifact_id'] == artifact and old['parts'] > 0 and session['node'] == row['node']
+            and state.get('harness') == 'codex' and state.get('thread_id') == source['thread_id']
+            and state.get('turn_id') == source['turn_id'], 'completed_committed_session_changed')
+
+
 def acceptance(store, payload, peer):
     reviewer = maintainer(peer)
     shape(payload, ('protocol', 'binding', 'expected', 'parts', 'operation_id', 'closure', 'known_local_progress',
@@ -366,7 +424,7 @@ def acceptance(store, payload, peer):
         prepared = [dict(row) for row in db.execute('SELECT part,body FROM native_partial_history_parts WHERE artifact_id=? ORDER BY part',
                                                   (artifact_id(source),))]
     raw, parts = _history(source, payload['parts'], prepared)
-    _prior_history(raw, prior_parts)
+    _prior_history(raw, prior_parts, complete=prepared_task['status'] == 'completed')
     receipts = history_receipts(raw, source['thread_id'], source['turn_id'])
     _progress(payload['known_local_progress'], payload['operation_id'], receipts)
     with store.transaction() as db:
@@ -376,13 +434,18 @@ def acceptance(store, payload, peer):
             require(previous['fingerprint'] == fingerprint, 'acceptance_id_content_conflict')
             return json.loads(previous['receipt'])  # Never reset a later attempt.
         row, checkpoint, session, state, old, old_parts = _selected(store, db, source['task_id'])
-        require(row['status'] == 'needs_review' and row['epoch'] == source['expected_epoch']
+        completed_review = row['status'] == 'completed'
+        require(row['status'] in ('needs_review', 'completed') and row['epoch'] == source['expected_epoch']
                 and row['paused_status'] is None and row['paused_deadline'] is None, 'task_not_reviewable')
         require(digest(dict(row)) == expected['task_sha256'] and digest(dict(session)) == expected['session_sha256']
                 and old == expected['artifact'], 'task_session_or_artifact_cas_changed')
         require(checkpoint['thread_id'] == source['thread_id'] and checkpoint['turn_id'] == source['turn_id'], 'original_native_binding_changed')
         operation = checkpoint.get('operation_id') or json.loads(row['context']).get('operation_id') or row['id']
-        require(operation == payload['operation_id'] and isolation.native_work_unsettled(checkpoint), 'original_operation_not_unsettled')
+        require(operation == payload['operation_id'], 'original_operation_not_unsettled')
+        if completed_review:
+            _completed_attempt(row, checkpoint, session, state, old, source, disposition, result)
+        else:
+            require(isolation.native_work_unsettled(checkpoint), 'original_operation_not_unsettled')
         require(row['node'] in (None, checkpoint['codex_node']), 'task_owner_changed')
         # An active/paused/blocked native Goal owns its own scheduling. Do not
         # synthesize a goal clear, reset, unpause or second autonomous owner.
@@ -410,6 +473,9 @@ def acceptance(store, payload, peer):
                    'original_input_replayed': False, 'native_turn_started': False, 'goal_reset': False,
                    'runtime_retired': False, 'automatic_outbound_replay': False,
                    'result_available_on_original_task': disposition == 'owner_reviewed_completion'}
+        if completed_review:
+            receipt.update(existing_completed_review=True, task_state_changed=False,
+                           session_state_changed=False, live_artifact_changed=False)
         for part in old_parts:
             db.execute('INSERT INTO native_partial_before_chunks VALUES(?,?,?,?)',
                        (source['acceptance_id'], old['artifact_id'], part['part'], part['body']))
@@ -417,6 +483,10 @@ def acceptance(store, payload, peer):
         db.execute('INSERT INTO native_partial_acceptances VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                    (source['acceptance_id'], reviewer, fingerprint, row['id'], row['epoch'], encoded(dict(row)),
                     encoded(dict(session)), encoded(old), encoded(payload), encoded(receipt), store.clock()))
+        if completed_review:
+            # Complete history already lives in the append-only staged parts;
+            # retain the committed live artifact/session/task bytes exactly.
+            return receipt
         artifact = receipt['complete_artifact']
         require(not db.execute('SELECT 1 FROM session_chunks WHERE id=? LIMIT 1', (artifact,)).fetchone(), 'artifact_namespace_conflict')
         for part in parts:

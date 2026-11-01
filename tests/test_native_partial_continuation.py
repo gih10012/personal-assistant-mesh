@@ -82,9 +82,9 @@ class NativePartialContinuationTests(unittest.TestCase):
     def specification(self):
         raw = self.raw(self.records)
         inspected = partial.inspect(self.store, self.claimed['id'], self.owner)
-        work = {'phase': 'unknown', 'task': {'id': self.claimed['id'], 'epoch': 1}}
+        work = {'phase': 'unknown', 'task': {'id': self.claimed['id'], 'epoch': inspected['epoch']}}
         return {'protocol': partial.PROTOCOL,
-                'binding': {'acceptance_id': 'fixture-owner-review', 'task_id': self.claimed['id'], 'expected_epoch': 1,
+                'binding': {'acceptance_id': 'fixture-owner-review', 'task_id': self.claimed['id'], 'expected_epoch': inspected['epoch'],
                             'thread_id': self.thread, 'turn_id': self.turn, 'sha256': hashlib.sha256(raw).hexdigest(), 'size': len(raw)},
                 'expected': inspected['expected'], 'parts': 1, 'operation_id': 'original-operation',
                 'closure': {'node': 'fixture-node', 'auth_home': '/fixture/original-auth', 'thread_id': self.thread,
@@ -94,7 +94,7 @@ class NativePartialContinuationTests(unittest.TestCase):
                             'owned_children_closed': True, 'forced_cleanup': False, 'goal_controller_active': False,
                             'goal_snapshot_sha256': partial.digest(self.checkpoint.get('goal')),
                             'evidence_ref': 'private:original-owned-close-receipt', 'evidence_sha256': 'a' * 64},
-                'known_local_progress': [{'tool_call_id': 'original-call', 'operation_id': 'original-operation',
+                'known_local_progress': [{'tool_call_id': self.call['payload']['call_id'], 'operation_id': 'original-operation',
                                           'call_sha256': hashlib.sha256(self.line(self.call)).hexdigest(),
                                           'output_sha256': hashlib.sha256(self.line(self.output)).hexdigest(),
                                           'effect_kind': 'owner-reviewed-local-progress', 'unresolved_external_effects': False,
@@ -293,3 +293,146 @@ class NativePartialContinuationTests(unittest.TestCase):
         self.assertFalse(after['claim_admission'])
         runtime.retirement_resolver = None
         self.assertEqual(receipt, runtime.retire_closed_runner('fixture-retire', runner, accepted['acceptance_id']))
+
+    def completed_attempt(self):
+        """A real normal epoch-2 claim/save/finalize, with an old missing outcome."""
+        self.payload['binding']['acceptance_id'] = 'fixture-prior-review'
+        self.stage(); self.accept()
+        self.claimed = self.store.claim('fixture-node')
+        self.assertEqual(2, self.claimed['epoch'])
+        self.turn = '33333333-3333-4333-8333-333333333333'
+        self.call = {'type': 'response_item', 'payload': {'type': 'custom_tool_call', 'call_id': 'completed-call',
+                                                       'name': 'exec', 'input': 'original completed local work'}}
+        self.output = {'type': 'response_item', 'payload': {'type': 'custom_tool_call_output',
+                                                         'call_id': 'completed-call', 'output': 'original completed receipt'}}
+        self.records += [{'type': 'event_msg', 'payload': {'type': 'task_started', 'turn_id': self.turn}},
+                         self.call, self.output,
+                         {'type': 'event_msg', 'payload': {'type': 'task_complete', 'turn_id': self.turn}}]
+        raw = self.raw(self.records)
+        fingerprint = {'dev': 1, 'ino': 2, 'uid': os.getuid(), 'mode': 0o600, 'size': len(raw),
+                       'mtime_ns': 3, 'ctime_ns': 4, 'sha256': hashlib.sha256(raw).hexdigest()}
+        self.checkpoint = dict(self.claimed['checkpoint'], turn_id=self.turn, side_effect_started=False,
+            native_execution_intent={'task_id': self.claimed['id'], 'task_epoch': 2, 'harness': 'codex',
+                                     'thread_id': self.thread, 'settled': True},
+            native_lifecycle={'controller_enabled': True, 'goal_managed': False, 'settled': True,
+                'quiescent': True, 'runtime_closed': True, 'thread_id': self.thread, 'turn_id': self.turn,
+                'turn_ids': [self.turn], 'completed_turn_ids': [self.turn],
+                'completion_statuses': {self.turn: 'completed'}, 'goal': None, 'thread_status': {'type': 'idle'},
+                'history_fingerprint': fingerprint})
+        self.old_packed = gzip.compress(raw, mtime=0)
+        self.store.session_action(self.claimed['id'], 'fixture-node', 2, 'upload',
+                                  {'part': 0, 'data': base64.b64encode(self.old_packed).decode()})
+        self.store.session_action(self.claimed['id'], 'fixture-node', 2, 'commit',
+                                  {'harness': 'codex', 'state': dict(self.checkpoint, side_effect_started=True), 'parts': 1})
+        self.store.update_task(self.claimed['id'], 'fixture-node', 2, self.checkpoint,
+                               'ORIGINAL COMPLETED RESULT', 'completed')
+        self.before_task = self.row('tasks', 'id', self.claimed['id'])
+        self.before_session = self.row('native_sessions', 'scope', self.before_task['scope'])
+        self.payload = self.specification()
+        self.payload.update(disposition='owner_reviewed_completion', instruction='', result=self.before_task['result'])
+
+    def test_completed_epoch_two_appends_review_only_and_retires_via_original_resolver(self):
+        self.completed_attempt()
+        runtime_root = self.root / 'completed-runtime'; runtime_root.mkdir(mode=0o700)
+        runtime = RuntimeStore(runtime_root)
+        runner = runtime.stage('fixture-completed-stage', {'kind': 'worker', 'component': 'fixture-worker',
+            'version': 'fixture-epoch-two', 'protocol_min': 1, 'protocol_max': 1,
+            'argv': [sys.executable, '-c', 'pass'], 'cwd': str(self.root), 'autorestart': False})['runner']
+        with runtime.transaction() as db:
+            db.execute("UPDATE runners SET state='starting',pid=?,birth=? WHERE id=?",
+                       (os.getpid(), LinuxProcess.identity(os.getpid()), runner))
+            token = db.execute('SELECT token FROM runners WHERE id=?', (runner,)).fetchone()[0]
+        runtime.runner_request(runner, token, 'ready', {}, os.getpid())
+        runtime.activate('fixture-completed-activate', runner)
+        runtime.runner_request(runner, token, 'admit', {'claim': 'original-epoch-two'}, os.getpid())
+        runtime.runner_request(runner, token, 'bind', {'claim': 'original-epoch-two',
+            'task': {'id': self.claimed['id'], 'epoch': 2}}, os.getpid())
+        runtime.runner_request(runner, token, 'unknown', {}, os.getpid())
+        before_runner = next(row for row in runtime.status()['runners'] if row['id'] == runner)
+        self.payload['closure']['runner_id'] = runner
+        with self.store.transaction() as db:
+            before_chunks = [tuple(row) for row in db.execute('SELECT * FROM session_chunks ORDER BY id,part')]
+        self.stage(); accepted = self.accept()
+        self.assertEqual((2, self.thread, self.turn), (accepted['source_epoch'], accepted['source_thread_id'], accepted['source_turn_id']))
+        self.assertEqual('trusted-owner-reviewed-local-effects-and-runtime-closure', accepted['evidence_basis'])
+        self.assertTrue(accepted['existing_completed_review'])
+        self.assertFalse(accepted['task_state_changed']); self.assertFalse(accepted['session_state_changed'])
+        self.assertFalse(accepted['live_artifact_changed'])
+        self.assertEqual(self.before_task, self.row('tasks', 'id', self.claimed['id']))
+        self.assertEqual(self.before_session, self.row('native_sessions', 'scope', self.before_task['scope']))
+        self.assertTrue(json.loads(self.before_session['state'])['side_effect_started'])
+        self.assertNotIn('outcome', json.loads(self.before_task['checkpoint'])['native_lifecycle'])
+        self.assertEqual(accepted, self.accept())
+        with self.store.transaction() as db:
+            self.assertEqual(before_chunks, [tuple(row) for row in db.execute('SELECT * FROM session_chunks ORDER BY id,part')])
+            retained = db.execute('SELECT * FROM native_partial_acceptances WHERE acceptance_id=?',
+                                 (accepted['acceptance_id'],)).fetchone()
+            self.assertEqual(self.before_task, json.loads(retained['before_task']))
+            self.assertEqual(self.before_session, json.loads(retained['before_session']))
+            full = b''.join(row[0] for row in db.execute('SELECT body FROM native_partial_history_parts WHERE artifact_id=? ORDER BY part',
+                                                       (accepted['complete_artifact'],)))
+            self.assertEqual(self.raw(self.records), gzip.decompress(full))
+        runtime.retirement_resolver = lambda identity: partial.receipt(self.store, identity, self.owner)
+        self.assertTrue(runtime.retire_closed_runner('fixture-completed-retire', runner, accepted['acceptance_id'])['original_work_retained'])
+        self.assertEqual('stopped', runtime.runner_request(runner, token, 'heartbeat', {}, os.getpid())['state'])
+        self.assertEqual(before_runner['work'], next(row for row in runtime.status()['runners'] if row['id'] == runner)['work'])
+        self.assertEqual(self.before_unrelated, self.row('tasks', 'id', 'unrelated-unknown'))
+
+    def test_completed_review_rejects_unsealed_changed_goal_intent_history_and_forged_result(self):
+        self.completed_attempt()
+        baseline = copy.deepcopy(self.checkpoint)
+        mutations = [lambda cp: cp.update(side_effect_started=True),
+            lambda cp: cp['native_execution_intent'].update(settled=False),
+            lambda cp: cp['native_execution_intent'].update(task_epoch=1),
+            lambda cp: cp['native_lifecycle'].update(runtime_closed=False),
+            lambda cp: cp['native_lifecycle'].update(outcome='unknown'),
+            lambda cp: cp['native_lifecycle'].update(completion_statuses={self.turn: 'failed'}),
+            lambda cp: cp['native_lifecycle']['history_fingerprint'].update(sha256='0' * 64),
+            lambda cp: cp['native_lifecycle'].pop('history_fingerprint'),
+            lambda cp: cp.update(goal={'status': 'active', 'threadId': self.thread})]
+        for mutate in mutations:
+            changed = copy.deepcopy(baseline); mutate(changed)
+            session_state = dict(changed, side_effect_started=True)
+            with self.store.transaction() as db:
+                db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (json.dumps(changed), self.claimed['id']))
+                db.execute('UPDATE native_sessions SET state=? WHERE scope=?', (json.dumps(session_state), self.before_task['scope']))
+            self.checkpoint = changed
+            self.payload = self.specification()
+            self.payload.update(disposition='owner_reviewed_completion', instruction='', result=self.before_task['result'])
+            self.stage()
+            with self.subTest(mutate=mutate), self.assertRaises(Conflict):
+                self.accept()
+        with self.store.transaction() as db:
+            db.execute('UPDATE tasks SET checkpoint=? WHERE id=?', (self.before_task['checkpoint'], self.claimed['id']))
+            db.execute('UPDATE native_sessions SET state=? WHERE scope=?', (self.before_session['state'], self.before_task['scope']))
+        self.checkpoint = baseline; self.payload = self.specification()
+        self.payload.update(disposition='owner_reviewed_completion', instruction='', result='FORGED REPLACEMENT RESULT')
+        self.stage()
+        with self.assertRaisesRegex(Conflict, 'completed_result_must_be_preserved'):
+            self.accept()
+        self.payload['result'] = self.before_task['result']
+        for status in ('running', 'waiting_backend', 'needs_review'):
+            with self.store.transaction() as db:
+                db.execute('UPDATE tasks SET status=? WHERE id=?', (status, self.claimed['id']))
+            self.payload['expected'] = partial.inspect(self.store, self.claimed['id'], self.owner)['expected']
+            with self.subTest(status=status), self.assertRaises(Conflict):
+                self.accept()
+        with self.store.transaction() as db:
+            self.assertFalse(db.execute('SELECT 1 FROM native_partial_acceptances WHERE acceptance_id=?',
+                                       (self.payload['binding']['acceptance_id'],)).fetchone())
+
+    def test_completed_review_still_requires_maintenance_owner_and_exact_committed_history(self):
+        self.completed_attempt()
+        self.stage()
+        for peer in ({'role': 'operator'}, {'role': 'worker', 'node': 'fixture-node'}, {'role': 'ingress'}):
+            with self.subTest(peer=peer), self.assertRaises(PermissionError):
+                self.api.dispatch('POST', partial.PREFIX + 'accept', self.payload, peer)
+        changed = copy.deepcopy(self.payload)
+        records = self.records + [{'type': 'token_usage_record', 'payload': {'synthetic': 'uncommitted suffix'}}]
+        raw = self.raw(records)
+        changed['binding'].update(acceptance_id='fixture-uncommitted-suffix', sha256=hashlib.sha256(raw).hexdigest(), size=len(raw))
+        self.stage(changed, records)
+        with self.assertRaisesRegex(Conflict, 'completed_history_differs'):
+            self.accept(changed)
+        self.assertEqual(self.before_task, self.row('tasks', 'id', self.claimed['id']))
+        self.assertEqual(self.before_session, self.row('native_sessions', 'scope', self.before_task['scope']))

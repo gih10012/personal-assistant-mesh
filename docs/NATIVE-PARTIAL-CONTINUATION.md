@@ -22,6 +22,24 @@ thread、Goal 或模型探测。代码实现不等于已部署或已接受任何
 消息的 operation；实际通知/投递仍按原 transport receipt 对账。这也不伪造
 原 native assistant answer 或自动调用 conversation-final hook。
 
+已由原 worker 正常完成的 task 也可用同一 `owner_reviewed_completion` 保存
+关闭复核回执，供旧 runner 的可信 resolver 协作退出。此窄分支要求原
+completed epoch/thread/turn、`side_effect_started:false`、绑定同 task/epoch
+且 settled 的 `native_execution_intent`、已 sealed 的完整 lifecycle，以及
+与完整上传字节相符的原 history_fingerprint。所有 turn 必须 completed，
+实际 Goal 必须是 null 或 complete，session 中的 intent/lifecycle/Goal 必须
+一致；原 committed artifact 必须恰好是这些完整字节，不能只匹配前缀。
+旧合格 converter 唯独缺少 outcome 时允许复核；显式 unknown 不允许。
+
+该 completed 分支的 `result` 必须等于原 task.result；接受后只追加既有
+三张维护表中的 before/完整历史/回执，**不改写 task 的任意字段、不改
+session state/guard/artifact，也不添加 live session_chunks**。原 session
+在保存时有意保留的 `side_effect_started:true` 原样保留。回执仍使用同一
+protocol/evidence_basis/closure，source_epoch 为实际完成的 epoch，额外明确
+`existing_completed_review:true,task_state_changed:false,session_state_changed:false,
+live_artifact_changed:false`。它不补写缺失的 lifecycle outcome，不重新投递
+结果，不允许 continue_remaining，不把任意 completed 字样当关闭证明。
+
 `continue_remaining` 用于仍有剩余业务：原 task 变 pending，accept 不增长
 epoch；下一次正常 claim 才增长 epoch，沿原 thread 明确开始后续 turn。
 输入包含已复核进度和本人提供的剩余工作，不重新附加整份原输入。原 input、

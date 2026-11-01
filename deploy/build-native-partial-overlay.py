@@ -15,7 +15,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 FORMAT = 'amita-native-partial-overlay/1'
 SUPPORT_PINS = {
-    'native_partial_continuation.py': '73f378520bbd1e14669ab1ddf1fee428a7d47f7e0f89d1916e47723081c9b386',
+    'native_partial_continuation.py': 'caa6bb6f4a3db9fac595cc9a8433ff2750b13e7545aa1ac487dcdd1bb6827f0c',
     'native_partial_adapter.py': 'fe82c7fc1202d9413820271c8ebfce7fbd41e016814500396089fe6d043097d2',
     'store.py': 'a12292767c356cbbbb887c6cd91d17ceac2f80bfc936259e5d4307660b1231e0',
 }
