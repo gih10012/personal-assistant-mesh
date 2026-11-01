@@ -7,6 +7,13 @@
 架构与接口见 [实施方案](AMITA-REPLAN-2026-10-26.md)，原任务图见
 [TASKS.json](TASKS.json)。历史阶段见 [HISTORY](HISTORY.md)，不作为当前指令。
 
+2026-11-02本人新增[Issue #1](https://github.com/gih10012/personal-assistant-mesh/issues/1)：
+吸收DeepSeek Super-agent的持续编排思想。采纳结论见
+[编排学习与映射](AMITA-SUPERAGENT-LEARNING-2026-11-02.md)。顶层助手面向本人
+协调多任务；自运维属于其下属工作之一，确定性保活/恢复仍独立。优先演进
+事件归属、订阅直达原Worker、人类输入优先及低打扰交付，复用原账本和Codex。
+这份长期方向不改变当前鸿蒙真机→VPS单点阶段顺序，也不重建原43项任务。
+
 ## 当前事实
 
 手机owner工具已合入并部署，真实私有CLI验收通过；商业构建、原Huawei
@@ -16,7 +23,8 @@
 进度维护与现代Worker已部署，手机工具开发任务已沿原身份结算；S2真实网内
 agent沿原thread以Sol/high完成原任务，quorum源码待合入/部署。Cloudflare
 Free转接已部署并真实往返至原MCP鉴权入口，完整Chat OAuth和三票接管仍未
-完成。详细状态见[11月1日进度](STATUS-2026-11-01.md)。
+完成。电脑执行器的terminal收尾缺口已修复，旧已完成attempt协作退出，新版
+已恢复领取新工作；详细状态见[11月2日进度](STATUS-2026-11-02.md)。
 
 已有PC/VPS节点、A2A、Claw独立入口与公网OAuth/MCP，以及部分能力、
 原生会话、模型配置、任务账本和工作空间源码。旧owner通知和工作空间
