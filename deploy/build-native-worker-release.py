@@ -25,7 +25,7 @@ PINS = {
     'native_history': '5e06abac895a169a7738b52f8818b2cec64bf3d7e112d92f285a1bf076b7dd6c',
     'sessions': '61382191eff2f3979b817db0e07b9fc143c2544632362d3de23166304a3e5304',
     'reasoning': 'a9eae2d719be4288f1c4a8e71e6bd232e88fcf4c31177b7e5c6092f478099945',
-    'native_partial_continuation': '73f378520bbd1e14669ab1ddf1fee428a7d47f7e0f89d1916e47723081c9b386',
+    'native_partial_continuation': 'caa6bb6f4a3db9fac595cc9a8433ff2750b13e7545aa1ac487dcdd1bb6827f0c',
     'native_worker_release': 'd8e0c50a4013eec22735742e85682a310ee4179b05ce3ef0a9c9e505c0382c63',
 }
 CONVERTER_PIN = '992139b27fdb191bef9a98c681dbd55e8e37a4c8b7ad1f914625d675e7ceae62'
