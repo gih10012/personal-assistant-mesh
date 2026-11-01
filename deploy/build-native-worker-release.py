@@ -28,7 +28,7 @@ PINS = {
     'native_partial_continuation': '73f378520bbd1e14669ab1ddf1fee428a7d47f7e0f89d1916e47723081c9b386',
     'native_worker_release': 'd8e0c50a4013eec22735742e85682a310ee4179b05ce3ef0a9c9e505c0382c63',
 }
-CONVERTER_PIN = '50664f0f29c08e8f11ef406e593266aae3322e8c7e2d4629219c73d07e8b0297'
+CONVERTER_PIN = '992139b27fdb191bef9a98c681dbd55e8e37a4c8b7ad1f914625d675e7ceae62'
 INCUMBENT_MODULES = ('worker', 'codex', 'config', 'governance_worker', 'leader_governance',
                      'metadata_diagnostics', 'task_scoped_profile', 'rolling_worker', 'rolling_runtime', 'reasoning', 'sessions')
 

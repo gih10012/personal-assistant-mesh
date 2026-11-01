@@ -182,6 +182,11 @@ def backend_source(text):
     text = replace_once(text, "                lifecycle['goal'] = copy.deepcopy(goal)\n            elif method == 'thread/goal/cleared':",
                         "                self._store_goal_snapshot(goal)\n            elif method == 'thread/goal/cleared':")
     text = replace_once(text, "        lifecycle['settled'] = False\n        self.close()", """        zero_turn = not self._native_started_turns
+        goal = lifecycle.get('goal')
+        if goal is not None and (not isinstance(goal, dict)
+                or goal.get('threadId') != self.thread_id
+                or goal.get('status') not in GOAL_STATUSES - {'active'}):
+            raise CodexError('codex_native_not_quiescent')
         if (set(self._native_completion_statuses) != self._native_started_turns
                 or any(status != 'completed' for status in self._native_completion_statuses.values())):
             raise CodexError('codex_native_drain_turn_unsettled')
@@ -201,6 +206,7 @@ def backend_source(text):
         lifecycle['completion_statuses'] = copy.deepcopy(self._native_completion_statuses)
         if zero_turn:
             lifecycle['zero_turn_terminal'] = True
+        lifecycle['outcome'] = 'terminal'
         lifecycle['settled'] = True
         return copy.deepcopy(lifecycle)""")
     return text

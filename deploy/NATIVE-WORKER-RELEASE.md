@@ -133,3 +133,11 @@ new management privilege or clearing of old work unknown is part of this release
 
 No new authority/business database tables are introduced here. Existing local
 Governance/metadata/profile files retain their original owners and locations.
+
+Terminal boundary correction, 2026-11-01: the converted native seal now records
+`outcome=terminal` only after actual runtime closure and full history validation.
+An active or mismatched Goal is rejected. Previously a plain successful turn
+could commit its business result but leave the original rolling ClaimGate in
+unknown because that required terminal outcome was absent. The correction does
+not turn an old unknown receipt into a safe checkpoint or replay any work;
+existing retained runners still need their original authority reconciliation.

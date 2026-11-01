@@ -174,6 +174,82 @@ print('source-only import; no account/model/authority')
         self.assertEqual(fixture.thread, state['thread_id'])
         self.assertFalse(agent.native_lifecycle['goal_managed'])
 
+    def test_sealed_plain_turn_releases_original_rolling_gate_after_final_ack(self):
+        agent, fixture = self.runtime(requested=False, actual=None)
+        agent.config['native_goal_drain'] = True
+        agent.start('Complete the synthetic source-only task')
+        turn = agent.turn_id
+        agent.deferred = [fixture.started(turn), fixture.message(turn, 'source work completed'), fixture.completed(turn)]
+        agent.finish(timeout=1)
+        rollout = self.root / 'plain-terminal-boundary.jsonl'
+        records = [{'type': 'session_meta', 'payload': {'id': fixture.thread}},
+                   {'type': 'event_msg', 'payload': {'type': 'task_started', 'turn_id': turn}},
+                   {'type': 'event_msg', 'payload': {'type': 'task_complete', 'turn_id': turn}}]
+        rollout.write_text(''.join(json.dumps(row) + '\n' for row in records))
+        rollout.chmod(0o600)
+        agent.rollout_path = str(rollout)
+        sealed = agent.seal_native_lifecycle()
+        self.assertTrue(sealed['settled'])
+        self.assertTrue(sealed['runtime_closed'])
+        rolling = load(self.package + '.original_rolling_gate', OLD_PATHS[1] / 'rolling_worker.py')
+        task = {'id': 'synthetic-completed-task', 'epoch': 2, 'checkpoint': {
+            'thread_id': fixture.thread, 'turn_id': turn, 'side_effect_started': True,
+            'runtime_failure': {'attempt_epoch': 1, 'native_start_attempted': True}}}
+        requests, local = [], []
+
+        def request(route, body):
+            requests.append((route, copy.deepcopy(body)))
+            return {'task': copy.deepcopy(task)} if route == '/v1/claim' else {'ok': True}
+
+        def control(action, body=None):
+            local.append((action, copy.deepcopy(body)))
+            return {'admitted': True} if action == 'admit' else {'ok': True}
+
+        gate = rolling.ClaimGate(SimpleNamespace(request=request), SimpleNamespace(call=control))
+        claimed = gate.request('/v1/claim', {})['task']
+        gate.request('/v1/task/update', {'id': claimed['id'], 'epoch': claimed['epoch'],
+            'checkpoint': {'side_effect_started': False, 'native_lifecycle': sealed, 'goal': None},
+            'status': 'completed'})
+        gate.finish_boundary(SimpleNamespace(current=None, agent=None,
+            _native_starting=False, _native_turn_live=None))
+        self.assertFalse(gate.unknown)
+        self.assertIsNone(gate.task)
+        self.assertEqual([('checkpoint', {'task': {'id': task['id'], 'epoch': 2}, 'safe': True})],
+                         [row for row in local if row[0] == 'checkpoint'])
+        self.assertEqual(1, sum(route == '/v1/claim' for route, body in requests))
+
+    def test_plain_turn_with_incomplete_history_never_publishes_terminal_boundary(self):
+        agent, fixture = self.runtime(requested=False, actual=None)
+        agent.config['native_goal_drain'] = True
+        agent.start('Complete the synthetic source-only task')
+        turn = agent.turn_id
+        agent.deferred = [fixture.started(turn), fixture.message(turn, 'answer'), fixture.completed(turn)]
+        agent.finish(timeout=1)
+        rollout = self.root / 'incomplete-terminal-boundary.jsonl'
+        records = [{'type': 'session_meta', 'payload': {'id': fixture.thread}},
+                   {'type': 'event_msg', 'payload': {'type': 'task_started', 'turn_id': turn}}]
+        rollout.write_text(''.join(json.dumps(row) + '\n' for row in records))
+        rollout.chmod(0o600)
+        agent.rollout_path = str(rollout)
+        with self.assertRaisesRegex(ValueError, 'native_history_turn_unsettled'):
+            agent.seal_native_lifecycle()
+        self.assertFalse(agent.native_lifecycle['settled'])
+        self.assertNotEqual('terminal', agent.native_lifecycle.get('outcome'))
+
+    def test_active_goal_refuses_terminal_seal_before_runtime_close(self):
+        agent, fixture = self.runtime(requested=False, actual=None)
+        agent.config['native_goal_drain'] = True
+        agent.start('Complete the synthetic source-only task')
+        turn = agent.turn_id
+        agent.deferred = [fixture.started(turn), fixture.completed(turn)]
+        agent.finish(timeout=1)
+        agent.native_lifecycle['goal'] = fixture.goal('active')
+        with self.assertRaisesRegex(ValueError, 'codex_native_not_quiescent'):
+            agent.seal_native_lifecycle()
+        agent.close.assert_not_called()
+        self.assertFalse(agent.native_lifecycle['settled'])
+        self.assertNotEqual('terminal', agent.native_lifecycle.get('outcome'))
+
     def test_mismatched_real_goal_never_releases_resumed_host_requests_or_starts_turn(self):
         fixture = lifecycle_fixtures.NativeGoalLifecycleTests()
         agent, _ = self.runtime(requested=False, actual=fixture.goal())
