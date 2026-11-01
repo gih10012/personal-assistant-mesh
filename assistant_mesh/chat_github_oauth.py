@@ -250,9 +250,13 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
     except Exception:
         raise NotConfigured('chat_oauth_private_secret_unavailable') from None
     _private_component_logs()  # Only this optional owner-installed auth integration.
-    encrypted = FernetEncryptionWrapper(key_value=FileTreeStore(data_directory=Path(state['directory'])),
+    from .oauth_state_boundary import MigrationBoundary
+    migration = MigrationBoundary(config, allow_loopback_for_tests=allow_loopback_for_tests)
+    ObservedFileTreeStore = migration.instrument(FileTreeStore, 'store')
+    ObservedOwnerIdentityProxy = migration.instrument(OwnerIdentityProxy, 'provider')
+    encrypted = FernetEncryptionWrapper(key_value=ObservedFileTreeStore(data_directory=Path(state['directory'])),
                                          fernet=fernet)
-    provider = OwnerIdentityProxy(
+    provider = ObservedOwnerIdentityProxy(
         upstream_authorization_endpoint='https://github.com/login/oauth/authorize',
         upstream_token_endpoint='https://github.com/login/oauth/access_token',
         upstream_client_id=config['github']['client_id'], upstream_client_secret=github_secret,
@@ -262,6 +266,7 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
         allowed_client_redirect_uris=config['redirect_uris'], client_storage=encrypted,
         jwt_signing_key=jwt_key, require_authorization_consent=True,
         fastmcp_access_token_expiry_seconds=900, enable_cimd=True)
+    migration.bind_provider(provider)
     auth_routes = provider.get_routes(mcp_path='/mcp')
     # FileTree's async get/delete is not an atomic authorization-code consume.
     # Serialize the EXISTING component's full token handler, including its SDK
@@ -349,4 +354,4 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
             yield
 
     app = Starlette(routes=auth_routes + [Mount('/', app=resource_app)], lifespan=lifespan)
-    return provider, server, app
+    return provider, server, migration.wrap_asgi(app)
