@@ -1,0 +1,96 @@
+name: Free Raft portability artifacts
+
+on:
+  push:
+    branches:
+      - research/free-quorum-portability-20261101
+    paths:
+      - deploy/raft-portability/src/**
+      - deploy/raft-portability/Cargo.toml
+      - deploy/raft-portability/Cargo.lock
+      - deploy/raft-portability/hosted_bundle.py
+      - .github/workflows/free-raft-portability.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: free-raft-portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-core:
+    # Public standard runners are free. Never fall back to private/larger runners.
+    if: github.event.repository.private == false && github.ref == 'refs/heads/research/free-quorum-portability-20261101'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/amita-raft-target
+      RUSTUP_DIST_SERVER: https://static.rust-lang.org
+      AMITA_TOOL_DIR: ${{ runner.temp }}/amita-raft-tools
+      AMITA_BUNDLE_DIR: ${{ runner.temp }}/amita-raft-public-bundle
+    defaults:
+      run:
+        shell: bash
+        working-directory: deploy/raft-portability
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /deploy/raft-portability/
+            /LICENSE
+
+      - name: Install one official compiler and both standard libraries
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --target wasm32-unknown-unknown
+          rustup run 1.98.1 rustc --version --verbose
+          rustup run 1.98.1 cargo --version
+          rustup run 1.98.1 cargo fetch --locked
+
+      - name: Build native release from the pinned lock
+        run: rustup run 1.98.1 cargo build --release --locked
+
+      - name: Run the one native durable vote recovery case on GitHub hosted Ubuntu
+        run: |
+          set -euo pipefail
+          rustup run 1.98.1 cargo test --release --locked --lib tests::durable_vote_survives_reconstruction -- --exact --color never \
+            | tee "$RUNNER_TEMP/amita-raft-hosted-test.log"
+          grep --fixed-strings --line-regexp --quiet 'running 1 test' "$RUNNER_TEMP/amita-raft-hosted-test.log"
+          grep --fixed-strings --line-regexp --quiet 'test tests::durable_vote_survives_reconstruction ... ok' "$RUNNER_TEMP/amita-raft-hosted-test.log"
+          printf '%s\n' 'tests::durable_vote_survives_reconstruction' > "$RUNNER_TEMP/amita-raft-hosted-test.passed"
+
+      - name: Build wasm32 release with the same official compiler
+        run: rustup run 1.98.1 cargo build --release --locked --target wasm32-unknown-unknown
+
+      - name: Generate matching wasm-bindgen 0.2.105 JavaScript
+        run: |
+          mkdir -p "$AMITA_TOOL_DIR"
+          cli_archive="$AMITA_TOOL_DIR/wasm-bindgen-0.2.105.tar.gz"
+          curl --fail --location --silent --show-error --retry 2 --max-time 90 \
+            'https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.105/wasm-bindgen-0.2.105-x86_64-unknown-linux-musl.tar.gz' \
+            --output "$cli_archive"
+          printf '%s  %s\n' 'b391448c4926ac4b11425a6752484d85164e72489d97804461d5e868c643b88a' "$cli_archive" | sha256sum --check --strict
+          tar --extract --gzip --file "$cli_archive" --directory "$AMITA_TOOL_DIR"
+          "$AMITA_TOOL_DIR/wasm-bindgen-0.2.105-x86_64-unknown-linux-musl/wasm-bindgen" \
+            --target web --out-dir "$RUNNER_TEMP/amita-raft-generated-js" \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/amita_raft_portability.wasm"
+          for license_name in COPYRIGHT LICENSE-MIT LICENSE-APACHE; do
+            curl --fail --location --silent --show-error --retry 2 --max-time 30 \
+              "https://raw.githubusercontent.com/rust-lang/rust/48a229ceaefd4985c50990b14116b6d856af0985/$license_name" \
+              --output "$AMITA_TOOL_DIR/rust-$license_name"
+          done
+
+      - name: Bundle only public Rust artifacts, licenses and hosted manifest
+        run: python3 hosted_bundle.py
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: amita-raft-portability-${{ github.sha }}
+          path: ${{ runner.temp }}/amita-raft-public-bundle/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 2

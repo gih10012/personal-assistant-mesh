@@ -7,6 +7,11 @@ and generated JS do not yet exist. See [BUILD-STATUS.md](BUILD-STATUS.md) and
 the generated [artifact/package inventory](ARTIFACTS.json) for current evidence
 and the exact continuation. Nothing here is deployed or a control service.
 
+A source-only [GitHub hosted build slice](HOSTED-BUILD.md) is now prepared for
+Root to push: public standard Ubuntu, one existing native case, official paired
+Rust/wasm std, pinned official actions and an explicit artifact allowlist. No
+hosted result has been claimed before Root's actual run.
+
 ## Historical 2026-11-01 checkpoint
 
 This directory is isolated from all production Python and Workers entrypoints.
