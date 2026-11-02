@@ -1,4 +1,13 @@
-# Bounded raft-rs portability spike — NOT BUILT
+# Bounded raft-rs portability spike
+
+**Current 2026-11-02 status:** native release and Cargo.lock exist. Recovery
+test has not executed because of Click verify runner context binding. Actual
+WASM compilation found an Arch compiler/official std metadata mismatch; WASM
+and generated JS do not yet exist. See [BUILD-STATUS.md](BUILD-STATUS.md) and
+the generated [artifact/package inventory](ARTIFACTS.json) for current evidence
+and the exact continuation. Nothing here is deployed or a control service.
+
+## Historical 2026-11-01 checkpoint
 
 This directory is isolated from all production Python and Workers entrypoints.
 It is an uncompiled checkpoint because Click rejected the actual Cargo build

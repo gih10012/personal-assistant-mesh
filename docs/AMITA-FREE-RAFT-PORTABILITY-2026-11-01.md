@@ -127,6 +127,25 @@ Click拒绝`cargo build --release` batch：`neither read-only nor a recognized c
 not found`，同样没有Cargo执行。未包装绕过；exact argv和限制见该目录README。
 设计文档首提交`464c631`可独立采用，未编译切片需要宿主开放正式Cargo检查能力后继续。
 
+### 2026-11-02：真实native产物与WASM构建停点
+
+Root按Click官方implementation mutation成功生成native release并锁定48个外部包，
+保留原产物和Cargo.lock。本轮没有把构建当验证PASS：新增实际尺寸/hash/许可证元数据
+生成器与`ARTIFACTS.json`见`deploy/raft-portability`，native rlib 1061802字节，so
+414984字节。所有49个locked包（含自身）的实际manifest许可证均已记录。
+
+恢复测试直接提交Click verify后，runner工作目录/上下文绑定错误导致Cargo未启动，
+不是测试失败也不是PASS；没有改包装或用mutation执行测试。exact argv见BUILD-STATUS。
+
+官方Rust1.98.1 wasm std和wasm-bindgen0.2.105工具均下载并私有提取，实际摘要与官方
+manifest/release metadata相同。WASM release构建已真正执行，报E0514：Arch编译器与
+官方std的编译器metadata不兼容，虽数字版本和commit相同。正确修复是配对同源工具链，
+不是改Raft或反复cargo clean。官方Arch精确匹配wasm包92.6MB，归档180秒仅得1.5MB，
+当前mirror已无该旧版（404）；停止无界下载重试，保留部分文件供后续受控续传。
+
+目前WASM/wasm-bindgen glue仍未生成，无DO启动、三票实测或生产部署。完整停点、工具
+路径/源及正式宿主前u64、ConfState、空entry/snapshot applied方案见BUILD-STATUS。
+
 若该切片需要fork共识核心/改写安全算法，或有界恢复无法满足Free限制，则停止此
 路线。零新支出替代是继续现有S1双完整副本和受控交接，等待现有合法独立计算节点
 承载第三个etcd member；没有该节点时保持单票故障不自动授唯一权，不冒称自动HA。
