@@ -72,6 +72,7 @@ class MigrationBoundary:
     def __init__(self, document, *, allow_loopback_for_tests=False):
         from .oauth_state_bundle import binding, key_references
         config, self.binding = binding(document, allow_loopback_for_tests)
+        self._document = config
         self.state_root = Path(config['state']['directory']).absolute()
         if (self.state_root / STAGING_MARKER).exists():
             raise ValueError('oauth_migration_staging_not_activated')
@@ -216,3 +217,14 @@ class MigrationBoundary:
                 return self._lease
         # Timing out does not cancel the SDK operations or reopen admission.
         return await asyncio.wait_for(drain(), timeout)
+
+    async def resume_backup(self, lease):
+        """Trusted same-instance backup only; never a handoff/fencing receipt."""
+        from .oauth_state_bundle import key_references
+        async with self.condition:
+            if (not isinstance(lease, FreezeLease) or lease is not self._lease
+                    or lease._boundary is not self):
+                raise ValueError('oauth_migration_live_freeze_lease_required')
+            lease.evidence(self.state_root, self.binding, key_references(self._document))
+            self._lease = None  # An earlier capture lease cannot freeze/export a reopened writer.
+            self.phase = 'open'

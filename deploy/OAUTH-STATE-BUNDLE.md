@@ -138,6 +138,79 @@ Source implementation, passing synthetic fixtures, deployed freeze and actual
 controlled OAuth migration are separate facts. This release does not move
 ordinary Chat, relax issuer/audience, or claim OAuth HA.
 
+## Opt-in local owner backup control
+
+The factory has a deployment-code-only `backup_control=None` option. The
+default starts no control listener. To enable it, Root creates a **separate**
+owned 0700 directory and an owned 0600 JSON file containing exactly:
+
+```json
+{"directory":"/PRIVATE/OAUTH-BACKUP-CONTROL","drain_timeout":30}
+```
+
+Pass `backup_control=private_json('/PRIVATE/backup-control.json')` to the
+existing `chat_github_oauth.create_app(...)`, preserving its original backend,
+conversation/session services and dedicated OAuth configuration/key references.
+Run this app with its normal ASGI lifespan enabled. Lifespan opens
+`CONTROL_DIRECTORY/control.sock` (0600), checks Linux `SO_PEERCRED` owner UID,
+and closes its own socket on shutdown. Both server and shipped CLI check peer
+UID. This trusts code running as that local OS owner; it does not distinguish
+hostile programs sharing the same UID. No public HTTP/MCP/admin route, OAuth
+policy relaxation, target writer or new account credential is added.
+
+The control directory must be separate from OAuth state and service keys. The
+local `control.lock` excludes a second control instance using **that directory**;
+it is not a fence of another OAuth process, machine or restart path and is not
+HA. Never point an old or second unguarded gateway at this state as recovery.
+
+Use the gateway's same pinned environment and this shipped CLI locally:
+
+```sh
+python -m scripts.oauth_owner_backup --control-config /PRIVATE/backup-control.json info
+python -m scripts.oauth_owner_backup --control-config /PRIVATE/backup-control.json backup --operation-id OWNER_CHOSEN_ORIGINAL_ID --instance-id EXACT_INFO_INSTANCE_ID
+python -m scripts.oauth_owner_backup --control-config /PRIVATE/backup-control.json status --operation-id OWNER_CHOSEN_ORIGINAL_ID --instance-id EXACT_INFO_INSTANCE_ID
+```
+
+Record the original operation/instance IDs before `backup`. Its reply accepts
+asynchronous work, **not** a completed backup. Status must reach
+`backup_committed_source_closed`, with bundle path/SHA256 and actual ASGI/SDK
+counts zero. This uses the running app's actual boundary and opaque FreezeLease.
+The full bundle and `operations/ID/{intent,result}.json` are privately fsynced;
+the bundle lives at the fixed `operations/ID/bundle/oauth-state-bundle.json`.
+Wire requests cannot select configs, keys, source/destination paths or commands.
+
+If an ACK is lost, query **the original** operation/instance. Repeating that
+backup returns its original state and never exports again. A different ID is
+refused while the source is closed. Disconnecting a control client does not
+cancel accepted freeze/export work. Timeout, unsupported memory state, changed
+files, export or durability failure leaves source admission closed, records a
+bounded diagnostic code when disk permits, and retains any partial bytes.
+Status never reports a failed or merely accepted operation as a usable backup.
+
+After a durably committed backup, Root may explicitly restore the **same live
+source instance** using:
+
+```sh
+python -m scripts.oauth_owner_backup --control-config /PRIVATE/backup-control.json resume --operation-id OWNER_CHOSEN_ORIGINAL_ID --instance-id EXACT_INFO_INSTANCE_ID
+```
+
+Resume rechecks the committed inactive bundle and live opaque lease/key binding,
+persists its original operation's resume intent/result, and invalidates that
+lease before reopening admission. It returns `source_resumed_backup_only` with
+`handoff_authorized:false`. A stopped process, JSON `source_stopped`, another
+instance, uncommitted/failed backup or caller-supplied proof cannot resume it.
+This is explicitly a **backup**, not a handoff or exclusive-writer proof; every
+target remains staging-only and `activate_staging` still always rejects.
+
+A persistent closed marker or interrupted/unresumed operation makes a new
+enabled instance start **sealed**. It can query the original operation, but
+cannot recreate the old in-memory lease or resume/replace that operation. Root
+must diagnose and control all original writer/restart paths separately before
+any manual recovery; there is no automatic reset/remove-marker action. A
+stale socket also refuses startup rather than unlinking another process's
+listener. Inspect its actual owner process before manual cleanup. This release
+does not supply the cross-process/three-vote authority needed for migration.
+
 ## Focused evidence
 
 The new fixtures use real pinned SDK PKCE/consent/code/refresh/revoke state and

@@ -115,7 +115,7 @@ def _private_component_logs():
 
 def create_app(document, *, backend, conversation_service=None, event_service=None,
                session_service=None,
-               allow_loopback_for_tests=False, http_client=None):
+               allow_loopback_for_tests=False, http_client=None, backup_control=None):
     """Owner-installed factory; not a public daemon or GitHub App creator.
 
     http_client is only an owner-code seam for a synthetic IdP transport in
@@ -348,10 +348,22 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
     # established AS routes are mounted; no generic Mesh/Store API appears here.
     auth_routes = [route for route in auth_routes if not route.path.startswith('/.well-known/oauth-protected-resource')]
 
+    backup = None
+    if backup_control is not None:
+        from .oauth_backup_control import OwnerBackupControl
+        backup = OwnerBackupControl(migration, config, backup_control,
+                                    allow_loopback_for_tests=allow_loopback_for_tests)
+
     @contextlib.asynccontextmanager
     async def lifespan(app):
         async with resource_app.router.lifespan_context(resource_app):
-            yield
+            if backup is not None:
+                await backup.start()
+            try:
+                yield
+            finally:
+                if backup is not None:
+                    await backup.close()
 
     app = Starlette(routes=auth_routes + [Mount('/', app=resource_app)], lifespan=lifespan)
     return provider, server, migration.wrap_asgi(app)
