@@ -196,6 +196,11 @@ class OAuthStateBundleTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittes
         staged = self.directory / 'existing'; staged.mkdir(mode=0o700)
         with self.assertRaisesRegex(ValueError, 'new_private_staging'):
             stage_bundle(source, staged, self.config, allow_loopback_for_tests=True)
+        foreign = Path(self.config['state']['directory']) / 'unapproved-collection'
+        foreign.mkdir(mode=0o700)
+        with self.assertRaisesRegex(ValueError, 'unexpected_state_directory'):
+            export_bundle(self.config, self.directory / 'foreign-layout', lease=lease, allow_loopback_for_tests=True)
+        self.assertFalse((self.directory / 'foreign-layout').exists())
 
     async def test_uncovered_memory_grants_replay_and_held_refresh_lock_cannot_claim_drain(self):
         import anyio
@@ -214,6 +219,12 @@ class OAuthStateBundleTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittes
         with self.assertRaisesRegex(ValueError, 'refresh_lock_still_live'):
             await boundary.freeze()
         lock.release()
+        filetree = self.provider._client_storage.key_value
+        strategy = filetree._collection_sanitization_strategy
+        filetree._collection_sanitization_strategy = object()
+        with self.assertRaisesRegex(ValueError, 'filetree_layout_strategy_changed'):
+            await boundary.freeze()
+        filetree._collection_sanitization_strategy = strategy
         lease = await boundary.freeze()
         exported = export_bundle(self.config, self.directory / 'memory-checked', lease=lease,
                                  allow_loopback_for_tests=True)

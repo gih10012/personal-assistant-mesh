@@ -19,10 +19,9 @@ from .oauth_state_boundary import FreezeLease, SDK_PINS, STAGING_MARKER, VERSION
 FORMAT = 'amita-oauth-state-bundle/1'
 COLLECTIONS = ('mcp-upstream-tokens', 'mcp-oauth-proxy-clients', 'mcp-oauth-transactions',
                'mcp-consent-csrf-tokens', 'mcp-authorization-codes', 'mcp-jti-mappings', 'mcp-refresh-tokens')
-# Pinned FileTree V1's seven short collection names are sanitized, not literal
-# directories. Preserve the actual SDK filenames/indexes and logical names.
-COLLECTION_DIRECTORIES = {name: 'S_' + name.replace('-', '_') + '-' + hashlib.sha256(name.encode()).hexdigest()[:8]
-                          for name in COLLECTIONS}
+# This gateway constructs FileTreeStore without optional V1 sanitizers. In
+# pinned 0.4.6 the actual default is PassthroughStrategy for keys/collections.
+COLLECTION_DIRECTORIES = {name: name for name in COLLECTIONS}
 MAX_FILE = 8 * 1024 * 1024
 MAX_TOTAL = 64 * 1024 * 1024
 KEY_ROLES = ('dedicated_github_oauth_app_secret', 'mesh_oauth_jwt_signing', 'mesh_oauth_state_fernet')
@@ -216,7 +215,7 @@ def export_bundle(document, destination, *, lease=None, allow_loopback_for_tests
     evidence = lease.evidence(root, bound, references) if lease is not None else {'kind': 'unfenced_stable_file_copy',
         'asgi_active': None, 'sdk_active': None, 'cross_process_writer_fenced': False, 'activation_authorized': False}
     files, directories, signatures = _scan(root)
-    artifacts = _layout(files, directories, root)
+    artifacts = _layout(files, directories, str(root))
     again, again_dirs, again_signatures = _scan(root)
     if files != again or directories != again_dirs or signatures != again_signatures:
         raise ValueError('oauth_bundle_source_changed')

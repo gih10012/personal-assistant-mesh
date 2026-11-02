@@ -75,10 +75,11 @@ the canonical envelope has its own SHA256. Bounds are 10000 files, 1000 dirs,
 8 MiB/file and 64 MiB raw total. Writes use new owned-0700 directories and
 owned-0600 files with fsync, never overwrite a running FileTree root.
 
-FileTree 0.4.6 sanitizes each logical collection into an `S_...-hash` directory
-and matching `*-info.json`; the reviewed sanitization sources are pinned too.
-These physical names are retained, rather than using logical collection names
-as paths. Its metadata records an **absolute** collection directory. The
+The configured FileTree 0.4.6 uses its default `PassthroughStrategy`, so these
+seven logical collection names are the actual physical directories. Its
+optional V1 sanitizers are not installed by this gateway. Freeze verifies both
+actual strategies; their reviewed sources are pinned. Its `*-info.json`
+metadata records an **absolute** collection directory. The
 source bundle preserves those original bytes; staging creates a separately
 hashed view which changes only that metadata `directory` field. All original
 timestamps, ciphertext and other fields stay intact, and the report maps each
@@ -151,3 +152,12 @@ Run the targeted unittest selection through Click Evidence in this worktree,
 using the existing isolated pinned Python environment. A dependency skip is not
 OAuth evidence. Actual execution results and the final command are reported in
 the implementation handoff, rather than claimed in advance here.
+
+On 2026-11-02 the standard direct argv (`PINNED_VENV/bin/python -m unittest`,
+without `-B`) was accepted by Click as `oauthsdk` and ran all four new fixtures
+plus the existing concurrent-code-consume and issuer/resource/client denial
+leaves. The initial real run exposed the mistaken optional-V1 layout
+assumption; the corrected default-Passthrough layout and Path/string boundary
+then passed this same group. The earlier `-B` argv's pre-execution rejection
+remains a separate historical fact, not a current testing blocker or a test
+pass. No wrapper, system-Python dependency skip or check substitution was used.

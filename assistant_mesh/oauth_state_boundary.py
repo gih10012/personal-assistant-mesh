@@ -93,6 +93,7 @@ class MigrationBoundary:
 
     def provider_evidence(self):
         from .oauth_state_bundle import COLLECTIONS
+        from key_value.aio._utils.sanitization import PassthroughStrategy
         provider = self._provider
         if provider is None:
             raise ValueError('oauth_migration_actual_provider_required')
@@ -103,6 +104,9 @@ class MigrationBoundary:
             if store._key_value is not provider._client_storage or store._default_collection != collection:
                 raise ValueError('oauth_migration_persistent_store_binding_changed')
         filetree = provider._client_storage.key_value
+        if (type(filetree._collection_sanitization_strategy) is not PassthroughStrategy
+                or type(filetree._key_sanitization_strategy) is not PassthroughStrategy):
+            raise ValueError('oauth_migration_filetree_layout_strategy_changed')
         if (Path(str(filetree._data_directory)) != self.state_root
                 or Path(str(filetree._metadata_directory)) != self.state_root):
             raise ValueError('oauth_migration_external_metadata_not_supported')
