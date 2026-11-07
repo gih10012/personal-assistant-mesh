@@ -15,6 +15,7 @@ import {
   validateRelayResponse, validateRelayUrl, validateResultEnvelope
 } from '../core/Protocol';
 import { ProviderDispatch, WorkConfig, validateWorkDispatch } from '../core/WorkProtocol';
+import { MAX_SETUP_BYTES, OwnerSetup, parseOwnerSetup } from '../core/SetupProtocol';
 
 export class NodeSnapshot {
   node_id: string = '';
@@ -194,6 +195,44 @@ export class NativeServices {
       this.selectedUri = selected.length === 1 && this.foreground ? selected[0] : '';
       // Selecting is not consent to send; permission toggle remains separate.
     } finally { this.busy = false; this.sharingEnabled = false; }
+  }
+  async readOwnerSetup(): Promise<OwnerSetup | null> {
+    requireValue(this.foreground && !this.busy, 'mesh_owner_setup_foreground_required');
+    this.busy = true;
+    try {
+      // Only this app-private debug staging filename is recognised. The envelope
+      // cannot supply another path, URL or command. Never reuse selectedUri.
+      const stagedPath: string = this.context.filesDir + '/amita-owner-setup.json';
+      const staged: boolean = fileIo.accessSync(stagedPath);
+      try {
+        let source: string = stagedPath;
+        if (!staged) {
+          const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+          options.maxSelectNumber = 1;
+          const view: picker.DocumentViewPicker = new picker.DocumentViewPicker(this.context);
+          const selected: string[] = await view.select(options);
+          if (selected.length === 0) { return null; }
+          requireValue(selected.length === 1, 'mesh_owner_setup_selection_invalid');
+          source = selected[0]; // Temporary setup grant only; never saved/shared.
+        }
+        requireValue(this.foreground, 'mesh_owner_setup_foreground_required');
+        const file: fileIo.File = fileIo.openSync(source, fileIo.OpenMode.READ_ONLY);
+        try {
+          const size: number = fileIo.statSync(file.fd).size;
+          requireValue(Number.isSafeInteger(size) && size > 0 && size <= MAX_SETUP_BYTES, 'mesh_owner_setup_size_invalid');
+          const bytes: ArrayBuffer = new ArrayBuffer(size);
+          const read: number = fileIo.readSync(file.fd, bytes);
+          requireValue(read === size && fileIo.statSync(file.fd).size === size, 'mesh_owner_setup_incomplete');
+          const raw: string = new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new Uint8Array(bytes));
+          return parseOwnerSetup(raw, this.snapshot.node_id, size);
+        } finally { fileIo.closeSync(file); }
+      } finally {
+        // Consume even malformed/oversized staging files. User-selected documents
+        // remain the user's files and are never removed or retained as a grant.
+        if (staged) { fileIo.unlinkSync(stagedPath); }
+      }
+    } catch (error) { throw new Error('mesh_owner_setup_read_unavailable'); }
+    finally { this.busy = false; }
   }
   private readSelectedComplete(maxBytes: number = MAX_BYTES): Uint8Array {
     requireValue(this.hasSelectedGrant(), 'mesh_selected_file_consent_required');

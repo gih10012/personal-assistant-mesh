@@ -2,6 +2,8 @@ import { common } from '@kit.AbilityKit';
 import { NativeServices } from '../platform/NativeServices';
 import { WorkClient, WorkStatus, WorkTaskStatus } from '../platform/WorkClient';
 import { MaintenanceService } from '../update/MaintenanceService';
+import { OwnerSetup } from '../core/SetupProtocol';
+import { UpdateTrust, validateTrust } from '../update/Manifest';
 
 @Entry
 @Component
@@ -24,6 +26,8 @@ struct Index {
   @State workTasks: string = '';
   @State updateConfig: string = '';
   @State maintenanceEnabled: boolean = false;
+  @State importing: boolean = false;
+  private importedRelayToken: string = '';
   private native: NativeServices | null = null;
   private work: WorkClient | null = null;
   private maintenance: MaintenanceService | null = null;
@@ -68,18 +72,68 @@ struct Index {
     } catch (error) { this.status = '维护未确认；保留旧版本与原下载记录'; }
   }
   aboutToDisappear(): void {
+    this.importedRelayToken = '';
+    this.clearSetupText();
     if (this.work !== null) { this.work.close(); }
   }
   onVisibilityChanged(): void {
     if (this.native !== null) { this.native.setForeground(this.foreground); }
     if (this.work !== null) { this.work.setForeground(this.foreground); }
-    if (!this.foreground) { this.share = false; this.token = ''; this.status = '后台/熄屏暂停 Mesh 新调用；原请求与未知状态保留'; }
+    if (!this.foreground) {
+      this.share = false; this.importedRelayToken = ''; this.clearSetupText();
+      this.status = '后台/熄屏暂停 Mesh 新调用；原请求与未知状态保留';
+    }
   }
   private setSharing(value: boolean): void {
     this.share = value;
     if (this.native !== null) { this.native.setSharing(value); }
     if (this.work !== null) { this.work.refresh(); }
   }
+  private clearSetupText(): void {
+    this.enrollment = ''; this.relayConfig = ''; this.workBootstrap = '';
+    this.updateConfig = ''; this.token = ''; this.challenge = '';
+  }
+  async importSetup(): Promise<void> {
+    if (this.importing) { return; }
+    this.importing = true;
+    this.importedRelayToken = '';
+    this.clearSetupText();
+    this.setSharing(false);
+    try {
+      const value: OwnerSetup | null = await (this.native as NativeServices).readOwnerSetup();
+      if (value === null) { this.status = '已取消配置选择；共享保持关闭'; return; }
+      if (value.phase === 'enrollment') {
+        await (this.native as NativeServices).bindEnrollment(value.enrollment_json);
+        this.operationId = await (this.native as NativeServices).bindRelay(value.relay_json);
+        if (!this.foreground) { throw new Error('mesh_owner_setup_foreground_required'); }
+        this.importedRelayToken = value.relay_token;
+        this.status = '入网配置已导入；连接与登记仍以原协议回执为准；未领取挑战或开启共享。凭据仅供下一次手动 relay 动作，离开前台即清除';
+      } else {
+        // ConfigureTrusted normally honours enabled. Import may pin trust only;
+        // scheduling still requires the separate local maintenance switch.
+        if (value.update_trust_json.length > 0) {
+          const trust: UpdateTrust = JSON.parse(value.update_trust_json) as UpdateTrust;
+          validateTrust(trust, this.nodeId);
+          if (trust.enabled) { throw new Error('mesh_owner_setup_maintenance_must_be_disabled'); }
+        }
+        await (this.work as WorkClient).bindBootstrap(value.work_bootstrap_json);
+        if (value.update_trust_json.length > 0) {
+          await (this.maintenance as MaintenanceService).configureTrusted(value.update_trust_json, this.nodeId);
+          this.maintenanceEnabled = false;
+          AppStorage.setOrCreate('meshUpdateStatus', JSON.stringify(await (this.maintenance as MaintenanceService).status()));
+        }
+        this.status = '成员配置已导入；节点凭据由原协议核验后存入Asset。实际连接见下方；共享保持关闭';
+      }
+    } catch (error) {
+      this.importedRelayToken = '';
+      this.status = '配置导入未全部确认；已保留的原绑定、任务与成果不回滚。请使用同一原配置核对；共享关闭';
+    } finally {
+      this.clearSetupText();
+      this.setSharing(false);
+      this.importing = false;
+    }
+  }
+  private relayToken(): string { return this.token.length > 0 ? this.token : this.importedRelayToken; }
   async bindWork(): Promise<void> {
     try {
       await (this.work as WorkClient).bindBootstrap(this.workBootstrap);
@@ -113,24 +167,24 @@ struct Index {
   }
   async runRelay(): Promise<void> {
     try {
-      this.output = await (this.native as NativeServices).runRelay(this.operationId, this.token);
+      this.output = await (this.native as NativeServices).runRelay(this.operationId, this.relayToken());
       this.status = '原 relay 动作完成；仅明确许可才执行，完整结果保留；状态见下方，不等于已注册';
     } catch (error) { this.status = '原请求未确认或权限不可用；本地成果保留，后续只查原状态，不换 ID 重做'; }
-    finally { this.token = ''; }
+    finally { this.token = ''; this.importedRelayToken = ''; }
   }
   async submitRelay(): Promise<void> {
     try {
-      this.output = await (this.native as NativeServices).submitRelayOriginalResult(this.operationId, this.token);
+      this.output = await (this.native as NativeServices).submitRelayOriginalResult(this.operationId, this.relayToken());
       this.status = '原结果首次回传/状态查回完成；结果 POST 若曾 attempted/unknown，本次只读查状态';
     } catch (error) { this.status = '回传未确认；完整本地结果仍可查，只查原状态，不自动重复上传'; }
-    finally { this.token = ''; }
+    finally { this.token = ''; this.importedRelayToken = ''; }
   }
   async queryRelay(): Promise<void> {
     try {
-      this.output = await (this.native as NativeServices).queryRelayStatus(this.operationId, this.token);
+      this.output = await (this.native as NativeServices).queryRelayStatus(this.operationId, this.relayToken());
       this.status = '远端原状态已查回；哈希一致才确认接收，不将本地 unknown 重新执行';
     } catch (error) { this.status = '原状态暂不可查；未执行、重传或改投其他入口；本地结果仍可读'; }
-    finally { this.token = ''; }
+    finally { this.token = ''; this.importedRelayToken = ''; }
   }
   query(): void {
     try { this.output = (this.native as NativeServices).originalResult(this.operationId); }
@@ -146,68 +200,70 @@ struct Index {
   build() {
     Scroll() {
       Column({ space: 12 }) {
-        Text('Mesh · 鸿蒙原生节点').fontSize(25).fontWeight(FontWeight.Bold)
+        Text('AMITA · 鸿蒙原生节点').fontSize(25).fontWeight(FontWeight.Bold)
         Text(this.nodeId).fontSize(12).copyOption(CopyOptions.LocalDevice)
         Text(this.status).fontSize(14)
+        Button('导入设备配置').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.importSetup(); })
+        Text('读取应用私有暂存配置；没有暂存时使用系统选择器。导入不启用共享；实际连接与任务状态分别显示。').fontSize(12)
         Text('只管理 Mesh 额外共享接口，不限制手机原生功能。小艺/GUI 未接入；不承诺后台常驻。').fontSize(12)
         TextArea({ text: this.enrollment, placeholder: '导入原 mesh-enrollment/1（使用上方节点 ID、interactive 模式）' })
           .height(140).onChange((value: string) => {
             this.enrollment = value; this.setSharing(false);
           })
-        Button('绑定原身份').enabled(this.ready && this.foreground).onClick(() => { this.bind(); })
+        Button('绑定原身份').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.bind(); })
         TextInput({ text: this.endpoint, placeholder: '本人授权的 HTTPS 加入入口（无自动公网回退）' })
           .onChange((value: string) => { this.endpoint = value; })
         TextInput({ text: this.token, placeholder: '仅本次动作的 scoped token（peer/单 operation relay 不混用），不落盘' }).type(InputType.Password)
-          .onChange((value: string) => { this.token = value; })
-        Button('核对原 peer（非注册）').enabled(this.ready && this.foreground).onClick(() => { this.connect(); })
+          .onChange((value: string) => { this.importedRelayToken = ''; this.token = value; })
+        Button('核对原 peer（非注册）').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.connect(); })
         Text('持续出站任务').fontSize(18).fontWeight(FontWeight.Bold)
         Text('先完成原登记，再导入可信服务签发的手机配置。手机主动连接，不开放入站调试口。').fontSize(12)
         TextArea({ text: this.workBootstrap, placeholder: '私有 mesh-phone-bootstrap/1（含节点凭据，导入后立即清空）' })
           .height(120).onChange((value: string) => { this.workBootstrap = value; this.setSharing(false); })
-        Button('保存节点配置并连接').enabled(this.ready && this.foreground).onClick(() => { this.bindWork(); })
+        Button('保存节点配置并连接').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.bindWork(); })
         Text(this.workStatus).fontSize(12)
         Text(this.workTasks).fontSize(12)
         Text('在线状态与任务租约分别显示；unknown只核对原回执，不重做。关闭共享或离开前台立即撤回本机能力。').fontSize(12)
         Text('数据与技能维护').fontSize(18).fontWeight(FontWeight.Bold)
         TextArea({ text: this.updateConfig, placeholder: '可信维护配置：固定公钥、版本化manifest入口与本机身份' })
           .height(100).onChange((value: string) => { this.updateConfig = value; })
-        Button('保存可信维护配置').enabled(this.ready && this.foreground).onClick(() => { this.maintain('configure'); })
+        Button('保存可信维护配置').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.maintain('configure'); })
         Row({ space: 10 }) {
-          Toggle({ type: ToggleType.Switch, isOn: this.maintenanceEnabled }).onChange((value: boolean) => {
+          Toggle({ type: ToggleType.Switch, isOn: this.maintenanceEnabled }).enabled(!this.importing).onChange((value: boolean) => {
             this.maintenanceEnabled = value; this.maintain('schedule');
           })
           Text('允许系统择机同步应用数据').fontSize(12)
         }
         Row({ space: 10 }) {
-          Button('同步数据与技能').enabled(this.ready && this.foreground).onClick(() => { this.maintain('sync'); })
-          Button('回退上一数据版本').enabled(this.ready && this.foreground).onClick(() => { this.maintain('rollback'); })
+          Button('同步数据与技能').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.maintain('sync'); })
+          Button('回退上一数据版本').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.maintain('rollback'); })
         }
         Text(this.updateStatus).fontSize(12)
-        Button('系统文件选择器：选择一个文件').enabled(this.ready && this.foreground).onClick(() => { this.choose(); })
+        Button('系统文件选择器：选择一个文件').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.choose(); })
         Row({ space: 12 }) {
-          Toggle({ type: ToggleType.Switch, isOn: this.share }).onChange((value: boolean) => {
+          Toggle({ type: ToggleType.Switch, isOn: this.share }).enabled(!this.importing).onChange((value: boolean) => {
             this.setSharing(value);
           })
           Text('本人允许前台 Mesh 使用字节及本人选定文件能力').fontSize(12)
         }
         TextArea({ text: this.relayConfig, placeholder: '本人提供的 mesh-enrollment-relay-client/1：原 /enrollment/node URL + 完整 binding，不含 token' })
           .height(130).onChange((value: string) => {
-            this.relayConfig = value; this.setSharing(false);
+            this.importedRelayToken = ''; this.relayConfig = value; this.setSharing(false);
           })
-        Button('绑定原远程任务（不重置记录）').enabled(this.ready && this.foreground).onClick(() => { this.bindRelay(); })
+        Button('绑定原远程任务（不重置记录）').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.bindRelay(); })
         TextInput({ text: this.operationId, placeholder: '原 operation ID：远程调度/只读查回/本地完整结果' })
-          .onChange((value: string) => { this.operationId = value; })
-        Button('远程领取 → 执行一次 → 完整回传').enabled(this.ready && this.foreground && this.share)
+          .onChange((value: string) => { this.importedRelayToken = ''; this.operationId = value; })
+        Button('远程领取 → 执行一次 → 完整回传').enabled(this.ready && this.foreground && this.share && !this.importing)
           .onClick(() => { this.runRelay(); })
         Text('领取/结果提交曾未确认时，上方动作只查原状态；不会重做。需要匹配原任务的可信服务端与单 operation token。').fontSize(12)
         Row({ space: 10 }) {
-          Button('原结果首次回传').enabled(this.ready && this.foreground && this.share).onClick(() => { this.submitRelay(); })
-          Button('远端原状态').enabled(this.ready && this.foreground).onClick(() => { this.queryRelay(); })
+          Button('原结果首次回传').enabled(this.ready && this.foreground && this.share && !this.importing).onClick(() => { this.submitRelay(); })
+          Button('远端原状态').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.queryRelay(); })
         }
         TextArea({ text: this.challenge, placeholder: '原 mesh-enrollment-challenge/1；仅字节 recipe 或选定文件完整只读（≤64KiB）' })
           .height(150).onChange((value: string) => { this.challenge = value; this.setSharing(false); })
         Row({ space: 10 }) {
-          Button('执行一次').enabled(this.ready && this.foreground && this.share).onClick(() => { this.execute(); })
+          Button('执行一次').enabled(this.ready && this.foreground && this.share && !this.importing).onClick(() => { this.execute(); })
           Button('声明能力').enabled(this.ready).onClick(() => { this.inventory(); })
           Button('动态状态').enabled(this.ready).onClick(() => { this.dynamicState(); })
         }
