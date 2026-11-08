@@ -80,8 +80,10 @@ The familiar actions map as follows:
 
 For `perform_action`, use a fresh `element_ref` from the original inspection;
 `action` is `tap`, `set_text`, `scroll_forward` or `scroll_backward`. `text` is
-empty except for `set_text` (maximum 4096 characters). Task and operation IDs are
-injected from the real execution binding. Approval, nonce, lease and human-input
+empty except for `set_text` (maximum 4096 characters). The input JSON has flat
+`format`, `command`, `element_ref`, `action`, `text` fields; it contains no task,
+operation or epoch override. The phone obtains those from its real dispatch.
+Approval, nonce, lease and human-input
 fence fields cannot be supplied by the requester. The phone's ControlSession
 creates and checks those locally, and the owner approves each input step there.
 Human input, disconnect or a changed view can invalidate the step.

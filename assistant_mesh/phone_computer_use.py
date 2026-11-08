@@ -29,7 +29,7 @@ def encode_blob(value):
             'base64': base64.b64encode(raw).decode('ascii')}
 
 
-def command_body(command, task_id, operation_id, arguments):
+def command_body(command, arguments):
     if command not in COMMANDS or not isinstance(arguments, dict):
         raise ValueError('phone_computer_use_command_invalid')
     body = {'format': CONTRACT, 'command': command}
@@ -47,7 +47,9 @@ def command_body(command, task_id, operation_id, arguments):
                 or arguments['action'] != 'set_text' and arguments['text'] != ''):
             raise ValueError('phone_computer_use_action_arguments_invalid')
         _name(arguments['element_ref'], 'phone_element_ref', 180)
-        body['request'] = dict(arguments, task_id=task_id, operation_id=operation_id)
+        # Task/operation/epoch come solely from the phone's real dispatch.
+        # The wire command cannot supply or override those execution bindings.
+        body.update(arguments)
     elif arguments:
         raise ValueError('phone_computer_use_screenshot_arguments_invalid')
     return body
@@ -66,7 +68,7 @@ class PhoneComputerUse:
     def prepare(self, command, operation_id, arguments=None):
         _name(operation_id, 'operation_id', 180)
         _name(self.calls.task_id, 'phone_control_task_id', 180)
-        body = command_body(command, self.calls.task_id, operation_id, arguments or {})
+        body = command_body(command, arguments or {})
         return {'action': 'action' if command == 'perform_action' else 'inspect',
                 'scope': {'task_id': self.calls.task_id, 'phone_node_id': self.phone,
                           'operation_id': operation_id, 'command': command},

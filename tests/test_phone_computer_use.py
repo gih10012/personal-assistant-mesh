@@ -1,6 +1,7 @@
 """Real in-process authority and provider transport; no GUI/model execution."""
 import copy
 import contextlib
+import base64
 import hashlib
 import io
 import json
@@ -134,6 +135,9 @@ class PhoneComputerUseTests(unittest.TestCase):
                                 {'action': 'tap', 'element_ref': 'original-view:1:0', 'text': ''})
         self.assertEqual('action', work['action'])
         self.assertEqual(self.f.task['id'], work['scope']['task_id'])
+        command = json.loads(base64.b64decode(work['workload']['input']['base64']))
+        self.assertEqual({'format': CONTRACT, 'command': 'perform_action', 'action': 'tap',
+                          'element_ref': 'original-view:1:0', 'text': ''}, command)
         with self.assertRaises(ValueError):
             self.tool.prepare('perform_action', 'original-action',
                 {'action': 'tap', 'element_ref': 'view:1:0', 'text': '', 'approved': True})
