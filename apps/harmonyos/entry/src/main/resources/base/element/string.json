@@ -1,1 +1,6 @@
-{ "string": [{ "name": "module_desc", "value": "Owner-controlled interactive Mesh capability provider" }] }
+{ "string": [
+  { "name": "module_desc", "value": "本人管理的 AMITA 手机节点" },
+  { "name": "phone_control_label", "value": "AMITA 手机操控服务" },
+  { "name": "phone_control_description", "value": "为本人授权的 AMITA 任务观察界面并申请单次操作；本人可随时拒绝或关闭" },
+  { "name": "screen_capture_reason", "value": "为本人授权的任务提供单次屏幕观察，不自动录像" }
+] }

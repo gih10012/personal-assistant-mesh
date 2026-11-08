@@ -1,0 +1,5 @@
+{
+  "accessibilityCapabilities": ["retrieve", "keyEventObserver", "gesture"],
+  "accessibilityAbilityTypes": ["generic"],
+  "needHide": false
+}

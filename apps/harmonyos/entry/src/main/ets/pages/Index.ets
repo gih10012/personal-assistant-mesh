@@ -4,6 +4,7 @@ import { WorkClient, WorkStatus, WorkTaskStatus } from '../platform/WorkClient';
 import { MaintenanceService } from '../update/MaintenanceService';
 import { OwnerSetup } from '../core/SetupProtocol';
 import { UpdateTrust, validateTrust } from '../update/Manifest';
+import { PhoneFeatures } from './PhoneFeatures';
 
 @Entry
 @Component
@@ -28,6 +29,8 @@ struct Index {
   @State maintenanceEnabled: boolean = false;
   @State importing: boolean = false;
   @State importedRelayReady: boolean = false;
+  @State memberConfigured: boolean = false;
+  @State showAdvanced: boolean = false;
   private importedRelayToken: string = '';
   private native: NativeServices | null = null;
   private work: WorkClient | null = null;
@@ -50,11 +53,12 @@ struct Index {
       this.maintenanceEnabled = maintenanceStatus.enabled;
       AppStorage.setOrCreate('meshUpdateStatus', JSON.stringify(maintenanceStatus));
       this.ready = true;
-      this.status = '身份已恢复；仅前台交互节点；未注册';
+      this.status = this.memberConfigured ? 'AMITA 成员身份已恢复' : '身份已恢复；等待加入 AMITA';
     } catch (error) { this.status = '私有状态不可用，保留原记录；不自动初始化替代身份'; }
   }
   private showWorkStatus(raw: string): void {
     const value: WorkStatus = JSON.parse(raw) as WorkStatus;
+    this.memberConfigured = value.configured;
     this.workStatus = '连接：' + value.connection + ' · 完成 ' + value.settled + '/' + value.tasks +
       ' · 待核对 ' + value.unknown + ' · 待回传 ' + value.pending_results;
     this.workTasks = value.task_states.map((row: WorkTaskStatus): string =>
@@ -239,9 +243,19 @@ struct Index {
         Text('AMITA · 鸿蒙原生节点').fontSize(25).fontWeight(FontWeight.Bold)
         Text(this.nodeId).fontSize(12).copyOption(CopyOptions.LocalDevice)
         Text(this.status).fontSize(14)
+        Text(this.workStatus).fontSize(13)
+        PhoneFeatures({ memberReady: this.memberConfigured })
+        Row({ space: 12 }) {
+          Toggle({ type: ToggleType.Switch, isOn: this.share }).enabled(this.memberConfigured && !this.importing)
+            .onChange((value: boolean): void => { if (value !== this.share) { this.setSharing(value); } })
+          Text('本页打开时分享基础能力').fontSize(13)
+        }
+        Text(this.workTasks).fontSize(12)
         Button('导入设备配置').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.importSetup(); })
         Text('读取应用私有暂存配置；没有暂存时使用系统选择器。导入不启用共享；实际连接与任务状态分别显示。').fontSize(12)
-        Text('只管理 Mesh 额外共享接口，不限制手机原生功能。小艺/GUI 未接入；不承诺后台常驻。').fontSize(12)
+        Button(this.showAdvanced ? '收起接入诊断' : '接入与诊断设置').onClick((): void => { this.showAdvanced = !this.showAdvanced; })
+        if (this.showAdvanced) {
+        Text('以下为接入与原回执诊断，不代表相应系统能力已经开通。').fontSize(12)
         TextArea({ text: this.enrollment, placeholder: '导入原 mesh-enrollment/1（使用上方节点 ID、interactive 模式）' })
           .height(140).onChange((value: string) => {
             if (value !== this.enrollment) { this.enrollment = value; this.setSharing(false); }
@@ -316,6 +330,7 @@ struct Index {
         }
         Button('原结果查回，不重做').enabled(this.ready).onClick(() => { this.query(); })
         TextArea({ text: this.output, placeholder: '私有完整结果；不要贴公共仓库/日志' }).height(220).enabled(false)
+        }
       }.padding(20).width('100%')
     }.height('100%').width('100%')
   }

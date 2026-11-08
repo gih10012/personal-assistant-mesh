@@ -101,6 +101,7 @@ test('foreground connects/discovers/updates without a task, then original alloca
   const f = fixture();
   await f.engine.connect([f.pending.capability_id]); await f.engine.discover();
   await f.engine.control(true, [f.pending.capability_id]);
+  assert.ok(f.controls.every(control => control.model_state === 'unknown'));
   assert.equal(f.engine.snapshot.records.length, 0);
   const [dispatch] = await f.engine.pull(); const row = await f.engine.run(dispatch);
   assert.equal(row.state, 'settled'); assert.equal(f.invocations, 1);
@@ -117,6 +118,45 @@ test('dispatch binds the real authority provider principal before any journal or
   }
   assert.equal(f.invocations, 0);
   assert.equal(f.engine.snapshot.records.length, 0);
+});
+
+test('a new local approval follows durable preparation and refreshes its grant before source admission', async () => {
+  const f = fixture(); let approvals = 0;
+  f.host.preflight = async () => {
+    approvals++;
+    assert.equal(f.durable.records[0].state, 'prepared');
+    assert.equal(f.calls.length, 0);
+    f.grant('new-local-approval');
+  };
+  const row = await f.engine.run(f.pending);
+  assert.equal(row.state, 'settled'); assert.equal(approvals, 1);
+  assert.equal(row.permission_context, 'new-local-approval');
+  assert.equal(f.invocations, 1);
+});
+
+test('local approval rejection never admits or repeats input even after cold resume and another pull', async () => {
+  const f = fixture(); let approvals = 0;
+  f.host.preflight = async () => { approvals++; throw new Error('owner-declined'); };
+  const row = await f.engine.run(f.pending);
+  assert.equal(row.state, 'unknown'); assert.equal(f.invocations, 0);
+  f.cold(); await f.engine.run(f.pending);
+  assert.equal(approvals, 1); assert.equal(f.invocations, 0);
+  assert.equal(f.calls.filter(call => ['accept', 'start'].includes(call.args.provider?.action)).length, 0);
+});
+
+test('GUI result reporting can outlive an element grant while owner withdrawal still blocks its bytes', async () => {
+  const f = fixture(); const execute = f.host.execute;
+  f.host.execute = async (...args) => { const result = await execute(...args); f.grant('scene-changed'); return result; };
+  let sharing = true;
+  f.host.reportAllowed = () => sharing;
+  const row = await f.engine.run(f.pending);
+  assert.equal(row.state, 'settled'); assert.equal(f.invocations, 1);
+  const g = fixture(); const run = g.host.execute;
+  g.host.execute = async (...args) => { const result = await run(...args); sharing = false; return result; };
+  g.host.reportAllowed = () => sharing;
+  const blocked = await g.engine.run(g.pending);
+  assert.equal(blocked.state, 'result_pending');
+  assert.equal(g.calls.filter(call => call.args.provider?.action === 'result').length, 0);
 });
 
 test('start ACK loss survives cold resume as original unknown and never invokes native adapter', async () => {

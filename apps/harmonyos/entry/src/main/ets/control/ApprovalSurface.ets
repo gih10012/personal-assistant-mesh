@@ -3,7 +3,7 @@ import { WantAgent } from '@kit.AbilityKit';
 import { liveViewManager } from '@kit.LiveViewKit';
 import { notificationManager } from '@kit.NotificationKit';
 // NotificationContent in this real API26 SDK still declares the legacy enum.
-import notification from '@ohos.notification';
+import legacyNotification from '@ohos.notification';
 import { ApprovalTicket } from './ControlSession';
 
 export interface ApprovalActions {
@@ -104,7 +104,7 @@ export class ApprovalSurface {
       const notification: notificationManager.NotificationRequest = { id: this.id, tapDismissed: false,
         deliveryTime: Date.now(), autoDeletedTime: ticket.expires_at,
         wantAgent: actions.review,
-        content: { contentType: notification.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        content: { contentType: legacyNotification.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
           normal: { title: 'AMITA · 等待本人确认', text: ticket.summary.slice(0, 320),
             additionalText: '单次决定 · 到期失效 · 关闭通知不会批准' } },
         actionButtons: ticket.review_required ? [{ title: '查看完整动作', wantAgent: actions.review },

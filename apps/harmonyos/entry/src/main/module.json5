@@ -12,9 +12,17 @@
       "skills": [{ "entities": ["entity.system.home"], "actions": ["action.system.home"] }]
     }],
     "extensionAbilities": [{
-      "name": "AmitaUpdateWork", "srcEntry": "./ets/background/AmitaUpdateWork.ets",
+      "name": "AmitaUpdateWork", "srcEntry": "./ets/maintenance/AmitaMaintenanceWork.ets",
       "type": "workScheduler", "exported": false
+    }, {
+      "name": "PhoneControlExtension", "srcEntry": "./ets/control/PhoneControlExtension.ets",
+      "type": "accessibility", "exported": true,
+      "label": "$string:phone_control_label", "description": "$string:phone_control_description",
+      "metadata": [{ "name": "ohos.accessibleability", "resource": "$profile:accessibility_config" }]
     }],
-    "requestPermissions": [{ "name": "ohos.permission.INTERNET" }]
+    "requestPermissions": [{ "name": "ohos.permission.INTERNET" }, {
+      "name": "ohos.permission.CUSTOM_SCREEN_CAPTURE", "reason": "$string:screen_capture_reason",
+      "usedScene": { "abilities": ["EntryAbility", "PhoneControlExtension"], "when": "inuse" }
+    }]
   }
 }

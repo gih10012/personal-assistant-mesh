@@ -60,6 +60,12 @@ export interface WorkHost {
   exchange(action: string, args: Object): Promise<PhoneResponse>;
   execute(dispatch: ProviderDispatch): Promise<Blob>;
   allowed(dispatch: ProviderDispatch, permissionContext?: string): boolean;
+  // New work only: validate/request local approval after the original prepared
+  // journal is durable, before any provider admission or input delivery.
+  preflight?(dispatch: ProviderDispatch): Promise<void>;
+  // Returning already-authorized bytes need not reuse an obsolete UI element
+  // grant. The host still checks current owner sharing/privacy permission.
+  reportAllowed?(dispatch: ProviderDispatch, permissionContext?: string): boolean;
   permission(dispatch: ProviderDispatch): string;
   id(): string;
   now(): number;
@@ -124,12 +130,17 @@ export function validateWorkDispatch(value: ProviderDispatch, nodeId: string, pe
   requireValue(selected !== null && selected !== undefined && selected.capability_id === value.capability_id,
     'mesh_work_selection_mismatch');
   epoch(selected.epoch);
-  const suffix: string = selected.action === 'challenge.bytes.repeat' ? ':bytes-v1' : ':selected-file-v1';
-  requireValue((selected.action === 'challenge.bytes.repeat' || selected.action === 'file.read.selected') &&
+  const control: boolean = selected.action === 'inspect' || selected.action === 'action';
+  const suffix: string = control ? ':ui-control-v1' :
+    selected.action === 'challenge.bytes.repeat' ? ':bytes-v1' : ':selected-file-v1';
+  requireValue((selected.action === 'challenge.bytes.repeat' || selected.action === 'file.read.selected' || control) &&
     value.capability_id === nodeId + suffix && selected.epoch === 1, 'mesh_work_adapter_contract_mismatch');
   requireValue(selected.scope !== null && selected.scope !== undefined && selected.workload !== null &&
     typeof selected.workload === 'object', 'mesh_work_scope_required');
-  if (selected.action === 'challenge.bytes.repeat') {
+  if (control) {
+    requireValue(Object.keys(selected.workload).join('|') === 'input', 'mesh_work_control_recipe_shape_invalid');
+    validateWorkBlob(selected.workload.input as Blob);
+  } else if (selected.action === 'challenge.bytes.repeat') {
     validateWorkBlob(selected.workload.input as Blob);
     const repeat: number = selected.workload.repeat as number;
     requireValue(Number.isSafeInteger(repeat) && repeat >= 1 && repeat <= 64 &&
@@ -174,7 +185,9 @@ export class WorkEngine {
     const intent: ControlIntent = this.snapshot.pending_control as ControlIntent;
     const result: PhoneResponse = await this.host.exchange(intent.action, { session_id: this.config().session_id,
       control_id: intent.control_id, online: intent.online, capabilities: intent.capabilities,
-      agent_state: intent.capabilities.length > 0 ? 'ready' : 'idle', model_state: 'unavailable' });
+      // These are deterministic providers; a local LLM is neither announced
+      // available nor required to deliver a device capability.
+      agent_state: intent.capabilities.length > 0 ? 'ready' : 'idle', model_state: 'unknown' });
     this.validateResponse(result); this.snapshot.pending_control = null; await this.save();
     // A failed old heartbeat must never swallow a subsequent permission withdrawal.
     if (intent.online !== online || intent.capabilities.join('|') !== capabilities.join('|')) {
@@ -247,7 +260,8 @@ export class WorkEngine {
         return this.reconcile(old); // No restart or re-delivery can invoke the native adapter.
       }
     }
-    requireValue(this.host.allowed(dispatch) && (dispatch.deadline as number) > this.host.now(), 'mesh_work_permission_unavailable');
+    requireValue((this.host.preflight !== undefined || this.host.allowed(dispatch)) &&
+      (dispatch.deadline as number) > this.host.now(), 'mesh_work_permission_unavailable');
     requireValue(this.snapshot.records.length < 256, 'mesh_work_journal_capacity_reached');
     const row: WorkRecord = { operation_id: dispatch.operation_id, capability_id: dispatch.capability_id,
       task_id: dispatch.task_id as string, task_epoch: dispatch.task_epoch as number, dispatch_json: JSON.stringify(dispatch),
@@ -256,6 +270,13 @@ export class WorkEngine {
       permission_context: this.host.permission(dispatch) };
     this.snapshot.records.push(row); await this.save();
     try {
+      if (this.host.preflight !== undefined) {
+        await this.host.preflight(dispatch);
+        row.permission_context = this.host.permission(dispatch);
+        await this.save();
+      }
+      requireValue(this.host.allowed(dispatch, row.permission_context) && (dispatch.deadline as number) > this.host.now(),
+        'mesh_work_permission_unavailable');
       const observed: ProviderDispatch = await this.inspect(row);
       requireValue(observed.state === 'pending' && observed.epoch === dispatch.epoch && observed.receipt_id === null,
         'mesh_work_original_not_pending');
@@ -292,7 +313,9 @@ export class WorkEngine {
   private async reportResult(row: WorkRecord): Promise<WorkRecord> {
     const dispatch: ProviderDispatch = JSON.parse(row.dispatch_json) as ProviderDispatch;
     // File-sharing revocation also prevents sending a locally buffered private document.
-    requireValue(this.host.allowed(dispatch, row.permission_context), 'mesh_work_result_permission_required');
+    const reportAllowed: boolean = this.host.reportAllowed === undefined ?
+      this.host.allowed(dispatch, row.permission_context) : this.host.reportAllowed(dispatch, row.permission_context);
+    requireValue(reportAllowed, 'mesh_work_result_permission_required');
     const result: Blob = JSON.parse(row.result_json) as Blob; validateWorkBlob(result);
     row.state = 'result_pending'; await this.save();
     const receipt: ResultReceipt = await this.provider(row, 'result', { operation_id: row.operation_id,

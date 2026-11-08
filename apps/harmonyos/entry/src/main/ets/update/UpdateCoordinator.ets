@@ -7,6 +7,7 @@ import { Artifact, BACKGROUND_BYTES, DataManifest, ManifestEnvelope, SMALL_ARTIF
 import { UpdateDB, UpdateState } from './UpdateDB';
 import { UpdateFiles } from './UpdateFiles';
 import { verifyEnvelope } from './UpdateCrypto';
+import { MaintenanceApiError } from '../maintenance/MaintenanceError';
 
 // No request.agent dependency: safe to share with WorkScheduler Extension.
 export class UpdateCoordinator {
@@ -90,7 +91,7 @@ export class UpdateCoordinator {
       if (small && total <= BACKGROUND_BYTES) { await this.activateIfComplete(db, owner, raw, manifest, files); }
     } catch (error) {
       if (owner.length > 0) { await db.checked(owner, 'update_failed_old_version_retained'); }
-      throw new Error('update_failed_old_version_retained');
+      throw new MaintenanceApiError(error as Error);
     } finally {
       clearTimeout(timeout);
       if (owner.length > 0) { await db.release(owner); }

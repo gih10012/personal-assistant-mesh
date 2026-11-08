@@ -105,6 +105,25 @@ export class SelfMaintenanceClient implements SupervisorHost {
       } finally { await this.close(); this.busy = false; }
     }
   }
+  async isEnabled(): Promise<boolean> {
+    const database: relationalStore.RdbStore = await relationalStore.getRdbStore(this.context, {
+      name: 'amita_updates_v1.db', securityLevel: relationalStore.SecurityLevel.S2
+    });
+    try {
+      const tables: relationalStore.ResultSet = await database.querySql(
+        'SELECT name FROM sqlite_master WHERE type=? AND name=?', ['table', 'phone_self_maintenance']);
+      let present: boolean = false;
+      try { present = tables.goToFirstRow(); } finally { tables.close(); }
+      if (!present) { return false; }
+      const rows: relationalStore.ResultSet = await database.querySql('SELECT state FROM phone_self_maintenance WHERE id=1');
+      try {
+        if (!rows.goToFirstRow()) { throw new Error('mesh_self_maintenance_state_missing'); }
+        const state: SupervisorState = JSON.parse(rows.getString(0)) as SupervisorState;
+        restoreSupervisor(state);
+        return state.enabled;
+      } finally { rows.close(); }
+    } finally { await database.close(); }
+  }
   async runOnce(snapshot: DiagnosticSnapshot): Promise<MaintenanceStatus> {
     if (this.busy) { throw new Error('mesh_self_maintenance_busy'); }
     this.busy = true;

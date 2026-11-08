@@ -7,6 +7,7 @@ import { UpdateCoordinator } from './UpdateCoordinator';
 import { UpdateDB, UpdateState } from './UpdateDB';
 import { UpdateFiles } from './UpdateFiles';
 import { verifyEnvelope } from './UpdateCrypto';
+import { SelfMaintenanceClient } from '../selfmaintenance/SelfMaintenanceClient';
 
 // UIAbility façade. Only trusted owner bootstrap import can set/replace a route.
 export class MaintenanceService {
@@ -38,7 +39,7 @@ export class MaintenanceService {
       requireUpdate(this.foreground(), 'update_foreground_required');
       await db.configure(JSON.stringify(value), owner);
     } finally { if (owner.length > 0) { await db.release(owner); } await db.close(); }
-    await scheduleUpdates(this.context, value.enabled);
+    await scheduleUpdates(this.context, value.enabled || await new SelfMaintenanceClient(this.context).isEnabled());
   }
   async setEnabled(enabled: boolean): Promise<void> {
     const db: UpdateDB = await UpdateDB.open(this.context);
@@ -91,7 +92,7 @@ export class MaintenanceService {
       const raw: string = (await db.state()).trust;
       if (raw.length > 0) { enabled = (JSON.parse(raw) as UpdateTrust).enabled; }
     } finally { await db.close(); }
-    await scheduleUpdates(this.context, enabled);
+    await scheduleUpdates(this.context, enabled || await new SelfMaintenanceClient(this.context).isEnabled());
   }
   async status(): Promise<UpdateStatus> {
     const db: UpdateDB = await UpdateDB.open(this.context);

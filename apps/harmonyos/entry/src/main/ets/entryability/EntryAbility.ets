@@ -1,14 +1,19 @@
-import { UIAbility } from '@kit.AbilityKit';
+import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { MaintenanceService } from '../update/MaintenanceService';
+import { PhoneControlBridge } from '../control/PhoneControlBridge';
 
 export default class EntryAbility extends UIAbility {
   private maintenance: MaintenanceService | null = null;
   private poll: number = -1;
-  onCreate(): void {
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     AppStorage.setOrCreate<boolean>('meshForeground', false);
     AppStorage.setOrCreate<string>('meshUpdateStatus', '{"state":"initializing"}');
     this.maintenance = new MaintenanceService(this.context);
+    PhoneControlBridge.onNewWant(this.context, want).catch((): void => {});
+  }
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    PhoneControlBridge.onNewWant(this.context, want).catch((): void => {});
   }
   onWindowStageCreate(stage: window.WindowStage): void { stage.loadContent('pages/Index'); }
   private async publish(): Promise<void> {
