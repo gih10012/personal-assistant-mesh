@@ -12,6 +12,16 @@ export interface IncidentRecord {
   incident_id: string; snapshot: DiagnosticSnapshot; state: string;
   task_id: string; operation_id: string; task_status: string; result: string;
   recovered: boolean;
+  task_epoch?: number;
+  repair?: RepairRecord;
+}
+export interface RepairCheckpoint { active_version: number; target_version: number; target_manifest_sha256: string; }
+export interface RepairEvidence {
+  outcome: string; active_version: number; observed_receipts: number; target_manifest_sha256: string;
+}
+export interface RepairRecord {
+  format: string; plan_json: string; state: string; checkpoint: RepairCheckpoint;
+  evidence: RepairEvidence | null; error_code: number;
 }
 export interface SupervisorState {
   format: string; enabled: boolean; records: IncidentRecord[];
@@ -42,9 +52,17 @@ export function restoreSupervisor(state: SupervisorState): void {
     const row: IncidentRecord = state.records[i];
     validateSnapshot(row.snapshot);
     if (row.recovered === undefined) { row.recovered = false; }
+    if (row.task_epoch === undefined) { row.task_epoch = 0; }
     requireState(/^[A-Za-z0-9_-]{1,96}$/.test(row.incident_id) &&
       typeof row.recovered === 'boolean' &&
       ['pending', 'attempted', 'unknown', 'accepted', 'finished'].includes(row.state));
+    requireState(Number.isSafeInteger(row.task_epoch) && (row.task_epoch as number) >= 0);
+    if (row.repair !== undefined) {
+      requireState(row.repair.format === 'amita-local-repair-record/1' &&
+        typeof row.repair.plan_json === 'string' && row.repair.plan_json.length <= 8192 &&
+        ['intent', 'attempted', 'unknown', 'completed'].includes(row.repair.state));
+      if (row.repair.state === 'intent' || row.repair.state === 'attempted') { row.repair.state = 'unknown'; }
+    }
     for (let j: number = 0; j < i; j++) { requireState(state.records[j].incident_id !== row.incident_id); }
     if (row.state === 'attempted') { row.state = 'unknown'; }
   }
@@ -111,9 +129,11 @@ export class SelfMaintenanceSupervisor {
       reply.local_cognition === 'not_configured' && reply.automatic_repair === false &&
       typeof reply.task_id === 'string' && reply.task_id.length > 0 &&
       typeof reply.operation_id === 'string' && reply.operation_id.length > 0 &&
+      Number.isSafeInteger(reply.task_epoch) && reply.task_epoch >= (row.task_epoch === undefined ? 0 : row.task_epoch) &&
       (row.task_id === '' || row.task_id === reply.task_id) &&
       (row.operation_id === '' || row.operation_id === reply.operation_id));
     row.task_id = reply.task_id; row.operation_id = reply.operation_id;
+    row.task_epoch = reply.task_epoch;
     row.task_status = reply.status; row.state = 'accepted';
   }
 }

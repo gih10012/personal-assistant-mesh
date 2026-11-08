@@ -45,13 +45,17 @@ export class UpdateCoordinator {
       if (this.activeRequest === transport) { this.activeRequest = null; }
     }
   }
-  async syncSmall(): Promise<void> {
-    this.stopped = false; this.deadline = Date.now() + 90000; this.used = 0;
-    const db: UpdateDB = await UpdateDB.open(this.context);
+  // Trusted in-process callers may reuse their existing update/self-maintenance
+  // lease. No wire request supplies these objects or an owner string.
+  async syncSmall(heldDB: UpdateDB | null = null, heldOwner: string = '', budgetMs: number = 90000): Promise<void> {
+    requireUpdate(Number.isSafeInteger(budgetMs) && budgetMs >= 1 && budgetMs <= 90000, 'update_remaining_budget_required');
+    this.stopped = false; this.deadline = Date.now() + budgetMs; this.used = 0;
+    const db: UpdateDB = heldDB === null ? await UpdateDB.open(this.context) : heldDB;
     let owner: string = '';
-    const timeout: number = setTimeout((): void => this.cancel(), 90000);
+    const timeout: number = setTimeout((): void => this.cancel(), budgetMs);
     try {
-      owner = await db.acquire();
+      owner = heldDB === null ? await db.acquire() : heldOwner;
+      requireUpdate(owner.length > 0 && (await db.state()).lease === owner, 'update_original_lease_required');
       const state: UpdateState = await db.state();
       if (state.trust.length === 0) { return; }
       const credential: NodeCredential | null = await new NodeCredentialStore().load();
@@ -94,8 +98,10 @@ export class UpdateCoordinator {
       throw new MaintenanceApiError(error as Error);
     } finally {
       clearTimeout(timeout);
-      if (owner.length > 0) { await db.release(owner); }
-      await db.close();
+      if (heldDB === null) {
+        if (owner.length > 0) { await db.release(owner); }
+        await db.close();
+      }
     }
   }
   private samePayload(left: string, right: string): boolean {
