@@ -66,7 +66,7 @@ export class GlobalScreenCapture {
       throw new Error('phone_global_capture_permission_or_local_approval_required');
     }
   }
-  async captureApproved(deadline: number, fence: ControlFence): Promise<GlobalScreenImage> {
+  async captureApproved(deadline: number, fence: ControlFence, meshBudget: boolean = false): Promise<GlobalScreenImage> {
     this.allowed(deadline, fence);
     if (this.busy || Date.now() - this.lastCaptureAt < 1000) { throw new Error('phone_global_capture_busy_or_rate_limited'); }
     this.busy = true; this.lastCaptureAt = Date.now();
@@ -75,15 +75,18 @@ export class GlobalScreenCapture {
       try {
         this.allowed(deadline, fence);
         const original: image.ImageInfo = await pixels.getImageInfo();
-        const factor: number = Math.min(1, 1280 / original.size.width, 1280 / original.size.height,
-          Math.sqrt(1048576 / (original.size.width * original.size.height)));
+        const edge: number = meshBudget ? 640 : 1280;
+        const pixelsBudget: number = meshBudget ? 262144 : 1048576;
+        const bytesBudget: number = meshBudget ? 42000 : 262144;
+        const factor: number = Math.min(1, edge / original.size.width, edge / original.size.height,
+          Math.sqrt(pixelsBudget / (original.size.width * original.size.height)));
         if (!Number.isFinite(factor) || factor <= 0) { throw new Error('phone_global_capture_dimensions_invalid'); }
         if (factor < 1) { await pixels.scale(factor, factor); }
         const dimensions: image.ImageInfo = await pixels.getImageInfo();
         const packer: image.ImagePacker = image.createImagePacker();
         try {
-          const bytes: ArrayBuffer = await packer.packing(pixels, { format: 'image/jpeg', quality: 60 });
-          if (bytes.byteLength > 262144 || dimensions.size.width * dimensions.size.height > 1048576) {
+          const bytes: ArrayBuffer = await packer.packing(pixels, { format: 'image/jpeg', quality: meshBudget ? 45 : 60 });
+          if (bytes.byteLength > bytesBudget || dimensions.size.width * dimensions.size.height > pixelsBudget) {
             throw new Error('phone_global_capture_budget_exceeded');
           }
           this.allowed(deadline, fence);

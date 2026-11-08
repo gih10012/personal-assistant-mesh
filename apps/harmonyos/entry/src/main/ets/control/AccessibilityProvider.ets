@@ -55,6 +55,7 @@ export class AccessibilityProvider implements ControlProvider {
   private lastError: string = 'accessibility_not_connected';
   private lastErrorCode: number = 0;
   private ownerActivity: (reason: string) => void;
+  private admissionPolicy: () => boolean = (): boolean => true;
 
   constructor(nodeId: string, ownerActivity: (reason: string) => void) {
     requireProvider(/^[A-Za-z0-9._:-]{1,160}$/.test(nodeId), 'phone_accessibility_node_invalid');
@@ -72,7 +73,7 @@ export class AccessibilityProvider implements ControlProvider {
     const inspect: boolean = this.connected && this.rootVerified;
     const callbacksObserved: boolean = this.eventCount + this.keyCount > 0;
     return { provider: 'harmony-accessibility-public-deprecated', inspect: inspect,
-      act: inspect && this.ownerAuthorised && callbacksObserved,
+      act: inspect && this.ownerAuthorised && callbacksObserved && this.admissionPolicy(),
       // Means actual callbacks have been observed, not complete physical-touch
       // coverage. status() explicitly discloses the conservative limitation.
       human_input_observable: callbacksObserved,
@@ -111,8 +112,13 @@ export class AccessibilityProvider implements ControlProvider {
   // Forward every received event, including events whose physical/automatic
   // origin is indistinguishable. Do not inspect or persist event text/extraInfo.
   onAccessibilityEvent(event: AccessibilityEvent): void {
-    this.eventCount++; this.invalidate('accessibility_event');
+    this.eventCount++;
+    // A notification-content update is not a physical input event. Publishing
+    // our approval notification must not itself invalidate its pending ticket.
+    if (event.eventType !== 'notificationUpdate') { this.invalidate('accessibility_event'); }
   }
+  noteOwnerDecisionKey(): void { this.keyCount++; } // Only after the runtime matches an exact live decision key.
+  setAdmissionPolicy(policy: () => boolean): void { this.admissionPolicy = policy; }
   onKeyEvent(event: KeyEvent): boolean {
     this.keyCount++; this.invalidate('accessibility_key_event');
     return false; // Never intercept the owner's real keys.
