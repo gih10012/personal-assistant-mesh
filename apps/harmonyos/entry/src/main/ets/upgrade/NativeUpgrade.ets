@@ -1,14 +1,9 @@
 import { common, bundleManager } from '@kit.AbilityKit';
 import { updateManager } from '@kit.AppGalleryKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-
-export interface DistributionLink {
-  format: string;
-  bundle_name: string;
-  channel: string;
-  url: string;
-  expires_at: number;
-}
+import { NodeCredential, NodeCredentialStore } from '../security/NodeCredentialStore';
+import { InstalledConfig, readInstalledConfig } from '../update/InstalledConfig';
+import { DistributionLink, validateDistributionLink } from './DistributionConfig';
 export interface NativeUpgradeStatus {
   state: string;
   installedVersion: number;
@@ -65,20 +60,30 @@ export class NativeUpgrade {
       return this.status();
     } catch (error) { this.failed(error as Error); throw new Error('native_store_dialog_unavailable'); }
   }
+  private async configured(): Promise<string> {
+    const credential: NodeCredential | null = await new NodeCredentialStore().load();
+    if (credential === null) { throw new Error('native_distribution_original_node_required'); }
+    const config: InstalledConfig | null = await readInstalledConfig(this.context, credential.nodeId, 'config/native-distribution.json');
+    if (config === null) { throw new Error('native_signed_distribution_config_missing'); }
+    return config.raw;
+  }
+  async openConfiguredDistributionLink(): Promise<NativeUpgradeStatus> {
+    this.requireForeground();
+    return this.openDistributionLink(await this.configured());
+  }
+  // Compatibility for trusted callers: even provided bytes must exactly match
+  // the current signed active file, never an unsigned model/network string.
   async openOwnerDistributionLink(raw: string): Promise<NativeUpgradeStatus> {
     this.requireForeground();
-    // raw must be read from the existing signed config artifact via
-    // MaintenanceService.resolveDataPath, or imported by the trusted owner UI.
-    // No manifest or response may authorize an arbitrary native installer.
+    if (raw !== await this.configured()) { throw new Error('native_signed_distribution_config_required'); }
+    return this.openDistributionLink(raw);
+  }
+  private async openDistributionLink(raw: string): Promise<NativeUpgradeStatus> {
+    this.requireForeground();
     if (raw.length > 4096) { throw new Error('native_distribution_config_budget'); }
     const link: DistributionLink = JSON.parse(raw) as DistributionLink;
     const installed: bundleManager.BundleInfo = await bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-    if (link.format !== 'amita-native-distribution-link/1' || link.bundle_name !== installed.name ||
-      link.channel !== 'agc-designated-device' || !Number.isSafeInteger(link.expires_at) ||
-      link.expires_at <= Math.floor(Date.now() / 1000) ||
-      !/^https:\/\/[A-Za-z0-9.-]+\//.test(link.url) || /[\s\\@#]/.test(link.url) || link.url.length > 2048) {
-      throw new Error('native_owner_distribution_link_invalid');
-    }
+    validateDistributionLink(link, installed.name, Math.floor(Date.now() / 1000));
     try {
       this.requireForeground();
       await this.context.openLink(link.url, { appLinkingOnly: false });

@@ -22,36 +22,41 @@ error 1009400004 means the application is not in foreground. See the
 Therefore this API must not be presented as proof that today's debug HAP can
 update itself wirelessly.
 
-For the owner's test phone, the alternative is an actually approved **AGC
-designated-device distribution**. The [official distribution comparison](https://developer.huawei.com/consumer/cn/doc/app/agc-help-invite-test-overview-0000002287701773/)
-describes a share-link channel. The [designated-device FAQ](https://developer.huawei.com/consumer/cn/doc/App/agc-help-internal-test-faq-0000002295372101/)
-requires developer mode and describes device limits and a 90-day lifetime from
-first installation. Root must obtain the corresponding signing/distribution
+For the owner's test phone, supported owner-configured link types are
+`agc-invitation-test` and `agc-designated-device`. The [official distribution comparison](https://developer.huawei.com/consumer/cn/doc/app/agc-help-invite-test-overview-0000002287701773/)
+describes test distribution channels. This source has not verified actual
+account eligibility, Profile lifetime or an installation on this phone. A
+search-index FAQ excerpt is not proof of a 90-day entitlement or channel access.
+Root must obtain the corresponding signing/distribution
 eligibility in the existing Huawei account and test an actual same-identity
 upgrade. Neither current debug Profile eligibility nor an AppGallery SDK import
 proves access to that channel. Do not assume a debug-to-distribution signature
 transition preserves app data; do not silently uninstall/recreate identity.
 
 When Root has an actual approved distribution link, place this small config in
-the **existing signed data manifest** (kind config) or import it via trusted
-owner UI. Never accept unsigned network/model instructions as this config:
+the **existing signed data manifest**, kind config at the fixed logical path
+`config/native-distribution.json` (the existing PhoneFeatures path). Never accept unsigned network/model instructions:
 
 ```json
 {
   "format": "amita-native-distribution-link/1",
   "bundle_name": "org.personalassistant.mesh",
-  "channel": "agc-designated-device",
+  "channel": "agc-invitation-test",
   "url": "https://ACTUAL-OWNER-APPROVED-DISTRIBUTION-HOST/ACTUAL-LINK",
   "expires_at": 1
 }
 ```
 
-The sample URL/expiry are placeholders, deliberately unusable. Read a verified
-artifact through the original MaintenanceService.resolveDataPath and bounded
-private-file read, then call `openOwnerDistributionLink(raw)` on an explicit
-user gesture. It checks the installed bundle and expiry and opens the approved
+The sample URL/expiry are placeholders, deliberately unusable. On an explicit
+user gesture call `openConfiguredDistributionLink()`. It re-verifies the active
+original signed envelope, node trust, complete config artifact hash and current
+pointer, then checks the installed bundle/expiry and opens the approved
 HTTPS link through `UIAbilityContext.openLink`. That is a **system/browser
 confirmation request**, not signature verification or installation success.
+The compatibility `openOwnerDistributionLink(raw)` also requires provided bytes
+to exactly match that currently active signed file; it cannot open raw unsigned
+UI/model/network input. AppGallery's formal-release check remains a separate API
+and does not acquire invitation-test support by adding this link channel.
 The owner must review the original AGC domain/link before signing its config.
 No HAP bytes pass through the config/skill/file updater. Platform installation
 policy remains authoritative, including unavailable channels and user refusal.
