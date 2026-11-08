@@ -134,7 +134,7 @@ class PhoneAuthority:
                   'capabilities', 'scope', 'enrollment'}
         for node in value['nodes']:
             if (not isinstance(node, dict) or not fields <= set(node)
-                    or set(node) - fields - {'visible_nodes'} or type(node['enabled']) is not bool):
+                    or set(node) - fields - {'visible_nodes', 'maintenance'} or type(node['enabled']) is not bool):
                 raise ValueError('invalid_phone_node_config')
             for key in ('node_id', 'subject', 'session_id'):
                 _identifier(node[key], 'phone_' + key)
@@ -144,8 +144,10 @@ class PhoneAuthority:
                     or node['node_id'] in seen or node['subject'] in subjects or digest in tokens
                     or not isinstance(node['capabilities'], list) or 'leader' in node['capabilities']
                     or not isinstance(node['scope'], list)
-                    or set(node['scope']) - {'phone:node', 'phone:updates'}):
+                    or set(node['scope']) - {'phone:node', 'phone:updates', 'phone:maintenance'}):
                 raise ValueError('invalid_phone_node_config')
+            from .phone_maintenance import validate_policy
+            validate_policy(node.get('maintenance'))
             for cap in node['capabilities']:
                 _identifier(cap, 'phone_capability')
             seen.add(node['node_id']); subjects.add(node['subject']); tokens.add(digest)
@@ -257,6 +259,11 @@ class PhoneAuthority:
             return self._node(token, envelope)
 
     def _node(self, token, envelope):
+        if isinstance(envelope, dict) and envelope.get('action') in (
+                'mesh_maintenance_submit', 'mesh_maintenance_status', 'mesh_maintenance_result'):
+            from .phone_maintenance import PhoneMaintenance
+            node = self.principal(token, 'phone:maintenance')
+            return PhoneMaintenance(self).request(node, envelope)
         node = self.principal(token, 'phone:node')
         if not isinstance(envelope, dict) or set(envelope) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_request')
@@ -266,6 +273,8 @@ class PhoneAuthority:
         with self.lock:
             if action in ('connect', 'node_update', 'discover'):
                 result = self.sessions.request(self._binding(node), action, value)
+                if action in ('connect', 'node_update'):
+                    self._capability_presence(node)
                 if action == 'discover':
                     visible = {self.sessions._public_node_id(k): v for k, v in node.get('visible_nodes', {}).items()}
                     for item in result['nodes']:
@@ -302,6 +311,44 @@ class PhoneAuthority:
                            (node['node_id'], value['report_id'], fingerprint))
             result = self._provider(node, value['provider'])
             return {'format': FORMAT, 'mesh_id': self.sessions.mesh_id, 'provider': result}
+
+    def _capability_presence(self, node):
+        """Renew only the immutable owner-approved registration and epoch.
+
+        Enrollment expiry fences the one-time challenge, not future membership.
+        Presence expiry still fences availability. Never advertise a replacement
+        capability, mutate spec/grants, or resurrect a revoked/revised epoch.
+        """
+        receipt = node.get('enrollment', {}).get('registration_receipt', {})
+        reference = receipt.get('registry_ref', '')
+        if not reference.startswith('capability:'):
+            return  # adjacent older installations without a registration receipt
+        try:
+            identity, epoch_text = reference[len('capability:'):].rsplit(':', 1)
+            epoch = int(epoch_text)
+        except (ValueError, AttributeError):
+            raise PermissionError('phone_original_capability_reference_required') from None
+        registry = self.api.resources
+        with self.store.transaction() as db:
+            session = self._presence(db, node)
+            view = self.sessions._session_view(session)
+            row = registry._find(db, identity)
+            if (row['principal'] != 'node:' + node['node_id'] or row['epoch'] != epoch
+                    or json.loads(row['spec']).get('enrollment_publication_sha256') != receipt.get('publication_sha256')
+                    or identity not in node['capabilities'] or row['revoked']):
+                return  # owner/Registry withdrawal always wins over phone presence
+            available = (view['network']['state'] == 'online'
+                         and identity in view['managed_capabilities']
+                         and session['agent_state'] != 'waiting_model'
+                         and session['model_state'] != 'unavailable'
+                         and row['health'] != 'failed')
+            now = self.store.clock()
+            deadline = min(session['expires'], now + self.sessions.ttl) if available else now
+            health = 'unknown' if available else 'failed' if row['health'] == 'failed' else 'unavailable'
+            db.execute('UPDATE capabilities SET deadline=?,health=?,updated=? WHERE id=? AND epoch=? AND revoked=0',
+                       (deadline, health, now, identity, epoch))
+            registry._audit(db, row['principal'], 'phone_presence', identity,
+                            {'epoch': epoch, 'deadline': deadline, 'available': available})
 
     def _provider(self, node, provider):
         if not isinstance(provider, dict) or set(provider) != {'action', 'arguments'}:
