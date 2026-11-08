@@ -14,7 +14,7 @@ import { NodeCredential, NodeCredentialStore } from '../security/NodeCredentialS
 import { AccessibilityProvider } from './AccessibilityProvider';
 import { ApprovalSurface } from './ApprovalSurface';
 import { buildApprovalWantAgents } from './ApprovalWantAgents';
-import { ApprovalTicket, ControlRequest, ControlSession, OwnerControlDecision } from './ControlSession';
+import { ApprovalTicket, ControlReceipt, ControlRequest, ControlSession, ControlView, OwnerControlDecision } from './ControlSession';
 import { ControlStore } from './ControlStore';
 import { GlobalScreenCapture, GlobalScreenImage } from './GlobalScreenCapture';
 import {
@@ -25,6 +25,18 @@ import { RuntimeApprovalGate, RuntimePermit } from './RuntimeApprovalGate';
 
 interface NodeIdentity { node_id: string; }
 interface RuntimeIdentity { format: string; node_id: string; control_session_id: string; }
+interface ControlResultIdentity {
+  format: string; contract: string; principal: string; operation_id: string;
+  task_id: string; task_epoch: number; command: string;
+}
+interface ControlActionResult extends ControlResultIdentity { receipt: ControlReceipt; }
+interface ControlInspectResult extends ControlResultIdentity { view: ControlView; }
+interface ControlScreenshotPayload {
+  format: string; width: number; height: number; display_id: number;
+  crop_left: number; crop_top: number; scale_x: number; scale_y: number;
+  user_selected: boolean; bytes: number; sha256: string; base64: string;
+}
+interface ControlScreenshotResult extends ControlResultIdentity { screenshot: ControlScreenshotPayload; }
 
 // The actual AccessibilityExtension lifecycle owns this loop. It neither
 // borrows EntryAbility foreground state nor creates a second physical node.
@@ -285,26 +297,29 @@ export class PhoneControlRuntime implements WorkHost {
     if (p.action_kind === 'action') {
       const receipt = await this.control.execute(dispatch.operation_id);
       requireValue(receipt.state === 'input_acknowledged', 'phone_control_original_action_outcome_unknown');
-      return controlBlob({ format: 'amita-phone-ui-control-result/1', contract: 'amita-phone-ui-control/1',
+      const result: ControlActionResult = { format: 'amita-phone-ui-control-result/1', contract: 'amita-phone-ui-control/1',
         principal: this.provider.principal(), operation_id: dispatch.operation_id, task_id: dispatch.task_id as string,
-        task_epoch: dispatch.task_epoch as number, command: body.command, receipt: receipt });
+        task_epoch: dispatch.task_epoch as number, command: body.command, receipt: receipt };
+      return controlBlob(result);
     }
     if (p.action_kind === 'screenshot') {
       const picture: GlobalScreenImage = await this.capture.captureApproved(p.ticket.expires_at, p.fence, true);
       const codec: util.Base64Helper = new util.Base64Helper();
-      return controlBlob({ format: 'amita-phone-ui-control-result/1', contract: 'amita-phone-ui-control/1',
+      const screenshot: ControlScreenshotPayload = { format: picture.format, width: picture.width, height: picture.height,
+        display_id: picture.display_id, crop_left: picture.crop_left, crop_top: picture.crop_top,
+        scale_x: picture.scale_x, scale_y: picture.scale_y, user_selected: false,
+        bytes: picture.bytes.length, sha256: await controlDigest(picture.bytes), base64: codec.encodeToStringSync(picture.bytes) };
+      const result: ControlScreenshotResult = { format: 'amita-phone-ui-control-result/1', contract: 'amita-phone-ui-control/1',
         principal: this.provider.principal(), operation_id: dispatch.operation_id, task_id: dispatch.task_id as string,
-        task_epoch: dispatch.task_epoch as number, command: body.command,
-        screenshot: { format: picture.format, width: picture.width, height: picture.height, display_id: picture.display_id,
-          crop_left: picture.crop_left, crop_top: picture.crop_top, scale_x: picture.scale_x, scale_y: picture.scale_y,
-          user_selected: false, bytes: picture.bytes.length, sha256: await controlDigest(picture.bytes),
-          base64: codec.encodeToStringSync(picture.bytes) } });
+        task_epoch: dispatch.task_epoch as number, command: body.command, screenshot: screenshot };
+      return controlBlob(result);
     }
     const view = await this.control.inspect(body.max_elements as number);
     requireValue(p.fence.valid && this.ownerAllowedNow(), 'phone_control_observation_permission_revoked');
-    return controlBlob({ format: 'amita-phone-ui-control-result/1', contract: 'amita-phone-ui-control/1',
+    const result: ControlInspectResult = { format: 'amita-phone-ui-control-result/1', contract: 'amita-phone-ui-control/1',
       principal: this.provider.principal(), operation_id: dispatch.operation_id, task_id: dispatch.task_id as string,
-      task_epoch: dispatch.task_epoch as number, command: body.command, view: view });
+      task_epoch: dispatch.task_epoch as number, command: body.command, view: view };
+    return controlBlob(result);
   }
   async exchange(action: string, args: Object): Promise<PhoneResponse> {
     requireValue(this.engine !== null && this.engine.snapshot.config !== null && deviceInfo.sdkApiVersion >= 23,

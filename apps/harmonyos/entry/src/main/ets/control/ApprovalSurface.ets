@@ -2,6 +2,8 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { WantAgent } from '@kit.AbilityKit';
 import { liveViewManager } from '@kit.LiveViewKit';
 import { notificationManager } from '@kit.NotificationKit';
+// NotificationContent in this real API26 SDK still declares the legacy enum.
+import notification from '@ohos.notification';
 import { ApprovalTicket } from './ControlSession';
 
 export interface ApprovalActions {
@@ -17,6 +19,13 @@ export interface ApprovalPresentation {
   pending: boolean;
   liveview_error: string;
   notification_error: string;
+}
+class ApprovalPlatformError extends Error {
+  code: number;
+  constructor(code: number) {
+    super('phone_liveview_state_unconfirmed');
+    this.code = Number.isSafeInteger(code) ? code : 0;
+  }
 }
 function liveError(error: BusinessError): string {
   switch (error.code) {
@@ -75,7 +84,9 @@ export class ApprovalSurface {
           this.sequence = Math.max(this.sequence, previous.sequence);
           active = true;
         } catch (error) {
-          if ((error as BusinessError).code !== 1003500009) { throw error; }
+          if ((error as BusinessError).code !== 1003500009) {
+            throw new ApprovalPlatformError((error as BusinessError).code);
+          }
         }
         const view: liveViewManager.LiveView = this.data(ticket, actions);
         const outcome: liveViewManager.LiveViewResult = active ? await liveViewManager.updateLiveView(view) :
@@ -93,7 +104,7 @@ export class ApprovalSurface {
       const notification: notificationManager.NotificationRequest = { id: this.id, tapDismissed: false,
         deliveryTime: Date.now(), autoDeletedTime: ticket.expires_at,
         wantAgent: actions.review,
-        content: { contentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        content: { contentType: notification.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
           normal: { title: 'AMITA · 等待本人确认', text: ticket.summary.slice(0, 320),
             additionalText: '单次决定 · 到期失效 · 关闭通知不会批准' } },
         actionButtons: ticket.review_required ? [{ title: '查看完整动作', wantAgent: actions.review },
