@@ -92,13 +92,36 @@ Screenshots require their own actual provider entitlement, owner opt-in and
 successful probe before the installation adds `screenshot` to `commands`.
 Unconfigured capture returns unavailable. Complete command/result bytes are
 bounded to 64 KiB; over-limit capture must be bounded or explicitly rejected by
-the device, never silently truncated.
+the device, never silently truncated. Prefer bounded `inspect_ui` text when it
+answers the task. The `result` CLI prints at most 8 KiB of metadata/text, with no
+image/base64 payload. For the original full result use an explicit private file:
+
+```sh
+python3 -m assistant_mesh.phone_computer_use --binding /PRIVATE/current-phone-task.json result --operation-id ORIGINAL_OP --output-file /PRIVATE/original-result.json
+```
+
+When visual inspection is needed, request a supported screenshot, retain its
+original operation, then download its real JPEG and pass the returned absolute
+path to native `view_image`:
+
+```sh
+python3 -m assistant_mesh.phone_computer_use --binding /PRIVATE/current-phone-task.json result --operation-id ORIGINAL_SCREEN_OP --image-out /PRIVATE/phone-screen.jpg
+```
+
+Destinations are explicit, created with mode 0600 and never overwrite different
+existing bytes. Repeating the same result download can reuse an identical
+private file. The actual Runtime result is `screenshot.{format,bytes,sha256,base64,
+width,height,display_id,crop_left,crop_top,scale_x,scale_y,user_selected}`. The
+CLI verifies original full Blob and inner JPEG hashes and returns coordinates:
+`screen_x=crop_left+image_x/scale_x`, `screen_y=crop_top+image_y/scale_y`.
+Geometry is provider-reported. Element actions still use fresh semantic refs and
+local approval; downloading or viewing an image grants no input authority.
 
 Calls are asynchronous. Keep `operation_id`, `decision_id` and
 `provider_receipt.receipt_id`; pending/accepted/running may be awaiting the
 provider or local owner approval. Read `status`/`result` for the same original
 operation. An existing invocation, including an unknown ACK, only queries its
 original IDs on repetition. Do not switch IDs, replay input, settle on the
-provider's behalf, or label a timeout as success. Results contain the original
-complete Blob and verified size/SHA-256; this verifies byte integrity, not that
+provider's behalf, or label a timeout as success. Saved files contain original
+complete bytes with verified size/SHA-256; this verifies byte integrity, not that
 the requested GUI effect succeeded.

@@ -7,6 +7,9 @@ import argparse
 import base64
 import hashlib
 import json
+import math
+import os
+import stat
 
 from .capability_call import CapabilityCallError, TaskCapabilityCalls
 from .config import private_json
@@ -15,6 +18,7 @@ from .resources import _name
 
 COMMANDS = frozenset(('inspect_ui', 'perform_action', 'screenshot'))
 FORMAT = 'mesh-phone-computer-use/1'
+MAX_STDOUT_BYTES = 8192
 
 
 def canonical(value):
@@ -27,6 +31,114 @@ def encode_blob(value):
         raise ValueError('phone_computer_use_command_too_large')
     return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
             'base64': base64.b64encode(raw).decode('ascii')}
+
+
+def decode_blob(body):
+    if (not isinstance(body, dict) or set(body) != {'bytes', 'sha256', 'base64'}
+            or type(body['bytes']) is not int or not 0 <= body['bytes'] <= 65536
+            or not isinstance(body['base64'], str) or len(body['base64']) > 87384):
+        raise ValueError('phone_computer_use_full_result_invalid')
+    raw = base64.b64decode(body['base64'], validate=True)
+    if len(raw) != body['bytes'] or hashlib.sha256(raw).hexdigest() != body['sha256']:
+        raise ValueError('phone_computer_use_full_result_invalid')
+    return raw
+
+
+def private_output(path, raw):
+    """Explicit caller destination: create 0600 or reuse identical private bytes."""
+    absolute = os.path.abspath(os.path.expanduser(path))
+    try:
+        fd = os.open(absolute, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        fd = os.open(absolute, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, 'rb') as handle:
+            info = os.fstat(handle.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                    or info.st_size != len(raw) or handle.read(len(raw) + 1) != raw):
+                raise ValueError('phone_computer_use_output_exists_or_not_private')
+        reused = True
+    else:
+        info = os.fstat(fd)
+        try:
+            with os.fdopen(fd, 'wb') as handle:
+                os.fchmod(handle.fileno(), 0o600)
+                handle.write(raw); handle.flush(); os.fsync(handle.fileno())
+        except Exception:
+            current = os.lstat(absolute)
+            if (current.st_dev, current.st_ino) == (info.st_dev, info.st_ino):
+                os.unlink(absolute)
+            raise
+        reused = False
+    return {'path': absolute, 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(), 'reused': reused}
+
+
+def result_output(receipt, image_out=None, output_file=None):
+    """Bounded text for agents; binary/full JSON stays in explicit local files."""
+    output = {k: receipt[k] for k in ('format', 'operation_id', 'decision_id', 'task_id', 'original_task_epoch',
+        'operation_state', 'phase', 'reason', 'verification', 'result_available',
+        'execution_verified', 'automatic_invocation_replay', 'retry_with_new_id') if k in receipt}
+    dispatch = receipt.get('provider_receipt')
+    if dispatch:
+        output['provider_receipt'] = {k: dispatch[k] for k in ('operation_id', 'capability_id', 'provider', 'state',
+                                                              'epoch', 'receipt_id') if k in dispatch}
+    if not receipt.get('result_available'):
+        return output
+    raw = decode_blob(receipt['result'])
+    output.update(result_bytes=len(raw), result_sha256=hashlib.sha256(raw).hexdigest())
+    try:
+        body = json.loads(raw.decode('utf8'))
+    except (ValueError, UnicodeError):
+        body = None
+    is_control = (isinstance(body, dict) and body.get('format') == 'amita-phone-ui-control-result/1'
+        and body.get('contract') == CONTRACT and body.get('operation_id') == receipt['operation_id']
+        and body.get('task_id') == receipt['task_id'] and body.get('task_epoch') == receipt['original_task_epoch']
+        and dispatch is not None and body.get('principal') == dispatch.get('provider'))
+    image, image_raw = None, None
+    if is_control and body.get('command') == 'screenshot':
+        # Current PhoneControlRuntime payload is screenshot.*, not image.*.
+        image = body.get('screenshot')
+        fields = {'format', 'width', 'height', 'display_id', 'crop_left', 'crop_top', 'scale_x', 'scale_y',
+                  'user_selected', 'bytes', 'sha256', 'base64'}
+        if (not isinstance(image, dict) or set(image) != fields or image['format'] != 'image/jpeg'
+                or any(type(image[k]) is not int or not 1 <= image[k] <= 16384 for k in ('width', 'height'))
+                or any(type(image[k]) is not int or image[k] < 0 for k in ('display_id', 'crop_left', 'crop_top'))
+                or any(type(image[k]) not in (int, float) or not math.isfinite(image[k])
+                       or not 0 < image[k] <= 1 for k in ('scale_x', 'scale_y'))
+                or type(image['user_selected']) is not bool):
+            raise ValueError('phone_computer_use_original_screenshot_invalid')
+        image_raw = decode_blob({k: image[k] for k in ('bytes', 'sha256', 'base64')})
+        if not image_raw.startswith(b'\xff\xd8\xff') or not image_raw.endswith(b'\xff\xd9'):
+            raise ValueError('phone_computer_use_original_screenshot_not_jpeg')
+        output['screenshot'] = {k: image[k] for k in fields if k != 'base64'}
+        output['coordinate_mapping'] = {'screen_x': 'crop_left + image_x / scale_x',
+            'screen_y': 'crop_top + image_y / scale_y', 'verification': 'provider_reported'}
+    elif is_control and body.get('command') == 'inspect_ui' and isinstance(body.get('view'), dict):
+        view = body['view']
+        output['view'] = {k: view[k] for k in ('revision', 'bundle_name', 'window_id', 'view_ref', 'width', 'height', 'truncated') if k in view}
+        elements = []
+        for element in view.get('elements', [])[:16]:
+            if not isinstance(element, dict):
+                continue
+            item = {k: element[k] for k in ('element_ref', 'sensitive', 'enabled', 'actions', 'bounds') if k in element}
+            item.update(role=str(element.get('role', ''))[:80], label=str(element.get('label', ''))[:80])
+            elements.append(item)
+        output['view']['elements'] = elements
+        output['view']['truncated'] = bool(view.get('truncated') or len(view.get('elements', [])) > len(elements))
+        while elements and len(canonical(output).encode('utf8')) > MAX_STDOUT_BYTES - 1024:
+            elements.pop(); output['view']['truncated'] = True
+    elif is_control and body.get('command') == 'perform_action' and isinstance(body.get('receipt'), dict):
+        output['receipt'] = {k: body['receipt'][k] for k in ('operation_id', 'state', 'input_acknowledged',
+                                                          'effect_verified', 'automatic_replay') if k in body['receipt']}
+    if image_out:
+        if image_raw is None:
+            raise ValueError('phone_computer_use_original_screenshot_required')
+        output['image_file'] = private_output(image_out, image_raw)
+    if output_file:
+        output['output_file'] = private_output(output_file, raw)
+    if len(canonical(output).encode('utf8')) > MAX_STDOUT_BYTES:
+        raise ValueError('phone_computer_use_metadata_too_large')
+    return output
 
 
 def command_body(command, arguments):
@@ -207,13 +319,7 @@ class PhoneComputerUse:
             body = self.client.request('/v1/phone/result', {'operation_id': operation_id, 'capability_id': self.capability})
         except (OSError, ValueError):
             return dict(status, result_available=False, reason='original_phone_result_unconfirmed')
-        if (not isinstance(body, dict) or set(body) != {'bytes', 'sha256', 'base64'}
-                or type(body['bytes']) is not int or not 0 <= body['bytes'] <= 65536
-                or not isinstance(body['base64'], str) or len(body['base64']) > 87384):
-            raise ValueError('phone_computer_use_full_result_invalid')
-        raw = base64.b64decode(body['base64'], validate=True)
-        if len(raw) != body['bytes'] or hashlib.sha256(raw).hexdigest() != body['sha256']:
-            raise ValueError('phone_computer_use_full_result_invalid')
+        raw = decode_blob(body)
         settlement = dispatch.get('settlement')
         if settlement:
             evidence = settlement.get('evidence', {})
@@ -252,9 +358,13 @@ def main(argv=None):
     parser.add_argument('--operation-id'); parser.add_argument('--decision-id')
     parser.add_argument('--request-file', help='JSON arguments/observations; contains no credential or task binding')
     parser.add_argument('--command', choices=sorted(COMMANDS), help='command for prepare/capability_status')
+    parser.add_argument('--image-out', help='result only: explicit private JPEG destination, created once or same-bytes reuse')
+    parser.add_argument('--output-file', help='result only: explicit private destination for the complete original Blob')
     args = parser.parse_args(argv)
     try:
         entry = load_entry(args.binding)
+        if (args.image_out or args.output_file) and args.action != 'result':
+            raise ValueError('phone_computer_use_result_output_only')
         value = {}
         if args.request_file:
             with open(args.request_file, encoding='utf8') as handle:
@@ -266,6 +376,8 @@ def main(argv=None):
                 raise ValueError('phone_computer_use_request_invalid')
         if args.action in ('status', 'result'):
             output = getattr(entry, args.action)(args.operation_id)
+            if args.action == 'result':
+                output = result_output(output, args.image_out, args.output_file)
         elif args.action == 'prepare':
             output = entry.prepare(args.command, args.operation_id, value.get('arguments', {}))
         elif args.action == 'capability_status':

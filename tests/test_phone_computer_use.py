@@ -12,7 +12,7 @@ from assistant_mesh.capability_call import TaskCapabilityCalls
 from assistant_mesh.ingress import Ingress
 from assistant_mesh.ingress_results import IngressResults
 from assistant_mesh.phone_authority import PhoneAuthority
-from assistant_mesh.phone_computer_use import PhoneComputerUse, encode_blob, main
+from assistant_mesh.phone_computer_use import PhoneComputerUse, encode_blob, main, result_output
 from assistant_mesh.phone_control import CONTRACT
 from tests import test_capability_call as fixtures
 from tests.test_enrollment_relay import owned
@@ -72,8 +72,8 @@ class PhoneComputerUseTests(unittest.TestCase):
         return self.phone_call('mesh_work_report', report_id='device-' + action,
             provider={'action': action, 'arguments': dict(args, operation_id='ui-op', capability_id=self.gui)})['provider']
 
-    def qualify(self):
-        work = self.tool.prepare('inspect_ui', 'ui-op')
+    def qualify(self, command='inspect_ui'):
+        work = self.tool.prepare(command, 'ui-op')
         self.api.resources.observe('checker', self.gui, 'ui.probe', True, 'result', 'synthetic independent oracle',
             epoch=1, observation_id='synthetic-ui-probe', verification='verified',
             evidence={'scope': work['scope'], 'workload': work['workload']})
@@ -152,3 +152,54 @@ class PhoneComputerUseTests(unittest.TestCase):
         self.assertEqual(self.tool.prepare('inspect_ui', 'ui-op'), value)
         self.assertEqual([], self.client.requests)
         self.assertNotIn(TOKEN, output.getvalue())
+
+    def test_cli_screenshot_exports_original_bytes_privately_and_reuses_without_reserve(self):
+        self.tool.commands.append('screenshot'); self.qualify('screenshot')
+        self.tool.invoke('screenshot', 'ui-op', 'ui-decision', observations=self.observations, lease_seconds=40)
+        accepted = self.report('accept', epoch=1, receipt_id='synthetic-device-approval')
+        started = self.report('start', epoch=accepted['epoch'], receipt_id='synthetic-device-approval')
+        # Synthetic marker bytes test byte preservation/storage only. No image
+        # codec or actual phone screen capture is claimed by this fixture.
+        jpeg = b'\xff\xd8\xff\xe0synthetic-transport-fixture\xff\xd9'
+        image = dict(encode_blob({}), format='image/jpeg', width=400, height=800, display_id=0,
+                     crop_left=0, crop_top=0, scale_x=0.5, scale_y=0.5, user_selected=False)
+        image.update(bytes=len(jpeg), sha256=hashlib.sha256(jpeg).hexdigest(), base64=base64.b64encode(jpeg).decode())
+        body = encode_blob({'format': 'amita-phone-ui-control-result/1', 'contract': CONTRACT,
+            'principal': 'node:synthetic-phone', 'operation_id': 'ui-op', 'task_id': self.f.task['id'],
+            'task_epoch': self.f.task['epoch'], 'command': 'screenshot', 'screenshot': image})
+        saved = self.report('result', receipt_id='synthetic-device-approval', result=body)
+        self.report('settle', epoch=started['epoch'], receipt_id='synthetic-device-approval', outcome='completed',
+                    evidence=dict(saved, resource_quiescent=True))
+        image_path, body_path = self.f.root / 'screen.jpg', self.f.root / 'original-result.json'
+        for attempt in range(2):
+            with mock.patch('assistant_mesh.phone_computer_use.load_entry', return_value=self.tool), contextlib.redirect_stdout(io.StringIO()) as stdout:
+                code = main(['--binding', '/SYNTHETIC/binding.json', 'result', '--operation-id', 'ui-op',
+                             '--image-out', str(image_path), '--output-file', str(body_path)])
+            self.assertEqual(0, code)
+            metadata = json.loads(stdout.getvalue())
+            self.assertNotIn('base64', stdout.getvalue()); self.assertLess(len(stdout.getvalue().encode()), 8192)
+            self.assertEqual(bool(attempt), metadata['image_file']['reused'])
+            self.assertEqual(str(image_path), metadata['image_file']['path'])
+            self.assertEqual(0.5, metadata['screenshot']['scale_x'])
+            self.assertEqual(jpeg, image_path.read_bytes()); self.assertEqual(0o600, image_path.stat().st_mode & 0o777)
+            self.assertEqual(base64.b64decode(body['base64']), body_path.read_bytes())
+        self.assertEqual(1, len(self.reserves()))
+        image_path.write_bytes(b'different-existing-private-file')
+        with mock.patch('assistant_mesh.phone_computer_use.load_entry', return_value=self.tool), contextlib.redirect_stdout(io.StringIO()):
+            code = main(['--binding', '/SYNTHETIC/binding.json', 'result', '--operation-id', 'ui-op', '--image-out', str(image_path)])
+        self.assertEqual(1, code); self.assertEqual(b'different-existing-private-file', image_path.read_bytes())
+        self.assertEqual(1, len(self.reserves()))
+
+    def test_screenshot_inner_hash_failure_never_creates_output(self):
+        image = {'format': 'image/jpeg', 'width': 1, 'height': 1, 'display_id': 0,
+                 'crop_left': 0, 'crop_top': 0, 'scale_x': 1, 'scale_y': 1, 'user_selected': False,
+                 'bytes': 4, 'sha256': '0' * 64, 'base64': base64.b64encode(b'bad!').decode()}
+        body = encode_blob({'format': 'amita-phone-ui-control-result/1', 'contract': CONTRACT,
+            'principal': 'node:synthetic-phone', 'operation_id': 'ui-op', 'task_id': self.f.task['id'],
+            'task_epoch': self.f.task['epoch'], 'command': 'screenshot', 'screenshot': image})
+        receipt = {'format': 'mesh-phone-computer-use/1', 'operation_id': 'ui-op', 'task_id': self.f.task['id'],
+            'original_task_epoch': self.f.task['epoch'], 'result_available': True, 'result': body,
+            'provider_receipt': {'provider': 'node:synthetic-phone'}}
+        path = self.f.root / 'bad.jpg'
+        with self.assertRaises(ValueError): result_output(receipt, image_out=str(path))
+        self.assertFalse(path.exists())
