@@ -18,6 +18,7 @@ from .enrollment_relay import EnrollmentRelay
 from .ingress import _identifier
 from .session_nodes import FORMAT, TOOLS
 from .store import Conflict
+from .phone_control import PhoneControl, validate_adapter
 
 
 def _json(value):
@@ -109,6 +110,9 @@ class PhoneAuthority:
                                                  clock=self.store.clock), gate))
         self.installed = self._config()
         self._install_bindings(self.installed)
+        self.control = PhoneControl(self)
+        for node in self.installed['nodes']:
+            self.control.install(node)
         previous_request = self.sessions.request
         def session_request(*args, **kwargs):
             with self.lock:
@@ -134,7 +138,8 @@ class PhoneAuthority:
                   'capabilities', 'scope', 'enrollment'}
         for node in value['nodes']:
             if (not isinstance(node, dict) or not fields <= set(node)
-                    or set(node) - fields - {'visible_nodes', 'maintenance'} or type(node['enabled']) is not bool):
+                    or set(node) - fields - {'visible_nodes', 'maintenance', 'control_session_id', 'installed_control_adapter'}
+                    or type(node['enabled']) is not bool):
                 raise ValueError('invalid_phone_node_config')
             for key in ('node_id', 'subject', 'session_id'):
                 _identifier(node[key], 'phone_' + key)
@@ -148,6 +153,7 @@ class PhoneAuthority:
                 raise ValueError('invalid_phone_node_config')
             from .phone_maintenance import validate_policy
             validate_policy(node.get('maintenance'))
+            validate_adapter(node)
             for cap in node['capabilities']:
                 _identifier(cap, 'phone_capability')
             seen.add(node['node_id']); subjects.add(node['subject']); tokens.add(digest)
@@ -247,12 +253,17 @@ class PhoneAuthority:
                 'subject': node['subject'], 'scopes': ['tasks:read', 'tasks:submit']}
 
     def _presence(self, db, node, *, live=False, capability=None):
+        if node.get('_control_service'):
+            return self.control.presence(db, node, live=live, capability=capability)
         row = self.sessions._session(db, self._binding(node), node['session_id'], live=live)
         view = self.sessions._session_view(row)
         if live and (row['agent_state'] == 'waiting_model' or row['model_state'] == 'unavailable'
                      or capability is not None and capability not in view['managed_capabilities']):
             raise Conflict('phone_capability_withdrawn')
         return row
+
+    def _presence_view(self, node, row):
+        return self.control.view(node, row) if node.get('_control_service') else self.sessions._session_view(row)
 
     def node(self, token, envelope):
         with self.lock:
@@ -268,10 +279,22 @@ class PhoneAuthority:
         if not isinstance(envelope, dict) or set(envelope) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_request')
         action, value = TOOLS.get(envelope['action']), envelope['arguments']
-        if action is None or not isinstance(value, dict) or value.get('session_id') != node['session_id']:
+        if action is None or not isinstance(value, dict):
             raise PermissionError('phone_session_binding_required')
+        node = self.control.select(node, value.get('session_id'))
         with self.lock:
             if action in ('connect', 'node_update', 'discover'):
+                if node.get('_control_service'):
+                    if action != 'discover':
+                        return self.control.control(node, action, value)
+                    if set(value) != {'session_id'}:
+                        raise ValueError('invalid_phone_control_discover')
+                    with self.store.transaction() as db:
+                        view = self._presence_view(node, self._presence(db, node))
+                    return self.sessions._base(session=view, nodes=[], business_task_created=False,
+                                               network={'state': 'reachable', 'control_available': True})
+                if action in ('connect', 'node_update') and set(value.get('capabilities', [])) - set(node['capabilities']):
+                    raise PermissionError('phone_session_capability_scope_required')
                 result = self.sessions.request(self._binding(node), action, value)
                 if action in ('connect', 'node_update'):
                     self._capability_presence(node)
@@ -293,10 +316,23 @@ class PhoneAuthority:
                 pending = self.api.allocations.pending('node:' + node['node_id'])
                 with self.store.transaction() as db:
                     session = self._presence(db, node, live=True)
-                    caps = self.sessions._session_view(session)['managed_capabilities']
+                    caps = self._presence_view(node, session)['managed_capabilities']
+                eligible, rejected = [], []
+                for dispatch in pending['dispatch']:
+                    if dispatch['capability_id'] not in caps:
+                        continue
+                    if node.get('_control_service'):
+                        try:
+                            self.control.validate_selection(node, dispatch['selection'])
+                        except (ValueError, PermissionError):
+                            rejected.append({'operation_id': dispatch['operation_id'],
+                                             'capability_id': dispatch['capability_id'],
+                                             'reason': 'installed_control_contract_required'})
+                            continue
+                    eligible.append(dispatch)
                 return {'format': FORMAT, 'mesh_id': self.sessions.mesh_id, 'work': None,
-                        'pull_id': value['pull_id'], 'dispatch': [d for d in pending['dispatch']
-                        if d['capability_id'] in caps], 'execution_authorized': False}
+                        'pull_id': value['pull_id'], 'dispatch': eligible,
+                        'rejected_dispatch': rejected, 'execution_authorized': False}
             if set(value) != {'session_id', 'report_id', 'provider'}:
                 raise ValueError('invalid_phone_report')
             _identifier(value['report_id'], 'phone_report')
@@ -363,14 +399,30 @@ class PhoneAuthority:
         if action not in fields or not isinstance(args, dict) or set(args) != fields[action]:
             raise ValueError('invalid_phone_provider_action')
         actor, allocations = 'node:' + node['node_id'], self.api.allocations
+        if args['capability_id'] not in node['capabilities']:
+            raise PermissionError('phone_session_capability_scope_required')
         # An allocation may have multiple providers: never expose another
         # provider's operation through an arbitrary capability ID.
         with self.store.transaction() as db:
             dispatch = allocations._dispatch(db, args['operation_id'], args['capability_id'], actor)
             if action in ('accept', 'start'):
                 self._presence(db, node, live=True, capability=args['capability_id'])
+                if node.get('_control_service'):
+                    allocation = allocations._allocation(db, args['operation_id'])
+                    selection = next(s for s in json.loads(allocation['plan'])['selections']
+                                     if s['capability_id'] == args['capability_id'])
+                    self.control.validate_selection(node, selection)
         if action == 'inspect':
-            return allocations.inspect(actor, args['operation_id'])
+            result = allocations.inspect(actor, args['operation_id'])
+            # An operation can include several providers/sessions. Return only
+            # this installed session's dispatch and workload, never other inputs
+            # or resolved grants through a same-provider allocation inspection.
+            view = {key: result[key] for key in ('operation_id', 'task_id', 'task_epoch', 'state', 'deadline')}
+            view.update({
+                'dispatch': [d for d in result['dispatch'] if d['capability_id'] in node['capabilities']],
+                'plan': {'selections': [s for s in result['plan']['selections']
+                                        if s['capability_id'] in node['capabilities']]}})
+            return view
         if action == 'result':
             return self._record_result(actor, args)
         if action == 'settle':
