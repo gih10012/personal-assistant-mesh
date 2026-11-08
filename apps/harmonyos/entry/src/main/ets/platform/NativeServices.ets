@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { preferences } from '@kit.ArkData';
-import { buffer, util } from '@kit.ArkTS';
+import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
@@ -9,7 +9,7 @@ import {
   AdaptationReport, Blob, Challenge, DeviceState, Enrollment, Hello, JournalRecord, MAX_BYTES,
   RelayClientConfig, RelayRecord, RelayResponse, ResultEnvelope, acceptRelayChallenge,
   beginOperation, beginRelayChallenge, beginRelayResult, canonicalChallenge, canonicalEnrollment,
-  canonicalRelayBinding, canonicalResult, coldResume, coldResumeRelays, deviceState, exactByteView,
+  canonicalRelayBinding, canonicalResult, coldResume, coldResumeRelays, deviceState,
   newRelayRecord, observeRelayStatus, relayChallengeState, relayResultState, report, requireManualChallengeUnclaimed, requireValue,
   validateChallenge, validateEnrollment, validateHello, validateJoinUrl, validateRelayClientConfig,
   validateRelayResponse, validateRelayUrl, validateResultEnvelope
@@ -144,11 +144,14 @@ export class NativeServices {
       // A new route/repo/owner never silently replaces old operation bindings.
       requireValue(this.snapshot.enrollment_json.length === 0 || this.snapshot.enrollment_json === encoded,
         'mesh_original_enrollment_changed');
-      const hash: string = await this.digestText(encoded);
+      let hash: string = '';
+      try { hash = await this.digestText(encoded); }
+      catch (_) { throw new Error('mesh_owner_enrollment_digest_unavailable'); }
       this.enrollment = value;
       this.enrollmentHash = hash;
       this.snapshot.enrollment_json = encoded;
-      await this.persist();
+      try { await this.persist(); }
+      catch (_) { throw new Error('mesh_owner_enrollment_storage_unavailable'); }
     } finally { this.busy = false; }
   }
   adaptationReport(): AdaptationReport {
@@ -257,8 +260,10 @@ export class NativeServices {
     return hex;
   }
   private async digestText(text: string): Promise<string> {
-    const utf8: buffer.Buffer = buffer.from(text, 'utf-8');
-    return this.digest(exactByteView(utf8.buffer, utf8.byteOffset, utf8.length));
+    // Encode directly into an exact UTF8 byte array. Buffer's native memory-pool
+    // offset must not be reapplied to a separately materialized ArrayBuffer.
+    const utf8: Uint8Array = new util.TextEncoder().encodeInto(text);
+    return this.digest(utf8);
   }
   async executeApprovedChallenge(raw: string): Promise<string> {
     requireValue(this.enrollment !== null && this.sharingEnabled && this.foreground && !this.busy,

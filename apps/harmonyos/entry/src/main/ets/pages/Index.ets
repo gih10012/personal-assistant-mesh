@@ -100,17 +100,22 @@ struct Index {
     this.clearImportedRelayToken();
     this.clearSetupText();
     this.setSharing(false);
+    let phase: string = '读取设备配置';
     try {
       const value: OwnerSetup | null = await (this.native as NativeServices).readOwnerSetup();
       if (value === null) { this.status = '已取消配置选择；共享保持关闭'; return; }
       if (value.phase === 'enrollment') {
+        phase = '核对原入网身份';
         await (this.native as NativeServices).bindEnrollment(value.enrollment_json);
+        phase = '核对原登记请求';
         this.operationId = await (this.native as NativeServices).bindRelay(value.relay_json);
+        phase = '确认前台状态';
         if (!this.foreground) { throw new Error('mesh_owner_setup_foreground_required'); }
         this.importedRelayToken = value.relay_token;
         this.importedRelayReady = true;
         this.status = '入网配置已导入；连接与登记仍以原协议回执为准；未领取挑战或开启共享。凭据仅供下一次手动 relay 动作，离开前台即清除';
       } else {
+        phase = '核对维护信任配置';
         // ConfigureTrusted normally honours enabled. Import may pin trust only;
         // scheduling still requires the separate local maintenance switch.
         if (value.update_trust_json.length > 0) {
@@ -118,8 +123,10 @@ struct Index {
           validateTrust(trust, this.nodeId);
           if (trust.enabled) { throw new Error('mesh_owner_setup_maintenance_must_be_disabled'); }
         }
+        phase = '绑定已登记成员';
         await (this.work as WorkClient).bindBootstrap(value.work_bootstrap_json);
         if (value.update_trust_json.length > 0) {
+          phase = '保存维护信任配置';
           await (this.maintenance as MaintenanceService).configureTrusted(value.update_trust_json, this.nodeId);
           this.maintenanceEnabled = false;
           AppStorage.setOrCreate('meshUpdateStatus', JSON.stringify(await (this.maintenance as MaintenanceService).status()));
@@ -128,7 +135,18 @@ struct Index {
       }
     } catch (error) {
       this.clearImportedRelayToken();
-      this.status = '配置导入未全部确认；已保留的原绑定、任务与成果不回滚。请使用同一原配置核对；共享关闭';
+      const code: string = (error as Error).message;
+      const known: string[] = ['mesh_owner_setup_read_unavailable', 'mesh_owner_setup_foreground_required',
+        'mesh_owner_binding_unavailable', 'mesh_original_enrollment_changed', 'mesh_contract_invalid',
+        'mesh_relay_owner_config_required', 'mesh_relay_config_invalid', 'mesh_relay_original_operation_changed',
+        'mesh_owner_enrollment_digest_unavailable', 'mesh_owner_enrollment_storage_unavailable',
+        'mesh_work_foreground_configuration_required', 'mesh_work_bootstrap_invalid',
+        'mesh_work_original_registration_required', 'mesh_work_original_enrollment_required',
+        'mesh_work_original_enrollment_result_required', 'mesh_work_original_session_changed',
+        'mesh_work_node_credential_invalid', 'mesh_work_node_credential_expired',
+        'mesh_node_credential_invalid', 'mesh_asset_secret_too_large'];
+      this.status = phase + '未确认' + (known.includes(code) ? '（' + code + '）' : '') +
+        '；原身份、任务与成果保留，共享关闭';
     } finally {
       this.clearSetupText();
       this.setSharing(false);

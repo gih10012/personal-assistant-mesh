@@ -118,7 +118,7 @@ export function validateWorkDispatch(value: ProviderDispatch, nodeId: string, pe
   requireValue(value !== null && typeof value === 'object', 'mesh_work_dispatch_invalid');
   name(value.operation_id); name(value.capability_id); name(value.provider);
   name(value.task_id as string); epoch(value.task_epoch as number); epoch(value.epoch);
-  requireValue(value.provider === nodeId && Number.isFinite(value.deadline), 'mesh_work_provider_mismatch');
+  requireValue(value.provider === 'node:' + nodeId && Number.isFinite(value.deadline), 'mesh_work_provider_mismatch');
   if (pending) { requireValue(value.state === 'pending' && value.receipt_id === null, 'mesh_work_not_pending'); }
   const selected: WorkSelection = value.selection as WorkSelection;
   requireValue(selected !== null && selected !== undefined && selected.capability_id === value.capability_id,
@@ -217,7 +217,7 @@ export class WorkEngine {
   }
   private response(row: WorkRecord, value: ProviderDispatch, state: string): void {
     requireValue(value.operation_id === row.operation_id && value.capability_id === row.capability_id &&
-      value.provider === this.snapshot.node_id && value.receipt_id === row.receipt_id && value.state === state,
+      value.provider === 'node:' + this.snapshot.node_id && value.receipt_id === row.receipt_id && value.state === state,
       'mesh_work_provider_response_mismatch'); epoch(value.epoch);
   }
   private async inspect(row: WorkRecord): Promise<ProviderDispatch> {
@@ -234,7 +234,7 @@ export class WorkEngine {
     requireValue(selections.length === 1 && matches.length === 1 &&
       sameSelection(selections[0], original.selection as WorkSelection), 'mesh_work_allocation_content_changed');
     const dispatch: ProviderDispatch = matches[0];
-    requireValue(dispatch.operation_id === row.operation_id && dispatch.provider === this.snapshot.node_id &&
+    requireValue(dispatch.operation_id === row.operation_id && dispatch.provider === 'node:' + this.snapshot.node_id &&
       (dispatch.receipt_id === null || dispatch.receipt_id === row.receipt_id), 'mesh_work_original_receipt_changed');
     epoch(dispatch.epoch); row.last_remote_state = dispatch.state; await this.save(); return dispatch;
   }

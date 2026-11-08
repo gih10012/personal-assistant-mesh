@@ -23,7 +23,7 @@ function fixture() {
     node_id: nodeId, session_id: 'original-session', mesh_id: 'synthetic-mesh', authority_id: 'synthetic-authority' };
   const selection = { capability_id: nodeId + ':bytes-v1', epoch: 1, action: 'challenge.bytes.repeat',
     scope: { task: 'original-only' }, workload: { input: blob('abc'), repeat: 3 } };
-  const pending = { operation_id: 'original-op', capability_id: selection.capability_id, provider: nodeId,
+  const pending = { operation_id: 'original-op', capability_id: selection.capability_id, provider: 'node:' + nodeId,
     state: 'pending', epoch: 1, receipt_id: null, selection, task_id: 'original-task', task_epoch: 7, deadline: 1060 };
   let remote = clone(pending);
   const controls = [];
@@ -108,6 +108,15 @@ test('foreground connects/discovers/updates without a task, then original alloca
   assert.equal(f.remote.operation_id, 'original-op'); assert.equal(f.remote.state, 'completed');
   f.cold(); await f.engine.reconcile(f.engine.snapshot.records[0]);
   assert.equal(f.invocations, 1); assert.equal(f.engine.snapshot.records[0].state, 'settled');
+});
+
+test('dispatch binds the real authority provider principal before any journal or device action', async () => {
+  const f = fixture();
+  for (const provider of [f.config.node_id, 'node:another-phone']) {
+    await assert.rejects(f.engine.run({ ...f.pending, provider }), /mesh_work_provider_mismatch/);
+  }
+  assert.equal(f.invocations, 0);
+  assert.equal(f.engine.snapshot.records.length, 0);
 });
 
 test('start ACK loss survives cold resume as original unknown and never invokes native adapter', async () => {

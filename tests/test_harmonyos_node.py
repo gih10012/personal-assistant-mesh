@@ -40,7 +40,6 @@ class HarmonyNodeTests(unittest.TestCase):
         source = (APP / 'entry/src/main/ets/platform/NativeServices.ets').read_text()
         self.assertIn('maxRedirects: 0', source)
         self.assertIn('deviceInfo.sdkApiVersion >= 23', source)
-        self.assertIn('exactByteView(utf8.buffer, utf8.byteOffset, utf8.length)', source)
         snapshot = source.split('export class NodeSnapshot {', 1)[1].split('\n}', 1)[0]
         self.assertNotIn('token', snapshot.lower())
         self.assertNotIn('uri', snapshot.lower())

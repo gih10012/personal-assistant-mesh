@@ -51,7 +51,8 @@ export class NodeCredentialStore {
     attributes.set(asset.Tag.SECRET, secret);
     attributes.set(asset.Tag.ACCESSIBILITY, asset.Accessibility.DEVICE_FIRST_UNLOCKED);
     attributes.set(asset.Tag.SYNC_TYPE, asset.SyncType.NEVER);
-    attributes.set(asset.Tag.IS_PERSISTENT, false);
+    // Omit IS_PERSISTENT: even setting it to false requires the restricted
+    // STORE_PERSISTENT_DATA permission. Default app assets are removed on uninstall.
     attributes.set(asset.Tag.CONFLICT_RESOLUTION, asset.ConflictResolution.OVERWRITE);
     await asset.add(attributes);
   }

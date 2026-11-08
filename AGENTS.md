@@ -1,6 +1,7 @@
 # AMITA working contract
 
-Current owner-approved contract: 2026-10-27 phone-first implementation. Read
+Current owner-approved contract: 2026-11-08 phone autonomy additions, on top of
+the 2026-10-27 phone-first implementation. Read
 docs/GOAL.md, docs/PLAN.md and docs/AMITA-PHONE-TO-HA-2026-10-27.md.
 The 2026-10-26 architecture remains applicable beneath this delivery order.
 Historical instructions are preserved in Git; their former pauses, fixed-VPS
@@ -24,6 +25,24 @@ system-scheduled background data/skill updates, and a legitimate same-signature
 HAP update path. Never keep wireless HDC open on the campus network as a
 management channel; the phone initiates authenticated AMITA connections.
 SCHOOL EVALUATION remains independently PAUSED; do not inspect or perform it.
+
+2026-11-08 update: the owner resumed the native Goal and requires phone control
+analogous to niri-computer-use, LiveView approval, usable operation while using
+other phone apps, device-owned self-maintenance and wireless future upgrades.
+First registration/independent oracle verification, Asset import and a real
+foreground outgoing connection succeeded. This does not establish background
+residency, GUI permissions, LiveView entitlement, an active cognition worker or
+wireless native installation. The first independent allocation exposed a real
+provider-principal mismatch; preserve that original receipt and fix the client.
+Finish all integration before requesting today's final useful USB window. Do
+not promise that USB is permanently unnecessary before a legal same-signature
+wireless native upgrade preserves identity and Asset on the actual phone.
+Deprecated public accessibility APIs require a legitimate owner-enabled device
+probe; deprecation alone proves neither availability nor unavailability. Use
+system-approved execution windows and report suspended/queued truthfully. Do
+not substitute a forever-visible Mesh page, fake media/transfer keepalive, or
+an open HDC port for a real background service. Keep model-free supervision
+separate from any actually authorized low-cost cognition route.
 
 Deliver user-visible functionality. Deploy completed authorized changes promptly
 and prefer one real CLI/Web/GUI acceptance. Reuse valid evidence and specialist
