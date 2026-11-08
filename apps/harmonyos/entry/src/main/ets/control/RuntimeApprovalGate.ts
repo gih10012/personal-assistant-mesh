@@ -11,6 +11,8 @@ export interface RuntimePermit {
   fence: ControlFence;
   state: string;
   hardware_armed: boolean;
+  details_reviewed?: boolean;
+  background_agents_verified?: boolean;
 }
 
 // One live local decision slot, not another task/operation ledger. Source
@@ -34,11 +36,13 @@ export class RuntimeApprovalGate {
     });
   }
   armHardware(): void {
-    if (this.permit !== null && this.permit.state === 'awaiting_approval') { this.permit.hardware_armed = true; }
+    if (this.permit !== null && ['awaiting_approval', 'awaiting_revalidation'].includes(this.permit.state)) {
+      this.permit.hardware_armed = true;
+    }
   }
   matches(value: OwnerControlDecision): boolean {
     const p: RuntimePermit | null = this.permit;
-    return p !== null && p.state === 'awaiting_approval' && p.ticket.expires_at > this.clock() &&
+    return p !== null && ['awaiting_approval', 'awaiting_revalidation'].includes(p.state) && p.ticket.expires_at > this.clock() &&
       value.approval_id === p.ticket.approval_id && value.nonce === p.ticket.nonce &&
       value.operation_id === p.ticket.operation_id && value.task_id === p.ticket.task_id &&
       value.revision === p.ticket.revision && value.expires_at === p.ticket.expires_at &&
@@ -46,8 +50,9 @@ export class RuntimeApprovalGate {
   }
   complete(approved: boolean): void {
     const p: RuntimePermit | null = this.permit;
-    if (p === null || p.state !== 'awaiting_approval') { throw new Error('phone_control_no_pending_approval'); }
+    if (p === null || !['awaiting_approval', 'awaiting_revalidation'].includes(p.state)) { throw new Error('phone_control_no_pending_approval'); }
     if (p.ticket.expires_at <= this.clock()) { this.cancel(); return; }
+    if (approved && !p.fence.valid) { throw new Error('phone_control_fresh_revalidated_fence_required'); }
     if (this.timer !== -1) { clearTimeout(this.timer); this.timer = -1; }
     p.state = approved ? 'approved' : 'denied';
     p.hardware_armed = false;
@@ -66,6 +71,14 @@ export class RuntimeApprovalGate {
     if (!this.allowed(dispatchJson, ownerGrant)) { throw new Error('phone_control_same_operation_approval_required'); }
     const p: RuntimePermit = this.permit as RuntimePermit;
     p.state = 'consumed'; return p;
+  }
+  invalidateForRevalidation(): void {
+    if (this.permit !== null && ['awaiting_approval', 'awaiting_revalidation'].includes(this.permit.state)) {
+      this.permit.fence.valid = false; this.permit.state = 'awaiting_revalidation';
+      this.permit.hardware_armed = false;
+      return; // No active permission. The original deadline/timer and promise remain unchanged.
+    }
+    this.cancel();
   }
   cancel(): void {
     if (this.timer !== -1) { clearTimeout(this.timer); this.timer = -1; }

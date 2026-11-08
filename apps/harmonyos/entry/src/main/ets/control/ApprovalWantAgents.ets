@@ -1,16 +1,33 @@
 import { Want, WantAgent, wantAgent } from '@kit.AbilityKit';
 import { ApprovalTicket, ControlSession, OwnerControlDecision } from './ControlSession';
 import { ApprovalActions } from './ApprovalSurface';
+import { CONTROL_BUNDLE, CONTROL_DECISION_EVENT, CONTROL_DECISION_PAYLOAD } from './BackgroundDecisionProtocol';
 
 // Public fallback: opens the app's own existing UIAbility. This does not pretend
 // to be a background callback. Root must route onCreate/onNewWant to the same
 // private pending approval journal and verify the exact ticket before deciding.
 // No remote-supplied bundle, ability, URL or command is accepted.
-export async function buildApprovalWantAgents(ticket: ApprovalTicket): Promise<ApprovalActions> {
+export async function buildApprovalWantAgents(ticket: ApprovalTicket, background: boolean = false): Promise<ApprovalActions> {
   const review: WantAgent = await decisionAgent(ticket, 'review', 0);
-  const approve: WantAgent = await decisionAgent(ticket, 'approve', 1);
-  const deny: WantAgent = await decisionAgent(ticket, 'deny', 2);
+  const approve: WantAgent = background ? await backgroundAgent(ticket, 'approve', 1) : await decisionAgent(ticket, 'approve', 1);
+  const deny: WantAgent = background ? await backgroundAgent(ticket, 'deny', 2) : await decisionAgent(ticket, 'deny', 2);
+  if (background && (await wantAgent.getBundleName(review) !== CONTROL_BUNDLE ||
+    await wantAgent.getBundleName(approve) !== CONTROL_BUNDLE || await wantAgent.getBundleName(deny) !== CONTROL_BUNDLE)) {
+    throw new Error('phone_control_background_agent_creator_mismatch');
+  }
   return { review: review, approve: approve, deny: deny };
+}
+async function backgroundAgent(ticket: ApprovalTicket, decision: string, offset: number): Promise<WantAgent> {
+  const value: OwnerControlDecision = { approval_id: ticket.approval_id, nonce: ticket.nonce,
+    operation_id: ticket.operation_id, task_id: ticket.task_id, revision: ticket.revision,
+    expires_at: ticket.expires_at, decision: decision };
+  const parameters: Record<string, Object> = {};
+  parameters[CONTROL_DECISION_PAYLOAD] = JSON.stringify(value);
+  const want: Want = { bundleName: CONTROL_BUNDLE, action: CONTROL_DECISION_EVENT,
+    uri: 'amita-control://decision/' + ticket.approval_id + '/' + decision, parameters: parameters };
+  return wantAgent.getWantAgent({ wants: [want], requestCode: offset,
+    actionType: wantAgent.OperationType.SEND_COMMON_EVENT,
+    actionFlags: [wantAgent.WantAgentFlags.ONE_TIME_FLAG, wantAgent.WantAgentFlags.CONSTANT_FLAG] });
 }
 // Only call from the app's own platform callback, never a network request.
 // false means review/no decision; it must open the actual private review UI.

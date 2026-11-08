@@ -9,6 +9,7 @@ import { KeyEvent } from '@kit.InputKit';
 import {
   ControlAvailability, ControlInvocation, ControlProvider, ProviderElement, ProviderView
 } from './ControlSession';
+import { controlDigest } from './PhoneControlJSON';
 
 export interface AccessibilityProviderStatus {
   principal: string; connected: boolean; root_verified: boolean; owner_authorised: boolean;
@@ -27,6 +28,26 @@ class NodeFacts {
   scrollable: boolean = false;
   rect: Rect = { left: 0, top: 0, width: 0, height: 0 };
   nativeActions: string[] = [];
+  stateFingerprint: string = '';
+}
+class NativeSemanticState {
+  checkable: boolean | null = null;
+  checked: boolean | null = null;
+  selected: boolean | null = null;
+  focused: boolean | null = null;
+  accessibilityFocused: boolean | null = null;
+  editable: boolean | null = null;
+  inputType: number | null = null;
+  currentIndex: number | null = null;
+  endIndex: number | null = null;
+  itemCount: number | null = null;
+  textLengthLimit: number | null = null;
+  valueNow: number | null = null;
+}
+interface NativeNodeFingerprint {
+  component_id: number; window_id: number; role: string; label: string;
+  password: boolean; enabled: boolean; visible: boolean; clickable: boolean; scrollable: boolean;
+  rect: Rect; actions: string[]; semantic: NativeSemanticState;
 }
 interface NativeHandle { element: AccessibilityElement; facts: NodeFacts; }
 interface PendingNode { element: AccessibilityElement; depth: number; }
@@ -164,6 +185,26 @@ export class AccessibilityProvider implements ControlProvider {
         result.label = contents.slice(0, 8).join(' ').slice(0, 1024);
       }
     }
+    const semantic: NativeSemanticState = new NativeSemanticState();
+    const reads: Promise<void>[] = [];
+    if (names.includes('checkable')) { reads.push(element.attributeValue('checkable').then((v: boolean): void => { semantic.checkable = v; })); }
+    if (names.includes('checked')) { reads.push(element.attributeValue('checked').then((v: boolean): void => { semantic.checked = v; })); }
+    if (names.includes('selected')) { reads.push(element.attributeValue('selected').then((v: boolean): void => { semantic.selected = v; })); }
+    if (names.includes('isFocused')) { reads.push(element.attributeValue('isFocused').then((v: boolean): void => { semantic.focused = v; })); }
+    if (names.includes('accessibilityFocused')) { reads.push(element.attributeValue('accessibilityFocused').then((v: boolean): void => { semantic.accessibilityFocused = v; })); }
+    if (names.includes('editable')) { reads.push(element.attributeValue('editable').then((v: boolean): void => { semantic.editable = v; })); }
+    if (names.includes('inputType')) { reads.push(element.attributeValue('inputType').then((v: number): void => { semantic.inputType = v; })); }
+    if (names.includes('currentIndex')) { reads.push(element.attributeValue('currentIndex').then((v: number): void => { semantic.currentIndex = v; })); }
+    if (names.includes('endIndex')) { reads.push(element.attributeValue('endIndex').then((v: number): void => { semantic.endIndex = v; })); }
+    if (names.includes('itemCount')) { reads.push(element.attributeValue('itemCount').then((v: number): void => { semantic.itemCount = v; })); }
+    if (names.includes('textLengthLimit')) { reads.push(element.attributeValue('textLengthLimit').then((v: number): void => { semantic.textLengthLimit = v; })); }
+    if (names.includes('valueNow')) { reads.push(element.attributeValue('valueNow').then((v: number): void => { semantic.valueNow = v; })); }
+    await Promise.all(reads);
+    const fingerprint: NativeNodeFingerprint = { component_id: result.componentId, window_id: result.windowId,
+      role: result.role, label: result.label, password: result.password, enabled: result.enabled, visible: result.visible,
+      clickable: result.clickable, scrollable: result.scrollable, rect: result.rect,
+      actions: result.nativeActions, semantic: semantic };
+    result.stateFingerprint = await controlDigest(new util.TextEncoder().encodeInto(JSON.stringify(fingerprint)));
     return result;
   }
   private semanticActions(facts: NodeFacts): string[] {
@@ -215,7 +256,7 @@ export class AccessibilityProvider implements ControlProvider {
           const key: string = 'native:' + visited + ':' + facts.componentId;
           elements.push({ key: key, role: facts.role.slice(0, 80), label: facts.password ? '[private]' : facts.label.slice(0, 1024),
             sensitive: facts.password, enabled: facts.enabled, actions: this.semanticActions(facts),
-            bounds: { left: left, top: top, width: right - left, height: bottom - top } });
+            bounds: { left: left, top: top, width: right - left, height: bottom - top }, state_fingerprint: facts.stateFingerprint });
           this.handles.set(key, { element: next.element, facts: facts });
         }
         const children: AccessibilityElement[] = await next.element.attributeValue('children');
@@ -281,7 +322,8 @@ export class AccessibilityProvider implements ControlProvider {
       requireProvider(bundle === this.bundle && windowId === this.windowId && currentDisplay.id === 0 &&
         currentDisplay.width === this.screenWidth && currentDisplay.height === this.screenHeight &&
         facts.componentId === native.facts.componentId && facts.windowId === native.facts.windowId &&
-        facts.role === native.facts.role && facts.label === native.facts.label && facts.enabled && facts.visible &&
+        facts.role === native.facts.role && facts.label === native.facts.label &&
+        facts.stateFingerprint === native.facts.stateFingerprint && facts.enabled && facts.visible &&
         !facts.password && facts.componentId >= 0 && facts.rect.left === native.facts.rect.left &&
         facts.rect.top === native.facts.rect.top && facts.rect.width === native.facts.rect.width &&
         facts.rect.height === native.facts.rect.height,

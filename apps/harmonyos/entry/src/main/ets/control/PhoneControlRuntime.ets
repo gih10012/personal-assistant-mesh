@@ -22,6 +22,8 @@ import {
 } from './PhoneControlBridge';
 import { PhoneControlInput, controlBlob, controlDigest, decodeControlInput } from './PhoneControlJSON';
 import { RuntimeApprovalGate, RuntimePermit } from './RuntimeApprovalGate';
+import { BackgroundDecisionBridge } from './BackgroundDecisionBridge';
+import { PhoneControlReviewAcknowledgement } from './PhoneControlBridge';
 
 interface NodeIdentity { node_id: string; }
 interface RuntimeIdentity { format: string; node_id: string; control_session_id: string; }
@@ -51,6 +53,7 @@ export class PhoneControlRuntime implements WorkHost {
   private control: ControlSession;
   private capture: GlobalScreenCapture = new GlobalScreenCapture();
   private gate: RuntimeApprovalGate = new RuntimeApprovalGate();
+  private background: BackgroundDecisionBridge;
   private readPermit: RuntimePermit | null = null;
   private engine: WorkEngine | null = null;
   private owner: PhoneControlOwnerOptions = new PhoneControlOwnerOptions();
@@ -64,6 +67,8 @@ export class PhoneControlRuntime implements WorkHost {
   private timer: number = -1;
   private lastTick: number = 0;
   private lastDecision: string = '';
+  private lastReview: string = '';
+  private surfaceBusy: boolean = false;
   private lastSurface: string = '';
   private held: Map<number, number> = new Map();
   private decisionKey: number = -1;
@@ -89,6 +94,11 @@ export class PhoneControlRuntime implements WorkHost {
     });
     const controlStore: ControlStore = new ControlStore(context, nodeId);
     this.control = new ControlSession(controlStore.load(), nodeId, controlStore, this.provider);
+    this.background = new BackgroundDecisionBridge(async (value: OwnerControlDecision): Promise<void> => {
+      const p: RuntimePermit | null = this.gate.current();
+      requireValue(p !== null && p.background_agents_verified === true, 'phone_control_background_creator_not_verified');
+      await this.decide(value, true);
+    });
     this.state.node_id = nodeId; this.state.principal = 'node:' + nodeId;
     this.state.control_session_id = this.identity.control_session_id;
   }
@@ -138,6 +148,9 @@ export class PhoneControlRuntime implements WorkHost {
     this.active = true;
     try { await this.provider.onConnect(context); this.state.error = ''; }
     catch (error) { this.state.error = 'phone_control_accessibility_root_unavailable'; }
+    if (!this.active) { return; }
+    await this.background.start();
+    if (!this.active) { await this.background.stop(); return; }
     await this.applyOwner();
     if (this.timer !== -1) { clearInterval(this.timer); }
     this.timer = setInterval((): void => { this.pulse(); }, 1000);
@@ -146,6 +159,7 @@ export class PhoneControlRuntime implements WorkHost {
   async onDisconnect(): Promise<void> {
     this.active = false; this.provider.onDisconnect(); this.gate.cancel(); this.readPermit = null;
     this.control.setOwnerEnabled(false); this.capture.setOwnerCaptureAllowed(false);
+    await this.background.stop();
     if (this.timer !== -1) { clearInterval(this.timer); this.timer = -1; }
     this.state.service_connected = false; this.state.connection = 'service_disconnected';
     await this.publish();
@@ -165,13 +179,13 @@ export class PhoneControlRuntime implements WorkHost {
     if (event.action === KeyAction.DOWN) { this.held.set(code, event.key.pressedTime); }
     const permit: RuntimePermit | null = this.gate.current();
     const decision: string = code === KeyCode.KEYCODE_VOLUME_UP ? 'approve' : code === KeyCode.KEYCODE_VOLUME_DOWN ? 'deny' : '';
-    if (permit !== null && permit.state === 'awaiting_approval' && permit.hardware_armed &&
+    if (permit !== null && ['awaiting_approval', 'awaiting_revalidation'].includes(permit.state) && permit.hardware_armed &&
       permit.ticket.expires_at > Date.now() && event.action === KeyAction.DOWN && !wasHeld &&
       !event.ctrlKey && !event.altKey && !event.shiftKey && event.keys.length === 1 && decision.length > 0 &&
-      !(decision === 'approve' && permit.ticket.review_required)) {
+      !(decision === 'approve' && permit.ticket.review_required && permit.details_reviewed !== true)) {
       this.decisionKey = code; this.decisionPressedTime = event.key.pressedTime;
       this.provider.noteOwnerDecisionKey();
-      this.decide(this.decisionFor(permit.ticket, decision)).catch((): void => {});
+      this.decide(this.decisionFor(permit.ticket, decision), permit.state === 'awaiting_revalidation').catch((): void => {});
       return true; // Match the explicit decision BEFORE the ordinary input fence.
     }
     return this.provider.onKeyEvent(event);
@@ -181,7 +195,7 @@ export class PhoneControlRuntime implements WorkHost {
       task_id: ticket.task_id, revision: ticket.revision, expires_at: ticket.expires_at, decision: decision };
   }
   private activity(): void {
-    this.gate.cancel();
+    this.gate.invalidateForRevalidation();
     if (this.readPermit !== null) { this.readPermit.fence.valid = false; this.readPermit = null; }
     if (this.control !== undefined) { this.control.ownerActivity(); }
   }
@@ -194,6 +208,7 @@ export class PhoneControlRuntime implements WorkHost {
     const root: boolean = this.provider.status().root_verified;
     const key: string = owner.grant_id + '|' + owner.enabled + '|' + root;
     if (key === this.ownerApplied) { return; }
+    this.gate.cancel(); this.control.setOwnerEnabled(false); // Explicit policy changes cancel dormant candidates too.
     this.activity(); this.owner = owner; this.ownerApplied = key;
     this.provider.setOwnerControlAllowed(owner.enabled && root);
     this.provider.setGestureFallbackAllowed(owner.enabled && root && owner.gesture_fallback);
@@ -223,7 +238,7 @@ export class PhoneControlRuntime implements WorkHost {
     const owner: PhoneControlOwnerOptions = readPhoneControlOwner(this.context);
     if (owner.grant_id !== p.owner_grant || !this.provider.availability().inspect) { return false; }
     if (p.action_kind !== 'action') { return p.action_kind !== 'screenshot' || owner.screen_capture; }
-    try { return this.provider.availability().act && this.control.receipt(dispatch.operation_id).state === 'approved'; }
+    try { return this.provider.availability().act && this.control.approvalCurrent(dispatch.operation_id); }
     catch (error) { return false; }
   }
   reportAllowed(dispatch: ProviderDispatch, permissionContext: string): boolean {
@@ -278,12 +293,7 @@ export class PhoneControlRuntime implements WorkHost {
     this.lastSurface = 'presenting';
     const waiting: Promise<boolean> = this.gate.begin(permit);
     await this.publish();
-    try {
-      const surface: ApprovalSurface = new ApprovalSurface(731901, owner.liveview_event);
-      const presentation = await surface.present(ticket, await buildApprovalWantAgents(ticket));
-      this.lastSurface = presentation.surface;
-      if (presentation.presented) { this.gate.armHardware(); }
-    } catch (error) { this.lastSurface = 'in_app_pending'; }
+    await this.presentPending();
     await this.publish();
     const approved: boolean = await waiting;
     if (!approved) { this.control.ownerActivity(); }
@@ -381,16 +391,78 @@ export class PhoneControlRuntime implements WorkHost {
     } catch (error) { this.connected = false; this.state.connection = 'unreachable'; this.state.error = 'phone_control_connection_or_receipt_unconfirmed'; }
     finally { this.busy = false; await this.publish(); if (!this.active) { await this.withdraw(); } }
   }
-  async decide(value: OwnerControlDecision): Promise<void> {
+  private sourcePrepared(permit: RuntimePermit): boolean {
+    if (this.engine === null || permit.dispatch_json.length === 0) { return false; }
+    const original: ProviderDispatch = JSON.parse(permit.dispatch_json) as ProviderDispatch;
+    const row: WorkRecord | undefined = this.engine.snapshot.records.find((item: WorkRecord): boolean =>
+      item.operation_id === permit.ticket.operation_id && item.capability_id === original.capability_id);
+    return row !== undefined && row.state === 'prepared' && row.invocation_nonce === '' && row.result_json === '' &&
+      row.task_id === permit.ticket.task_id && row.task_epoch === original.task_epoch && row.authority_epoch === original.epoch &&
+      row.dispatch_json === permit.dispatch_json && row.last_remote_state === 'pending';
+  }
+  private async presentPending(): Promise<void> {
+    const p: RuntimePermit | null = this.gate.current();
+    if (this.surfaceBusy || p === null || !['awaiting_approval', 'awaiting_revalidation'].includes(p.state)) { return; }
+    this.surfaceBusy = true;
+    try {
+      const t: ApprovalTicket = p.ticket;
+      const display: ApprovalTicket = { approval_id: t.approval_id, nonce: t.nonce, operation_id: t.operation_id,
+        task_id: t.task_id, revision: t.revision, expires_at: t.expires_at,
+        summary: p.details_reviewed === true ? t.summary + ' · 完整内容已核对；回原窗口后明确决定' : t.summary,
+        review_required: t.review_required && p.details_reviewed !== true };
+      const useBackground: boolean = this.background.status().subscribed;
+      const actions = await buildApprovalWantAgents(display, useBackground);
+      p.background_agents_verified = useBackground;
+      const surface: ApprovalSurface = new ApprovalSurface(731901, this.owner.liveview_event);
+      const presentation = await surface.present(display, actions);
+      this.lastSurface = presentation.surface;
+      if (presentation.presented) { this.gate.armHardware(); }
+    } catch (error) {
+      p.background_agents_verified = false;
+      this.lastSurface = 'in_app_pending'; this.state.error = 'phone_control_approval_surface_unconfirmed';
+    } finally { this.surfaceBusy = false; }
+  }
+  private async acknowledgeReview(value: PhoneControlReviewAcknowledgement): Promise<void> {
+    const p: RuntimePermit | null = this.gate.current();
+    requireValue(p !== null && p.ticket.review_required && p.input_json === value.input_json &&
+      this.gate.matches({ approval_id: value.approval_id, nonce: value.nonce, operation_id: value.operation_id,
+        task_id: value.task_id, revision: value.revision, expires_at: value.expires_at, decision: 'approve' }) &&
+      this.ownerAllowedNow() && readPhoneControlOwner(this.context).grant_id === p.owner_grant && this.sourcePrepared(p),
+      'phone_control_review_acknowledgement_mismatch');
+    (p as RuntimePermit).details_reviewed = true;
+    await this.presentPending(); // Only enables the later explicit decision; never approves now.
+  }
+  async decide(value: OwnerControlDecision, explicitRevalidation: boolean = false): Promise<void> {
+    if (this.deciding && value.decision === 'deny' && this.gate.matches(value)) {
+      // A fresh exact owner rejection during asynchronous revalidation revokes
+      // immediately; it does not wait behind the outstanding approval write.
+      this.gate.cancel(); this.control.ownerActivity();
+      this.state.error = 'phone_control_owner_denied_during_revalidation';
+      await this.publish(); return;
+    }
     if (this.deciding || !this.gate.matches(value)) { throw new Error('phone_control_pending_decision_mismatch'); }
     const p: RuntimePermit = this.gate.current() as RuntimePermit;
     requireValue(this.ownerAllowedNow() && readPhoneControlOwner(this.context).grant_id === p.owner_grant,
       'phone_control_owner_grant_revoked');
+    requireValue(value.decision !== 'approve' || !p.ticket.review_required || p.details_reviewed === true,
+      'phone_control_complete_private_review_required');
     this.deciding = true;
     try {
-      await this.control.decideBound(value);
+      if (explicitRevalidation && value.decision === 'approve') {
+        await this.control.decideAfterRevalidation(value, (): boolean => this.sourcePrepared(p));
+        requireValue(this.control.approvalCurrent(value.operation_id) && this.sourcePrepared(p),
+          'phone_control_revalidated_decision_interrupted');
+        p.fence = { valid: true, human_input_epoch: 0 };
+      } else { await this.control.decideBound(value); }
       this.gate.complete(value.decision === 'approve');
-    } catch (error) { this.gate.cancel(); this.state.error = 'phone_control_local_decision_unconfirmed'; throw new Error('phone_control_local_decision_unconfirmed'); }
+    } catch (error) {
+      let pending: boolean = false;
+      try { pending = this.control.receipt(value.operation_id).state === 'awaiting_approval'; } catch (readError) {}
+      if (explicitRevalidation && pending && this.sourcePrepared(p) && p.ticket.expires_at > Date.now()) {
+        this.gate.invalidateForRevalidation(); this.state.error = 'phone_control_return_to_original_window_and_decide_again';
+      } else { this.gate.cancel(); this.state.error = 'phone_control_local_decision_unconfirmed'; }
+      throw new Error('phone_control_local_decision_unconfirmed');
+    }
     finally { this.deciding = false; await this.publish(); }
   }
   private async pulse(): Promise<void> {
@@ -400,9 +472,15 @@ export class PhoneControlRuntime implements WorkHost {
       await this.applyOwner();
       const mailbox: preferences.Preferences = freshControlPreferences(this.context, 'amita_control_decision_v1');
       const raw: string = mailbox.getSync('decision', '') as string;
+      const review: string = mailbox.getSync('review_ack', '') as string;
+      if (review.length > 0 && review !== this.lastReview) {
+        this.lastReview = review;
+        try { await this.acknowledgeReview(JSON.parse(review) as PhoneControlReviewAcknowledgement); }
+        catch (error) { this.state.error = 'phone_control_review_acknowledgement_rejected_or_stale'; }
+      }
       if (raw.length > 0 && raw !== this.lastDecision) {
         this.lastDecision = raw;
-        try { await this.decide(JSON.parse(raw) as OwnerControlDecision); }
+        try { await this.decide(JSON.parse(raw) as OwnerControlDecision, true); }
         catch (error) { this.state.error = 'phone_control_local_decision_rejected_or_stale'; }
       }
       await this.publish();
@@ -415,7 +493,14 @@ export class PhoneControlRuntime implements WorkHost {
     this.publishing = true;
     try {
       const p: RuntimePermit | null = this.gate.current();
-      const pending: boolean = p !== null && p.state === 'awaiting_approval';
+      const pending: boolean = p !== null && ['awaiting_approval', 'awaiting_revalidation'].includes(p.state);
+      const background = this.background.status();
+      this.state.background_decision_subscribed = background.subscribed;
+      this.state.background_decision_callback_verified = background.callback_verified;
+      this.state.background_decision_error = background.error;
+      this.state.background_decision_publisher = background.observed_publisher;
+      this.state.background_agents_verified = pending && (p as RuntimePermit).background_agents_verified === true;
+      this.state.pending_revalidation = pending && (p as RuntimePermit).state === 'awaiting_revalidation';
       this.state.service_connected = this.active; this.state.root_verified = this.provider.status().root_verified;
       this.state.owner_enabled = this.ownerAllowedNow(); this.state.configured = this.engine !== null && this.engine.snapshot.config !== null;
       this.state.pending_operation_id = pending ? (p as RuntimePermit).ticket.operation_id : '';
@@ -424,7 +509,8 @@ export class PhoneControlRuntime implements WorkHost {
       this.state.pending_task_epoch = dispatch === null ? 0 : dispatch.task_epoch as number;
       this.state.pending_expires_at = pending ? (p as RuntimePermit).ticket.expires_at : 0;
       this.state.pending_summary = pending ? (p as RuntimePermit).ticket.summary : '';
-      this.state.pending_review_required = pending && (p as RuntimePermit).ticket.review_required;
+      this.state.pending_review_required = pending && (p as RuntimePermit).ticket.review_required &&
+        (p as RuntimePermit).details_reviewed !== true;
       this.state.approval_surface = pending ? this.lastSurface : '';
       const records: WorkRecord[] = this.engine === null ? [] : this.engine.snapshot.records;
       this.state.tasks = records.length; this.state.settled = records.filter((r: WorkRecord): boolean => r.state === 'settled').length;

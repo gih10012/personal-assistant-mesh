@@ -27,6 +27,12 @@ export class PhoneControlRuntimeStatus {
   pending_expires_at: number = 0;
   pending_summary: string = '';
   pending_review_required: boolean = false;
+  pending_revalidation: boolean = false;
+  background_decision_subscribed: boolean = false;
+  background_decision_callback_verified: boolean = false;
+  background_agents_verified: boolean = false;
+  background_decision_error: string = '';
+  background_decision_publisher: string = '';
   approval_surface: string = '';
   tasks: number = 0;
   settled: number = 0;
@@ -37,6 +43,10 @@ export interface PhoneControlPending {
   ticket: ApprovalTicket;
   task_epoch: number;
   input_json: string; // App-private review only, never included in public status/logs.
+}
+export interface PhoneControlReviewAcknowledgement {
+  approval_id: string; nonce: string; operation_id: string; task_id: string;
+  revision: number; expires_at: number; input_json: string;
 }
 export function freshControlPreferences(context: common.Context, name: string): preferences.Preferences {
   preferences.removePreferencesFromCacheSync(context, name);
@@ -99,6 +109,17 @@ export class PhoneControlBridge {
     await PhoneControlBridge.postDecision(context, { approval_id: t.approval_id, nonce: t.nonce,
       operation_id: t.operation_id, task_id: t.task_id, revision: t.revision,
       expires_at: t.expires_at, decision: decision });
+  }
+  static async markPendingReviewed(context: common.UIAbilityContext): Promise<void> {
+    const pending: PhoneControlPending | null = PhoneControlBridge.pendingForOwner(context);
+    if (pending === null || pending.ticket.expires_at <= Date.now()) { throw new Error('phone_control_no_pending_review'); }
+    const t: ApprovalTicket = pending.ticket;
+    const ack: PhoneControlReviewAcknowledgement = { approval_id: t.approval_id, nonce: t.nonce,
+      operation_id: t.operation_id, task_id: t.task_id, revision: t.revision,
+      expires_at: t.expires_at, input_json: pending.input_json };
+    const store: preferences.Preferences = freshControlPreferences(context, 'amita_control_decision_v1');
+    store.putSync('review_ack', JSON.stringify(ack)); await store.flush();
+    // This records reading the complete local body, never an execution decision.
   }
   static async postDecision(context: common.Context, value: OwnerControlDecision): Promise<void> {
     if (!['approve', 'deny'].includes(value.decision) || value.expires_at <= Date.now()) {

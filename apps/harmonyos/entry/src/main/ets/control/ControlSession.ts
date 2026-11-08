@@ -4,6 +4,7 @@ export interface ControlBounds { left: number; top: number; width: number; heigh
 export interface ProviderElement {
   key: string; role: string; label: string; sensitive: boolean;
   enabled: boolean; actions: string[]; bounds: ControlBounds;
+  state_fingerprint?: string;
 }
 export interface ProviderView {
   bundle_name: string; window_id: string; view_token: string;
@@ -12,6 +13,7 @@ export interface ProviderView {
 export interface ControlElement {
   element_ref: string; role: string; label: string; sensitive: boolean;
   enabled: boolean; actions: string[]; bounds: ControlBounds;
+  state_fingerprint?: string;
 }
 export interface ControlView {
   revision: number; bundle_name: string; window_id: string; view_ref: string;
@@ -60,6 +62,22 @@ export interface ControlReceipt {
   operation_id: string; state: string; input_acknowledged: boolean;
   effect_verified: boolean; automatic_replay: boolean;
 }
+interface StableProviderView {
+  bundle_name: string; window_id: string; width: number; height: number;
+  truncated: boolean; elements: ProviderElement[];
+}
+interface DecisionCandidate {
+  request_json: string; fingerprint: string; target_key: string;
+}
+interface RevalidatedExecution {
+  approval_id: string; request_json: string; revision: number; human_epoch: number;
+  lease_id: string; target_key: string; fingerprint: string;
+}
+function viewFingerprint(value: ProviderView): string {
+  const stable: StableProviderView = { bundle_name: value.bundle_name, window_id: value.window_id,
+    width: value.width, height: value.height, truncated: value.truncated, elements: value.elements };
+  return JSON.stringify(stable); // Exact bounded in-memory equality; not an external authentication hash.
+}
 function requireControl(ok: boolean, code: string): void { if (!ok) { throw new Error(code); } }
 function identifier(value: string): boolean {
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,180}$/.test(value);
@@ -101,6 +119,8 @@ export class ControlSession {
   private view: ProviderView | null = null;
   private observed: ControlView | null = null;
   private fence: ControlFence | null = null;
+  private candidates: Map<string, DecisionCandidate> = new Map();
+  private revalidated: Map<string, RevalidatedExecution> = new Map();
 
   constructor(state: ControlState, nodeId: string, host: ControlHost, provider: ControlProvider) {
     requireControl(state !== null && state.format === 'amita-phone-control-state/1' && state.node_id === nodeId &&
@@ -131,12 +151,13 @@ export class ControlSession {
   // Called only by the trusted local owner UI, not the remote tool transport.
   setOwnerEnabled(value: boolean): void {
     this.enabled = value;
-    if (!value) { this.ownerActivity(); }
+    if (!value) { this.candidates.clear(); this.ownerActivity(); }
   }
   // Native human input, system lock, focus/window change and provider disconnect
   // all invalidate refs and pending approvals. Never swallow the owner's input.
   ownerActivity(): void {
     this.humanEpoch++; this.revision++; this.view = null; this.observed = null; this.lease = null;
+    this.revalidated.clear();
     if (this.fence !== null) { this.fence.valid = false; }
   }
   acquire(taskId: string, durationMs: number): ControlLease {
@@ -187,9 +208,12 @@ export class ControlSession {
           Number.isSafeInteger(box.height) && box.left >= 0 && box.top >= 0 && box.width > 0 && box.height > 0 &&
           box.left + box.width <= value.width && box.top + box.height <= value.height, 'phone_control_element_invalid');
         keys.push(row.key);
+        requireControl(row.state_fingerprint === undefined || /^[a-f0-9]{64}$/.test(row.state_fingerprint),
+          'phone_control_element_fingerprint_invalid');
         elements.push({ element_ref: this.sessionId + ':' + this.revision + ':' + i, role: row.role,
           label: row.sensitive ? '[private]' : row.label.slice(0, 160), sensitive: row.sensitive,
-          enabled: row.enabled, actions: row.actions.slice(), bounds: { left: box.left, top: box.top, width: box.width, height: box.height } });
+          enabled: row.enabled, actions: row.actions.slice(), bounds: { left: box.left, top: box.top, width: box.width, height: box.height },
+          state_fingerprint: row.state_fingerprint });
       }
       const observed: ControlView = { revision: this.revision, bundle_name: value.bundle_name,
         window_id: value.window_id, view_ref: this.sessionId + ':' + this.revision,
@@ -222,6 +246,12 @@ export class ControlSession {
         expires_at: Math.min(lease.expires_at, this.host.now() + 30000), state: 'awaiting_approval' };
       requireControl(identifier(record.approval_id) && identifier(record.nonce), 'phone_control_approval_invalid');
       this.state.records.push(record);
+      const originalView: ProviderView = this.view as ProviderView;
+      if (!originalView.truncated && originalView.elements.every((element: ProviderElement): boolean =>
+        element.state_fingerprint !== undefined && /^[a-f0-9]{64}$/.test(element.state_fingerprint))) {
+        this.candidates.set(record.approval_id, { request_json: encoded,
+          fingerprint: viewFingerprint(originalView), target_key: target.key });
+      }
       const summary: string = request.action + ' · ' + (this.view as ProviderView).bundle_name + ' · ' +
         target.role + ' · ' + target.label.slice(0, 80);
       await this.persist();
@@ -245,7 +275,10 @@ export class ControlSession {
         'phone_control_approval_expired_or_stale');
     }
     this.busy = true;
-    try { record.state = decision === 'approve' ? 'approved' : 'denied'; await this.persist(); }
+    try {
+      record.state = decision === 'approve' ? 'approved' : 'denied'; await this.persist();
+      this.candidates.delete(record.approval_id);
+    }
     finally { this.busy = false; }
   }
   async decideBound(value: OwnerControlDecision): Promise<void> {
@@ -258,6 +291,59 @@ export class ControlSession {
       row.revision === value.revision && row.expires_at === value.expires_at, 'phone_control_approval_mismatch');
     await this.decide(value.approval_id, value.nonce, value.decision);
   }
+  // Only a trusted explicit owner callback may enter this separate path. Old
+  // decideBound remains strict. A candidate is memory-only evidence, never a
+  // grant; every ordinary input still revokes all current refs/leases/fences.
+  async decideAfterRevalidation(value: OwnerControlDecision, sourcePrepared: () => boolean): Promise<void> {
+    requireControl(value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      Object.keys(value).sort().join('|') === ['approval_id', 'nonce', 'operation_id', 'task_id', 'revision',
+        'expires_at', 'decision'].sort().join('|'), 'phone_control_approval_mismatch');
+    if (value.decision === 'deny') { await this.decideBound(value); return; }
+    requireControl(!this.busy && this.ready && this.enabled && value.decision === 'approve' && sourcePrepared(),
+      'phone_control_explicit_revalidation_unavailable');
+    const row: ControlRecord | undefined = this.state.records.find((record: ControlRecord): boolean =>
+      record.approval_id === value.approval_id);
+    const candidate: DecisionCandidate | undefined = this.candidates.get(value.approval_id);
+    requireControl(row !== undefined && candidate !== undefined && row.state === 'awaiting_approval' &&
+      row.operation_id === value.operation_id && row.task_id === value.task_id && row.nonce === value.nonce &&
+      row.revision === value.revision && row.expires_at === value.expires_at && row.expires_at > this.host.now() &&
+      row.request_json === candidate.request_json, 'phone_control_original_pending_candidate_required');
+    const record: ControlRecord = row as ControlRecord;
+    const original: DecisionCandidate = candidate as DecisionCandidate;
+    const epoch: number = this.humanEpoch;
+    await this.inspect(128); // Actual root and full bounded tree; validates all elements again.
+    requireControl(!this.busy, 'phone_control_busy');
+    this.busy = true;
+    try {
+      const current: ProviderView = this.view as ProviderView;
+      requireControl(this.enabled && this.view !== null && epoch === this.humanEpoch && sourcePrepared() &&
+        record.state === 'awaiting_approval' && record.expires_at > this.host.now() && !current.truncated &&
+        viewFingerprint(current) === original.fingerprint &&
+        current.elements.some((element: ProviderElement): boolean => element.key === original.target_key) &&
+        this.provider.availability().act && this.provider.availability().human_input_observable,
+        'phone_control_original_view_revalidation_failed');
+      requireControl(this.lease === null || this.lease.expires_at <= this.host.now() || this.lease.task_id === record.task_id,
+        'phone_control_screen_busy');
+      const leaseId: string = this.host.id();
+      requireControl(identifier(leaseId), 'phone_control_lease_invalid');
+      const proof: RevalidatedExecution = { approval_id: record.approval_id, request_json: record.request_json,
+        revision: this.revision, human_epoch: this.humanEpoch, lease_id: leaseId,
+        target_key: original.target_key, fingerprint: original.fingerprint };
+      this.lease = { task_id: record.task_id, lease_id: leaseId, expires_at: record.expires_at };
+      this.revalidated.set(record.operation_id, proof);
+      record.state = 'approved';
+      await this.persist();
+      if (!this.enabled || this.revalidated.get(record.operation_id) !== proof || epoch !== this.humanEpoch ||
+        proof.revision !== this.revision || record.expires_at <= this.host.now() || !sourcePrepared()) {
+        this.revalidated.delete(record.operation_id); record.state = 'cancelled'; await this.persist();
+        throw new Error('phone_control_revalidated_grant_interrupted');
+      }
+      this.candidates.delete(record.approval_id);
+    } catch (error) {
+      this.revalidated.delete(record.operation_id);
+      throw new Error('phone_control_original_view_revalidation_failed');
+    } finally { this.busy = false; }
+  }
   receipt(operationId: string): ControlReceipt {
     const row: ControlRecord | undefined = this.state.records.find((value: ControlRecord): boolean => value.operation_id === operationId);
     requireControl(row !== undefined, 'phone_control_original_operation_not_found');
@@ -265,17 +351,37 @@ export class ControlSession {
     return { operation_id: record.operation_id, state: record.state, input_acknowledged: record.state === 'input_acknowledged',
       effect_verified: false, automatic_replay: false };
   }
+  approvalCurrent(operationId: string): boolean {
+    const record: ControlRecord | undefined = this.state.records.find((row: ControlRecord): boolean => row.operation_id === operationId);
+    if (!this.ready || !this.enabled || record === undefined || record.state !== 'approved' || this.view === null ||
+      record.expires_at <= this.host.now()) { return false; }
+    const proof: RevalidatedExecution | undefined = this.revalidated.get(operationId);
+    try { this.currentLease(record.task_id, proof === undefined ? record.lease_id : proof.lease_id); }
+    catch (error) { return false; }
+    return proof === undefined ? record.revision === this.revision :
+      proof.approval_id === record.approval_id && proof.request_json === record.request_json &&
+      proof.revision === this.revision && proof.human_epoch === this.humanEpoch &&
+      viewFingerprint(this.view) === proof.fingerprint;
+  }
   async execute(operationId: string): Promise<ControlReceipt> {
     requireControl(!this.busy, 'phone_control_busy');
     const row: ControlRecord | undefined = this.state.records.find((value: ControlRecord): boolean => value.operation_id === operationId);
     requireControl(row !== undefined && row.state === 'approved', 'phone_control_original_operation_not_approved');
     const record: ControlRecord = row as ControlRecord;
-    this.currentLease(record.task_id, record.lease_id);
-    requireControl(record.revision === this.revision && record.expires_at > this.host.now() && this.view !== null,
+    const proof: RevalidatedExecution | undefined = this.revalidated.get(operationId);
+    this.currentLease(record.task_id, proof === undefined ? record.lease_id : proof.lease_id);
+    const currentRevision: boolean = proof === undefined ? record.revision === this.revision :
+      proof.approval_id === record.approval_id && proof.request_json === record.request_json &&
+      proof.revision === this.revision && proof.human_epoch === this.humanEpoch && this.view !== null &&
+      viewFingerprint(this.view as ProviderView) === proof.fingerprint;
+    requireControl(currentRevision && record.expires_at > this.host.now() && this.view !== null,
       'phone_control_approval_expired_or_stale');
     const request: ControlRequest = recordedRequest(record.request_json);
-    const target: ProviderElement = this.target(request.element_ref);
     const view: ProviderView = this.view as ProviderView;
+    const renewedTarget: ProviderElement | undefined = proof === undefined ? undefined :
+      view.elements.find((element: ProviderElement): boolean => element.key === proof.target_key);
+    requireControl(proof === undefined || renewedTarget !== undefined, 'phone_control_revalidated_target_missing');
+    const target: ProviderElement = proof === undefined ? this.target(request.element_ref) : renewedTarget as ProviderElement;
     const available: ControlAvailability = this.provider.availability();
     requireControl(available.act && available.human_input_observable && target.enabled && !target.sensitive &&
       target.actions.includes(request.action), 'phone_control_provider_unavailable');
@@ -299,6 +405,7 @@ export class ControlSession {
       return this.receipt(operationId);
     } finally {
       fence.valid = false; this.fence = null; this.busy = false;
+      this.revalidated.delete(operationId); this.candidates.delete(record.approval_id);
       this.view = null; this.observed = null; this.revision++;
     }
   }
