@@ -18,7 +18,7 @@ from .enrollment_relay import EnrollmentRelay, OWNER_FORMAT
 from .phone_authority import LiveTaskGate, RegistryEnrollment, issue_node, verified_enrollment
 from .ingress import _identifier
 
-ACTIONS = ('plan', 'status', 'prepare-existing-binding', 'verify', 'register', 'issue')
+ACTIONS = ('plan', 'status', 'prepare-existing-binding', 'verify', 'register', 'issue', 'reload-installed')
 PREFIX = '/v1/phone/owner/'
 SCOPE = 'leader:project:amita-harmony-onboarding'
 _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z')
@@ -136,6 +136,9 @@ class PhoneOwnerOperations:
 
     def handle(self, action, payload):
         _require(action in ACTIONS and isinstance(payload, dict), 'phone_owner_request_invalid')
+        if action == 'reload-installed':
+            _require(set(payload) == {'expected_sha256'}, 'phone_owner_reload_request_invalid')
+            return self.service.reload_installed(payload['expected_sha256'])
         if not payload and action in ('plan', 'status'):
             with self.service.lock:
                 return {'format': 'amita-phone-owner-result/1', 'action': action,
@@ -285,21 +288,29 @@ def main(argv=None):
     parser.add_argument('--config', required=True, help='existing private operator transport configuration')
     parser.add_argument('action', choices=ACTIONS)
     parser.add_argument('--enrollment-id')
+    parser.add_argument('--expected-sha256', help='SHA-256 of exact fixed owner config bytes, for reload-installed')
     args = parser.parse_args(argv)
     try:
-        _require((args.enrollment_id is None and args.action in ('plan', 'status')) or
-                 (isinstance(args.enrollment_id, str) and bool(_ID.fullmatch(args.enrollment_id))),
+        reload = args.action == 'reload-installed'
+        _require((reload and args.enrollment_id is None and isinstance(args.expected_sha256, str)
+                  and re.fullmatch(r'[0-9a-f]{64}', args.expected_sha256) is not None) or
+                 (not reload and args.expected_sha256 is None and (
+                     (args.enrollment_id is None and args.action in ('plan', 'status')) or
+                     (isinstance(args.enrollment_id, str) and bool(_ID.fullmatch(args.enrollment_id))))),
                  'phone_owner_enrollment_id_invalid')
         from .worker import Client
         client = Client(_private_json(args.config))
-        value = client.request(PREFIX + args.action,
-                               {'enrollment_id': args.enrollment_id} if args.enrollment_id else {})
+        payload = ({'expected_sha256': args.expected_sha256} if reload else
+                   {'enrollment_id': args.enrollment_id} if args.enrollment_id else {})
+        value = client.request(PREFIX + args.action, payload)
         print(json.dumps(value, sort_keys=True))
         return 0
     except Exception:
         # No transport exception text, private paths or tokens in stdout.
         print(json.dumps({'status': 'unconfirmed', 'automatic_replay': False,
-                          'next_action': 'query status using the same enrollment ID; reconcile original operation'}))
+                          'next_action': ('retry reload-installed with the same expected SHA-256; do not issue a new identity'
+                                          if args.action == 'reload-installed' else
+                                          'query status using the same enrollment ID; reconcile original operation')}))
         return 1
 
 

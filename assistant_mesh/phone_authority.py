@@ -13,12 +13,13 @@ import threading
 from pathlib import Path
 
 from .enrollment import document_sha256, REGISTRATION_FORMAT
-from .enrollment_bootstrap import _private_json, _write_new_private
+from .enrollment_bootstrap import _private_json, _write_new_private, _json as _parse_private_json
 from .enrollment_relay import EnrollmentRelay
 from .ingress import _identifier
 from .session_nodes import FORMAT, TOOLS
 from .store import Conflict
-from .phone_control import PhoneControl, validate_adapter
+from .phone_control import PhoneControl, validate_adapter, spec as control_spec, KIND as CONTROL_KIND
+from .provider_runtime import _owner_bytes
 
 
 def _json(value):
@@ -213,6 +214,82 @@ class PhoneAuthority:
             subjects, bindings = self.prepare_bindings(config)
             self.sessions.subjects, self.sessions.node_bindings = subjects, bindings
             self._bindings_installed = True
+
+    def reload_installed(self, expected_sha256):
+        """Load only the fixed owner file, without reissuing an enrolled node.
+
+        Caller is the private operator route. Validate the complete candidate
+        and original Registry identities before one short writer transaction;
+        there is no task/challenge freshness dependency or operation recovery.
+        """
+        if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
+                or any(c not in '0123456789abcdef' for c in expected_sha256)):
+            raise ValueError('phone_reload_expected_sha256_required')
+        with self.lock:
+            raw = _owner_bytes(self.config_path, 128 * 1024, 'phone_reload_private_config_required')
+            digest = hashlib.sha256(raw).hexdigest()
+            if not hmac.compare_digest(digest, expected_sha256):
+                raise Conflict('phone_reload_config_digest_changed')
+            candidate = self._config(_parse_private_json(raw))
+            old = {n['node_id']: n for n in self.installed['nodes']}
+            if set(old) != {n['node_id'] for n in candidate['nodes']}:
+                raise PermissionError('phone_reload_existing_members_only')
+            immutable = ('node_id', 'subject', 'session_id', 'token_sha256', 'enrollment', 'capabilities')
+            for node in candidate['nodes']:
+                prior = old[node['node_id']]
+                if any(node[k] != prior[k] for k in immutable) or node.get('visible_nodes', {}) != prior.get('visible_nodes', {}):
+                    raise PermissionError('phone_reload_enrolled_identity_changed')
+                installed_adapter = prior.get('installed_control_adapter')
+                if installed_adapter is not None and (
+                        node.get('control_session_id') != prior.get('control_session_id')
+                        or node.get('installed_control_adapter') is None
+                        or any(node['installed_control_adapter'][k] != installed_adapter[k]
+                               for k in installed_adapter if k != 'enabled')):
+                    raise PermissionError('phone_reload_installed_control_identity_changed')
+            subjects, bindings = self.prepare_bindings(candidate)
+            already = candidate == self.installed
+            if not already:
+                with self.store.transaction() as db:
+                    # First validate EVERY Registry row, then mutate. A bad
+                    # later node cannot partially install an earlier adapter.
+                    controls = []
+                    for node in candidate['nodes']:
+                        adapter = node.get('installed_control_adapter')
+                        if adapter is None:
+                            continue
+                        row = db.execute('SELECT * FROM capabilities WHERE id=?', (adapter['capability_id'],)).fetchone()
+                        if row is not None and (row['principal'] != 'node:' + node['node_id']
+                                or row['kind'] != CONTROL_KIND or row['epoch'] != adapter['epoch']
+                                or json.loads(row['spec']) != control_spec(adapter)):
+                            raise Conflict('phone_reload_original_control_registry_required')
+                        if row is None and adapter['epoch'] != 1:
+                            raise Conflict('phone_reload_original_control_epoch_required')
+                        controls.append((node, adapter, row))
+                    now, registry = self.store.clock(), self.api.resources
+                    for node, adapter, row in controls:
+                        enabled = candidate['enabled'] and node['enabled'] and adapter['enabled'] and 'phone:node' in node['scope']
+                        if row is None and enabled:
+                            db.execute('INSERT INTO capabilities VALUES(?,?,?,?,?,?,1,?,?,0,?,?)',
+                                (adapter['capability_id'], 'node:' + node['node_id'], CONTROL_KIND, '',
+                                 _json(control_spec(adapter)), 0, 'unavailable', now, now, now))
+                            registry._audit(db, 'node:' + node['node_id'], 'advertise', adapter['capability_id'],
+                                            {'epoch': 1, 'kind': CONTROL_KIND, 'installation': 'owner_reload_declared'})
+                        previous_adapter = old[node['node_id']].get('installed_control_adapter')
+                        if row is not None and (not enabled or previous_adapter is None or not previous_adapter['enabled']):
+                            # Installation/re-enable is not an observed service
+                            # connect. Preserve revoked/failed and require its
+                            # next real control presence to renew availability.
+                            db.execute("UPDATE capabilities SET deadline=?,health=CASE WHEN health='failed' THEN health ELSE 'unavailable' END,updated=? WHERE id=? AND revoked=0",
+                                       (now, now, adapter['capability_id']))
+                    # All writes above are still rollbackable. No request can
+                    # observe the new maps before this transaction commits.
+                self.sessions.subjects, self.sessions.node_bindings = subjects, bindings
+                self.installed = candidate
+            return {'format': 'amita-phone-owner-result/1', 'action': 'reload-installed',
+                    'installed_sha256': digest, 'already_installed': already,
+                    'loaded_node_ids': [n['node_id'] for n in candidate['nodes']],
+                    'identity_preserved': True, 'credentials_rotated': False,
+                    'task_created': False, 'unknown_settled': False}
 
     def principal(self, token, scope):
         with self.lock:
