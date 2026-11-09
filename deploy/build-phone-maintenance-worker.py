@@ -15,9 +15,9 @@ MODERN = ('leader_governance', 'governance_worker', 'model_recovery', 'model_adv
 def sha(data): return hashlib.sha256(data).hexdigest()
 
 
-def read(path):
+def read(path, maximum=2 * 1024 * 1024):
     path = Path(path)
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > maximum:
         raise ValueError('phone_role_regular_source_required')
     return path.read_bytes()
 
@@ -52,7 +52,7 @@ def build(destination, parent_release, installed_target, first_start, worker_con
         raise ValueError('phone_role_original_laptop_configuration_required')
     if any(row['scope'] == scope for row in native['additional_profiles']):
         raise ValueError('phone_role_do_not_hard_bind_legacy_profile')
-    cache = json.loads(read(models_cache).decode())
+    cache = json.loads(read(models_cache, maximum=16 * 1024 * 1024).decode())
     model = next((m for m in cache['models'] if m.get('slug') == 'gpt-6-luna'), None)
     if model is None or 'max' not in [r['effort'] for r in model.get('supported_reasoning_levels', [])]:
         raise ValueError('phone_role_local_catalog_selection_missing')
