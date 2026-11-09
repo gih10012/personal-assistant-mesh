@@ -52,7 +52,9 @@ def build(destination, parent_release, installed_target, first_start, worker_con
         raise ValueError('phone_role_original_laptop_configuration_required')
     if any(row['scope'] == scope for row in native['additional_profiles']):
         raise ValueError('phone_role_do_not_hard_bind_legacy_profile')
-    cache = json.loads(read(models_cache, maximum=16 * 1024 * 1024).decode())
+    # The owner's official auth-home cache is a managed symlink. Resolve only
+    # this non-secret metadata cache; source/runtime pins remain no-symlink.
+    cache = json.loads(read(Path(models_cache).resolve(), maximum=16 * 1024 * 1024).decode())
     model = next((m for m in cache['models'] if m.get('slug') == 'gpt-6-luna'), None)
     if model is None or 'max' not in [r['effort'] for r in model.get('supported_reasoning_levels', [])]:
         raise ValueError('phone_role_local_catalog_selection_missing')
