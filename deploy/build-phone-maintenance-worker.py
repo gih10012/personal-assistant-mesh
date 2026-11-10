@@ -110,6 +110,7 @@ def build(destination, parent_release, installed_target, first_start, worker_con
         "if __name__=='__main__':\n    _parent._incumbent.main()\n").encode()
     outputs['launch_worker.py'] = launcher
     for filename, data in outputs.items(): ast.parse(data.decode(), filename=filename, feature_version=(3, 6))
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     destination.mkdir(mode=0o700)
     for filename, data in outputs.items(): write(destination / 'candidate-release' / filename, data)
     candidate_worker = dict(worker, capabilities=list(worker['capabilities']) + ['phone-maintenance'])
@@ -119,6 +120,7 @@ def build(destination, parent_release, installed_target, first_start, worker_con
     write(config_dir / 'modern-worker-policy.unchanged.json', native_raw)
     write(config_dir / 'governance-policy.unchanged.json', policy_raw)
     write(workspace / 'AGENTS.md', read(Path(source_root) / 'deploy/PHONE-MAINTENANCE-ROLE-AGENTS.md'))
+    write(destination / 'CHECKLIST.md', read(Path(source_root) / 'deploy/PHONE-MAINTENANCE-ROLE-CHECKLIST.md'))
     spec = json.loads(read(previous_spec).decode())
     if spec['component'] != 'laptop-worker' or spec['kind'] != 'worker': raise ValueError('phone_role_original_worker_spec_required')
     spec.update(version='20261109.phone-maintenance.1', argv=[spec['argv'][0], str(Path(installed_target) / 'launch_worker.py'),

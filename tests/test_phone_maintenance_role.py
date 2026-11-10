@@ -140,5 +140,5 @@ assert module._parent._incumbent._phone_maintenance_role_installed is True
 assert module._parent._incumbent._native_worker_release_installed is True
 print('candidate import composed; no ledger/model/process')
 '''
-        output = subprocess.check_output([sys.executable, '-c', script, candidate], stderr=subprocess.STDOUT).decode()
+        output = subprocess.check_output([sys.executable, '-B', '-c', script, candidate], stderr=subprocess.STDOUT).decode()
         self.assertIn('no ledger/model/process', output)
