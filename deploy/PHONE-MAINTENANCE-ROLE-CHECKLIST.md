@@ -43,6 +43,14 @@ execution. Only backend construction uses the scoped governance facade.
    original active runner is idle, then activate with a separate original
    activation operation. Preserve previous runner/version for ordinary rollback.
    Root alone sends these commands; this checklist never changes lifecycle.
+   The existing control CLI uses these exact flags (do not execute before the
+   preceding idle and Source-authorization steps):
+
+   ```sh
+   PYTHONPATH=/home/gihggiy/.local/share/amita/control/20261031.1 /usr/bin/python3 -m assistant_mesh.rolling_runtime --state /home/gihggiy/.local/state/amita-runtime/laptop status
+   PYTHONPATH=/home/gihggiy/.local/share/amita/control/20261031.1 /usr/bin/python3 -m assistant_mesh.rolling_runtime --state /home/gihggiy/.local/state/amita-runtime/laptop stage --operation-id owner-phone-maintenance-stage-20261109.1 --spec /home/gihggiy/.local/state/amita-phone-maintenance-role/20261109/candidate-config/stage-spec.json
+   PYTHONPATH=/home/gihggiy/.local/share/amita/control/20261031.1 /usr/bin/python3 -m assistant_mesh.rolling_runtime --state /home/gihggiy/.local/state/amita-runtime/laptop activate --operation-id owner-phone-maintenance-activate-20261109.1 --runner ACTUAL_STAGED_RUNNER_ID
+   ```
 7. Only an actual device maintenance incident starts cognition. Its context must
    match this one device scope, isolated memory, node-maintenance origin, exact
    agent+phone-maintenance requirements, D1 and low risk. The existing original

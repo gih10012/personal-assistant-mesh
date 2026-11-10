@@ -22,6 +22,8 @@ POLICY = {'revision': 'synthetic-owner-policy', 'defaults': {'D1': 'ordinary', '
                 'cost_basis': 'included_subscription', 'quality': 'standard', 'difficulties': ['D1', 'D2']},
                {'id': 'advanced', 'model': 'gpt-6.1-sol', 'effort': 'high', 'harness': 'codex',
                 'cost_basis': 'included_subscription', 'quality': 'strong', 'difficulties': ['D1', 'D2', 'D3']}]}
+CANDIDATE_ROOT = os.environ.get('AMITA_PHONE_ROLE_CANDIDATE_ROOT') or str(
+    Path.home() / '.local/state/amita-phone-maintenance-role/20261109/candidate-release')
 
 
 def task():
@@ -124,9 +126,9 @@ class PhoneMaintenanceRoleTests(unittest.TestCase):
         self.assertIs(worker.client, worker._phone_backend.client)
         self.assertEqual(self.config, worker.config)
 
-    @unittest.skipUnless(os.environ.get('AMITA_PHONE_ROLE_CANDIDATE_ROOT'), 'actual candidate not requested')
+    @unittest.skipUnless((Path(CANDIDATE_ROOT) / 'launch_worker.py').is_file(), 'actual candidate absent')
     def test_actual_candidate_import_opens_no_ledger_or_model_process(self):
-        candidate = os.environ['AMITA_PHONE_ROLE_CANDIDATE_ROOT']
+        candidate = CANDIDATE_ROOT
         script = '''
 import importlib.util, sqlite3, subprocess, sys
 def forbidden(*a, **k): raise AssertionError('candidate import must not open a ledger or launch a process')
