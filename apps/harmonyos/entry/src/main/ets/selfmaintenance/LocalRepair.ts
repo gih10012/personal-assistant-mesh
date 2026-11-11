@@ -8,6 +8,10 @@ export interface RepairPlan {
 // runtime routing config or phone service JSON. Default allows nothing.
 export interface LocalRepairPolicy { sync_signed_data: boolean; observe_receipts: boolean; rollback_versions: number[]; }
 interface NumericRepairError extends Error { code?: number; }
+interface RoleRepairRecommendation {
+  format: string; incident_id: string; task_id: string; operation_id: string;
+  decision: string; actions: string[]; original_receipt_ids: string[]; reason: string;
+}
 export function noLocalRepairs(): LocalRepairPolicy {
   return { sync_signed_data: false, observe_receipts: false, rollback_versions: [] };
 }
@@ -21,9 +25,35 @@ export interface LocalRepairHost {
 function requireRepair(value: boolean, reason: string): void {
   if (!value) { throw new Error('mesh_local_repair_' + reason); }
 }
+function boundedIdentity(value: string): boolean {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160 &&
+    value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value);
+}
+function recommendationPlan(raw: string, row: IncidentRecord): RepairPlan {
+  const reply: RoleRepairRecommendation = JSON.parse(raw) as RoleRepairRecommendation;
+  requireRepair(reply.format === 'amita-phone-maintenance-repair/1' &&
+    boundedIdentity(reply.incident_id) && boundedIdentity(reply.task_id) && boundedIdentity(reply.operation_id) &&
+    reply.incident_id === row.incident_id && reply.task_id === row.task_id && reply.operation_id === row.operation_id &&
+    reply.decision === 'recommendation' && Array.isArray(reply.actions) && reply.actions.length === 1 &&
+    ['recommend_signed_data_sync', 'reconcile_original_receipts'].includes(reply.actions[0]) &&
+    Array.isArray(reply.original_receipt_ids) && reply.original_receipt_ids.length <= 16 &&
+    reply.original_receipt_ids.every((id: string, index: number): boolean =>
+      boundedIdentity(id) && reply.original_receipt_ids.indexOf(id) === index) &&
+    typeof reply.reason === 'string' && reply.reason.length <= 1000 &&
+    Number.isSafeInteger(row.task_epoch) && row.task_epoch > 0, 'original_completed_recommendation_required');
+  // Epoch comes only from the original Source receipt. Model receipt IDs and
+  // free-form reason never enter the executable plan or receipt observation.
+  return { format: reply.format, incident_id: row.incident_id, task_id: row.task_id,
+    task_epoch: row.task_epoch, operation_id: row.operation_id,
+    action: reply.actions[0] === 'recommend_signed_data_sync' ? 'sync_signed_data' : 'observe_receipts', target_version: 0 };
+}
 export function parseRepairPlan(raw: string, row: IncidentRecord): RepairPlan {
   requireRepair(typeof raw === 'string' && raw.length <= 8192, 'plan_budget');
-  const plan: RepairPlan = JSON.parse(raw) as RepairPlan;
+  let plan: RepairPlan = JSON.parse(raw) as RepairPlan;
+  if (plan !== null && typeof plan === 'object' && Object.keys(plan).sort().join('|') ===
+    'actions|decision|format|incident_id|operation_id|original_receipt_ids|reason|task_id') {
+    plan = recommendationPlan(raw, row);
+  }
   requireRepair(plan !== null && typeof plan === 'object' &&
     Object.keys(plan).sort().join('|') === 'action|format|incident_id|operation_id|target_version|task_epoch|task_id' &&
     plan.format === 'amita-phone-maintenance-repair/1' && row.state === 'finished' && row.task_status === 'completed' &&

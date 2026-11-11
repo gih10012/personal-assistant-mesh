@@ -25,6 +25,61 @@ function repairFixture() {
   return {state,row,plan,host,policy,get calls(){return calls;},get durable(){return durable;}, failSave(){failSave=true;}};
 }
 
+function roleRecommendation(f, action = 'recommend_signed_data_sync') {
+  return {format:'amita-phone-maintenance-repair/1',task_id:f.row.task_id,incident_id:f.row.incident_id,
+    operation_id:f.row.operation_id,decision:'recommendation',actions:[action],
+    original_receipt_ids:['model-mentioned-receipt'],reason:'Diagnosed the original bounded device snapshot.'};
+}
+
+test('actual role recommendations normalize only two safe actions using the original Source epoch', async () => {
+  const f = repairFixture();
+  for (const [recommendation, action] of [['recommend_signed_data_sync','sync_signed_data'],
+    ['reconcile_original_receipts','observe_receipts']]) {
+    const reply = roleRecommendation(f, recommendation);
+    assert.deepEqual(parseRepairPlan(JSON.stringify(reply), f.row), {
+      format:f.plan.format,incident_id:f.row.incident_id,task_id:f.row.task_id,task_epoch:2,
+      operation_id:f.row.operation_id,action,target_version:0
+    });
+  }
+  f.row.result = JSON.stringify(roleRecommendation(f));
+  await assert.rejects(new LocalRepairController(f.state,f.host,noLocalRepairs()).advance(f.row), /owner_scope/);
+  assert.equal(f.row.repair, undefined); assert.equal(f.calls, 0);
+  f.host.capture = async plan => {
+    assert.equal(plan.action, 'sync_signed_data');
+    assert.equal('original_receipt_ids' in plan, false);
+    return {active_version:8,target_version:0,target_manifest_sha256:''};
+  };
+  let executions = 0, observations = 0;
+  f.host.execute = async () => { executions++; throw new Error('lost original completion ACK'); };
+  f.host.observe = async plan => {
+    observations++; assert.equal('original_receipt_ids' in plan, false);
+    return {outcome:'unconfirmed',active_version:8,observed_receipts:0,target_manifest_sha256:''};
+  };
+  const controller = new LocalRepairController(f.state,f.host,f.policy);
+  await assert.rejects(controller.advance(f.row), /original_attempt_unconfirmed/);
+  assert.equal((await controller.advance(f.row)).state, 'unknown');
+  assert.equal(executions, 1); assert.equal(observations, 1);
+});
+
+test('role adapter rejects foreign identities, unknown or multiple actions and noncompleted receipts before execution', async () => {
+  const f = repairFixture(), reply = roleRecommendation(f);
+  for (const extra of [{task_id:'foreign'}, {incident_id:'foreign'}, {operation_id:'foreign'},
+    {task_epoch:2}, {shell:'untrusted'}, {decision:'no_action'}, {decision:'escalate_leader'},
+    {actions:['diagnose']}, {actions:['unknown']}, {actions:['rollback_signed_data']},
+    {actions:['recommend_signed_data_sync','reconcile_original_receipts']}, {actions:[]},
+    {reason:'x'.repeat(1001)}, {original_receipt_ids:Array(17).fill('receipt')},
+    {original_receipt_ids:['duplicate','duplicate']}, {original_receipt_ids:['x'.repeat(161)]}]) {
+    f.row.result = JSON.stringify({...reply,...extra});
+    await assert.rejects(new LocalRepairController(f.state,f.host,f.policy).advance(f.row));
+    assert.equal(f.row.repair, undefined);
+  }
+  for (const changed of [{state:'unknown'}, {task_status:'needs_review'}, {task_epoch:0},
+    {task_epoch:undefined}, {task_epoch:1.5}]) {
+    assert.throws(() => parseRepairPlan(JSON.stringify(reply), {...f.row,...changed}));
+  }
+  assert.equal(f.calls, 0);
+});
+
 test('repair owner scope and strict original result binding reject Shell, URL, epoch/task swaps before an effect', async () => {
   const f = repairFixture();
   await assert.rejects(new LocalRepairController(f.state,f.host,noLocalRepairs()).advance(f.row), /owner_scope/);
