@@ -15,6 +15,13 @@ if os.environ.get("GITHUB_ACTIONS") != "true":
     raise RuntimeError("this bundler records GitHub hosted evidence only")
 if (TEMP / "amita-raft-hosted-test.passed").read_text().strip() != TEST:
     raise RuntimeError("native hosted test completion marker missing")
+wasm_evidence = json.loads((TEMP / "amita-raft-wasm-recovery.json").read_text())
+wasm_path = TEMP / "amita-raft-generated-js/amita_raft_portability_bg.wasm"
+if (wasm_evidence.get("format") != "amita-raft-wasm-recovery/1"
+        or wasm_evidence.get("case") != "durable_vote_survives_reconstruction"
+        or wasm_evidence.get("status") != "passed"
+        or wasm_evidence.get("wasm_sha256") != hashlib.sha256(wasm_path.read_bytes()).hexdigest()):
+    raise RuntimeError("matching generated WASM recovery completion missing")
 OUTPUT.mkdir(parents=True, exist_ok=False)
 
 
@@ -36,6 +43,9 @@ copy_public(TARGET / "wasm32-unknown-unknown/release/amita_raft_portability.wasm
 for name in ("amita_raft_portability.js", "amita_raft_portability_bg.wasm",
              "amita_raft_portability.d.ts", "amita_raft_portability_bg.wasm.d.ts"):
     copy_public(TEMP / "amita-raft-generated-js" / name, Path("wasm") / name)
+copy_public(ROOT / "wasm-smoke.mjs", "wasm/wasm-smoke.mjs")
+copy_public(ROOT / "wasm-package.json", "wasm/package.json")
+copy_public(TEMP / "amita-raft-wasm-recovery.json", "WASM-RECOVERY.json")
 copy_public(ROOT / "Cargo.lock", "Cargo.lock")
 copy_public(ROOT.parents[1] / "LICENSE", "licenses/amita-raft-portability/LICENSE")
 for name in ("COPYRIGHT", "LICENSE-MIT", "LICENSE-APACHE"):
@@ -82,7 +92,9 @@ manifest = {
     "wasm_bindgen": "0.2.105; official archive SHA256 checked in workflow",
     "rust_license_source": "https://github.com/rust-lang/rust/tree/48a229ceaefd4985c50990b14116b6d856af0985",
     "hosted_native_case": {"name": TEST, "status": "passed before this packaging step"},
-    "limits": "Not a local Click cargo test receipt, WASM runtime test, three-voter quorum test or DO deployment.",
+    "hosted_wasm_case": wasm_evidence,
+    "runnable_entry": "node wasm/wasm-smoke.mjs",
+    "limits": "Not a local Click cargo test receipt, three-voter quorum test, DO deployment or business-effect fencing.",
     "packages": packages, "files": files,
 }
 (OUTPUT / "HOSTED-MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n")

@@ -9,6 +9,8 @@ on:
       - deploy/raft-portability/Cargo.toml
       - deploy/raft-portability/Cargo.lock
       - deploy/raft-portability/hosted_bundle.py
+      - deploy/raft-portability/wasm-smoke.mjs
+      - deploy/raft-portability/wasm-package.json
       - .github/workflows/free-raft-portability.yml
   workflow_dispatch:
 
@@ -83,6 +85,11 @@ jobs:
               "https://raw.githubusercontent.com/rust-lang/rust/48a229ceaefd4985c50990b14116b6d856af0985/$license_name" \
               --output "$AMITA_TOOL_DIR/rust-$license_name"
           done
+
+      - name: Execute generated WASM initialization and durable vote recovery
+        run: |
+          cp wasm-package.json "$RUNNER_TEMP/amita-raft-generated-js/package.json"
+          node wasm-smoke.mjs "$RUNNER_TEMP/amita-raft-generated-js" "$RUNNER_TEMP/amita-raft-wasm-recovery.json"
 
       - name: Bundle only public Rust artifacts, licenses and hosted manifest
         run: python3 hosted_bundle.py

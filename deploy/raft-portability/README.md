@@ -1,5 +1,11 @@
 # Bounded raft-rs portability spike
 
+**2026-11-11 continuation:** the original free public CI slice now prepares an
+actual generated-WASM vote recovery step and ships `wasm/wasm-smoke.mjs` as a
+runnable allowlisted entry. The original-branch GitHub run query returned no
+runs; Root still owns push/dispatch. No new build, WASM pass or HA result is
+claimed. Exact trigger, artifact path and commands: [HOSTED-BUILD.md](HOSTED-BUILD.md).
+
 **Current 2026-11-02 status:** native release and Cargo.lock exist. Recovery
 test has not executed because of Click verify runner context binding. Actual
 WASM compilation found an Arch compiler/official std metadata mismatch; WASM
