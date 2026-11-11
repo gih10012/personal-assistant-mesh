@@ -20,7 +20,9 @@ execution. Only backend construction uses the scoped governance facade.
    policy is already Luna/max; no global model default changes are needed.
 2. Source authorization is the existing worker peer selected by role=worker,
    node=laptop in /home/ai_agent/.local/state/personal-assistant-mesh/server.json:
-   append phone-maintenance to that peer's allowed capabilities. Keep the same
+   require exactly one matching peer; append phone-maintenance to its
+   `capabilities` list, preserving its order and every existing value. Stop on
+   zero or multiple matches. Keep the same
    token/config binding. Root applies this only through its original safe Source
    configuration/reload lifecycle. No client can self-authorize the new cap.
 3. The local candidate-config/laptop-worker.json only adds phone-maintenance to
@@ -39,8 +41,13 @@ execution. Only backend construction uses the scoped governance facade.
    work, and a safe original native/authority boundary. Retained/unknown runners
    stay retained; do not clear their work, fake a checkpoint or re-admit them.
 6. Stage candidate-config/stage-spec.json with one original stage operation ID;
-   keep its returned runner ID. Wait for actual standby readiness. Recheck the
-   original active runner is idle, then activate with a separate original
+   keep its returned runner ID. Wait for actual standby readiness. Before the
+   final idle check, acquire the existing Source worker-maintenance lease for
+   node=laptop with the original operator binding. A status-only idle observation
+   does not prevent the old active worker from claiming between status and
+   activation. Require an actual `claim_blocked=true`, live lease receipt; keep
+   the lease live through activation. Recheck the original active runner is idle,
+   then activate with a separate original
    activation operation. Preserve previous runner/version for ordinary rollback.
    Root alone sends these commands; this checklist never changes lifecycle.
    The existing control CLI uses these exact flags (do not execute before the
@@ -51,6 +58,25 @@ execution. Only backend construction uses the scoped governance facade.
    PYTHONPATH=/home/gihggiy/.local/share/amita/control/20261031.1 /usr/bin/python3 -m assistant_mesh.rolling_runtime --state /home/gihggiy/.local/state/amita-runtime/laptop stage --operation-id owner-phone-maintenance-stage-20261109.1 --spec /home/gihggiy/.local/state/amita-phone-maintenance-role/20261109/candidate-config/stage-spec.json
    PYTHONPATH=/home/gihggiy/.local/share/amita/control/20261031.1 /usr/bin/python3 -m assistant_mesh.rolling_runtime --state /home/gihggiy/.local/state/amita-runtime/laptop activate --operation-id owner-phone-maintenance-activate-20261109.1 --runner ACTUAL_STAGED_RUNNER_ID
    ```
+
+   The existing private Source route is `POST /v1/worker-maintenance`; use the
+   original operator Client, never the worker credential. These are the exact
+   request bodies for this release (not new business tasks or worker identities):
+
+   ```json
+   {"action":"acquire","node":"laptop","operation_id":"owner-phone-maintenance-window-20261109.1","control_id":"owner-phone-maintenance-window-acquire-20261109.1","ttl":600}
+   {"action":"status","node":"laptop","operation_id":"owner-phone-maintenance-window-20261109.1"}
+   {"action":"release","node":"laptop","operation_id":"owner-phone-maintenance-window-20261109.1","control_id":"owner-phone-maintenance-window-release-20261109.1"}
+   ```
+
+   Release only after the new runner is actually active and the previous runner
+   is idle/draining/standby at its original safe boundary. On activation failure,
+   preserve the original active runner and release the original lease after
+   recording the failure. An expired/released operation cannot be reacquired;
+   retain its receipt and use a new window operation for a later attempt. If the
+   private route is absent or the lease expires before activation, stop this
+   activation. Do not drain/kill the original runner to imitate a maintenance
+   lease, remove retained/unknown work, or change the supervisor implementation.
 7. Only an actual device maintenance incident starts cognition. Its context must
    match this one device scope, isolated memory, node-maintenance origin, exact
    agent+phone-maintenance requirements, D1 and low risk. The existing original
