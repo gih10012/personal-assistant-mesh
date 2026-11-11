@@ -1,6 +1,7 @@
 # AMITA working contract
 
-Current owner-approved contract: 2026-11-08 phone autonomy additions, on top of
+Current owner-approved contract: 2026-11-11 phone-control research correction,
+on top of the 2026-11-08 phone autonomy additions and
 the 2026-10-27 phone-first implementation. Read
 docs/GOAL.md, docs/PLAN.md and docs/AMITA-PHONE-TO-HA-2026-10-27.md.
 The 2026-10-26 architecture remains applicable beneath this delivery order.
@@ -43,6 +44,26 @@ system-approved execution windows and report suspended/queued truthfully. Do
 not substitute a forever-visible Mesh page, fake media/transfer keepalive, or
 an open HDC port for a real background service. Keep model-free supervision
 separate from any actually authorized low-cost cognition route.
+
+2026-11-11 correction: the real signed extension is installed/enumerable but
+disabled, with no third-party enable entry found on the retail phone. Current
+Huawei Accessibility Kit overview excludes node/screen-content querying; its
+English legacy callback docs additionally say the capabilities are unavailable.
+Another API26 retail-device GitHub report matches our enablement failure.
+Read docs/HARMONY-GUI-ROUTES-2026-11-11.md before any further GUI work. Do not
+repeat menu searches or manifest churn without new evidence. Prioritize public
+system/app APIs, intents and A2A, while preparing the actual Huawei GUI partner
+application; no qualification is granted yet. HDC-based open-source drivers
+remain development tools and cannot replace the owner's no-open-wireless-debug
+requirement. Owner follow-up explicitly requests an ON-PHONE HDC client: actual
+ClawMate SelfHDC source and current official wireless workflow do not require
+USB bootstrap. Prioritize an owner-started local HDC session using its own key
+and normal system trust, while retaining original Mesh task/approval boundaries.
+This does not prove daemon loopback-only binding or long-term background life;
+do not silently leave campus wireless debugging enabled. See the correction at
+the top of the research document. The phone is unplugged; 7.0.0.111's exact model changelog and any
+changed GUI entitlement remain unverified. No callback, action or background
+success may be inferred from installation, SDK declarations or this research.
 
 Deliver user-visible functionality. Deploy completed authorized changes promptly
 and prefer one real CLI/Web/GUI acceptance. Reuse valid evidence and specialist
