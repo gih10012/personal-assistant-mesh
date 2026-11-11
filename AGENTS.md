@@ -59,10 +59,18 @@ requirement. Owner follow-up explicitly requests an ON-PHONE HDC client: actual
 ClawMate SelfHDC source and current official wireless workflow do not require
 USB bootstrap. Prioritize an owner-started local HDC session using its own key
 and normal system trust, while retaining original Mesh task/approval boundaries.
+Actual follow-through on 2026-11-11: v0.3 was covered-installed on retail7.0.0.111,
+original membership restored, app-owned loopback HDC authenticated after the
+owner's Always trust action, and its own shell returned uid2000. Screenshot,
+native input, independent unplugged execution and background residency remain
+unverified. Read docs/PHONE-STATUS-2026-11-11.md. The original laptop Worker is
+now active with phone-maintenance; three old retained/unknown runners and their
+guards remain. No real incident model execution was invented for acceptance.
 This does not prove daemon loopback-only binding or long-term background life;
 do not silently leave campus wireless debugging enabled. See the correction at
-the top of the research document. The phone is unplugged; 7.0.0.111's exact model changelog and any
-changed GUI entitlement remain unverified. No callback, action or background
+the top of the research document. The owner has been told USB may be unplugged;
+7.0.0.111's exact model changelog and any changed GUI entitlement remain
+unverified. No callback, action or background
 success may be inferred from installation, SDK declarations or this research.
 
 Deliver user-visible functionality. Deploy completed authorized changes promptly

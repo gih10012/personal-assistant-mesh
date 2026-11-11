@@ -13,6 +13,7 @@ import { SelfMaintenanceClient, MaintenanceStatus } from '../selfmaintenance/Sel
 import { LocalRepairPolicy, noLocalRepairs } from '../selfmaintenance/LocalRepair';
 import { UpdateDB } from '../update/UpdateDB';
 import { NativeUpgrade } from '../upgrade/NativeUpgrade';
+import { SelfHdcPanel } from '../selfhdc/SelfHdcPanel';
 
 // Local owner controls, separate from the real Accessibility service lifecycle.
 @Component
@@ -227,7 +228,9 @@ export struct PhoneFeatures {
   }
   build() {
     Column({ space: 12 }) {
-      Text('手机操控').fontSize(18).fontWeight(FontWeight.Bold)
+      SelfHdcPanel({ foreground: this.foreground })
+      Divider()
+      Text('系统辅助服务与审批').fontSize(18).fontWeight(FontWeight.Bold)
       Text(this.controlLabel).fontSize(13)
       Text(this.systemServiceProbe).fontSize(12)
       Row({ space: 12 }) {
@@ -235,12 +238,12 @@ export struct PhoneFeatures {
           .onChange((value: boolean): void => { if (value !== this.controlEnabled) { this.control(value); } })
         Text('允许 AMITA 协助观察和操作手机').fontSize(13)
       }
-      Text('在系统设置搜索“无障碍”，启用“AMITA 手机操控服务”。独立服务获系统许可后无需停留本页；服务未运行时请求排队。').fontSize(12)
+      Text('此设备尚未找到第三方辅助服务的启用入口。上方本机调试可独立连接；辅助服务未实际运行时，相关远程请求排队。').fontSize(12)
       Row({ space: 8 }) {
         Button(this.captureEnabled ? '截图已授权' : '允许单次截图').enabled(this.memberReady && !this.busy).onClick((): void => { this.allowCapture(); })
         Button('允许审批通知').enabled(this.memberReady && !this.busy).onClick((): void => { this.notification(); })
       }
-      Text('动作审批优先实况窗；未获权益时使用通知。待审批时音量＋允许一步、音量－拒绝，其他时候不接管音量键。输入文字需查看完整内容。').fontSize(12)
+      Text('辅助服务运行后的动作审批优先实况窗，未获权益时使用通知。服务未启用时音量键审批也不可用。输入文字需查看完整内容。').fontSize(12)
       if (this.pendingSummary.length > 0) {
         Text('待本人决定：' + this.pendingSummary).fontSize(14)
         Text(this.pendingBody).fontSize(12)
@@ -270,7 +273,7 @@ export struct PhoneFeatures {
       Button('同步与自检').enabled(this.memberReady && !this.busy).onClick((): void => { this.sync(); })
       Divider()
       Text('应用升级 · ' + this.versionLabel).fontSize(18).fontWeight(FontWeight.Bold)
-      Text('配置和技能可签名更新。原生应用由系统安装；升级不依赖长期开放无线调试。').fontSize(12)
+      Text('配置和技能可签名更新。原生应用升级需要系统确认，分发通道以实际检查结果为准。').fontSize(12)
       Row({ space: 8 }) {
         Button('可信无线分发').enabled(this.memberReady && !this.busy).onClick((): void => { this.nativeUpdate(true); })
         Button('应用市场更新').enabled(!this.busy).onClick((): void => { this.nativeUpdate(false); })

@@ -2,7 +2,7 @@ export const MAX_ARTIFACT_BYTES: number = 32 * 1024 * 1024;
 export const MAX_UPDATE_BYTES: number = 64 * 1024 * 1024;
 export const SMALL_ARTIFACT_BYTES: number = 256 * 1024;
 export const BACKGROUND_BYTES: number = 1024 * 1024;
-export const SHELL_VERSION: number = 1000001;
+export const SHELL_VERSION: number = 1000002;
 
 export interface UpdateTrust {
   format: string;
