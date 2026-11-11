@@ -13,29 +13,53 @@ export struct SelfHdcPanel {
   @State identity: string = '';
   @State layout: string = '';
   @State imageUri: string = '';
+  @State diagnosticStage: string = '';
+  @State diagnosticCode: string = '';
+  @State portRemembered: boolean = false;
   private controller: SelfHdcController | null = null;
+  private statusTimer: number = -1;
 
   aboutToAppear(): void {
     const context: common.Context = this.getUIContext().getHostContext() as common.Context;
     this.controller = new SelfHdcController(context);
+    this.port = this.controller.savedPort();
     this.controller.setForeground(this.foreground);
+    this.apply(this.controller.snapshot());
+    this.startStatusPoll();
   }
 
   aboutToDisappear(): void {
     this.sessionAllowed = false;
-    this.port = '';
+    this.stopStatusPoll();
     if (this.controller !== null) { this.controller.setForeground(false); this.apply(this.controller.snapshot()); }
   }
 
   foregroundChanged(): void {
-    if (!this.foreground) { this.sessionAllowed = false; this.port = ''; }
+    if (!this.foreground) { this.sessionAllowed = false; this.stopStatusPoll(); }
     if (this.controller !== null) { this.controller.setForeground(this.foreground); this.apply(this.controller.snapshot()); }
+    if (this.foreground) { this.startStatusPoll(); }
+  }
+
+  private startStatusPoll(): void {
+    if (!this.foreground || this.statusTimer !== -1) { return; }
+    // Local cached state only: no socket requests, port scan or reconnect.
+    this.statusTimer = setInterval((): void => {
+      if (this.foreground && this.controller !== null && (this.busy || this.authenticated)) {
+        this.apply(this.controller.snapshot());
+      }
+    }, 1000);
+  }
+
+  private stopStatusPoll(): void {
+    if (this.statusTimer !== -1) { clearInterval(this.statusTimer); this.statusTimer = -1; }
   }
 
   private apply(value: SelfHdcViewState): void {
     this.busy = value.busy; this.authenticated = value.authenticated;
     this.message = value.message; this.identity = value.identity;
     this.layout = value.layout; this.imageUri = value.imageUri;
+    this.diagnosticStage = value.diagnosticStage; this.diagnosticCode = value.diagnosticCode;
+    this.portRemembered = value.portRemembered;
   }
 
   private toggle(value: boolean): void {
@@ -43,7 +67,7 @@ export struct SelfHdcPanel {
     if (!this.sessionAllowed && this.controller !== null) {
       this.controller.disconnect(); this.apply(this.controller.snapshot());
     }
-    if (this.sessionAllowed) { this.message = '已允许本次前台手动探测；请输入端口后连接'; }
+    if (this.sessionAllowed) { this.message = '已允许本次前台手动探测；核对端口后连接'; }
   }
 
   private async connect(): Promise<void> {
@@ -70,7 +94,7 @@ export struct SelfHdcPanel {
     Column({ space: 10 }) {
       Text('本机调试连接').fontSize(18).fontWeight(FontWeight.Bold)
       Text('无需 USB 初始化。在系统开发者选项打开“无线调试”，填写页面显示的端口，并由本人确认系统信任提示。').fontSize(12)
-      Text('AMITA 只连接本机。系统无线调试仍可能监听局域网；此功能不提供局域网隔离。请勿在不可信网络开启，用完请关闭系统无线调试。').fontSize(12)
+      Text('AMITA 只连接本机；系统无线调试仍可能监听局域网，不可信网络请勿开启，用完请在设置中关闭。').fontSize(12)
       Row({ space: 10 }) {
         Toggle({ type: ToggleType.Switch, isOn: this.sessionAllowed }).enabled(this.foreground)
           .onChange((value: boolean): void => { if (value !== this.sessionAllowed) { this.toggle(value); } })
@@ -79,6 +103,8 @@ export struct SelfHdcPanel {
       TextInput({ text: this.port, placeholder: '无线调试端口' }).type(InputType.Number).maxLength(5)
         .enabled(this.sessionAllowed && this.foreground && !this.busy && !this.authenticated)
         .onChange((value: string): void => { this.port = value; })
+      Text(this.portRemembered ? '已记住上次输入；系统端口可能变化，请按设置页面核对。' :
+        '系统端口可能变化，请按设置页面核对。').fontSize(12)
       Row({ space: 8 }) {
         Button('连接本机').enabled(this.sessionAllowed && this.foreground && !this.busy && !this.authenticated)
           .onClick((): void => { this.connect(); })
@@ -86,6 +112,10 @@ export struct SelfHdcPanel {
           .onClick((): void => { this.disconnect(); })
       }
       Text(this.message).fontSize(13)
+      if (this.diagnosticStage.length > 0) {
+        Text('阶段：' + this.diagnosticStage).fontSize(12)
+      }
+      if (this.diagnosticCode.length > 0) { Text(this.diagnosticCode).fontSize(12) }
       Row({ space: 8 }) {
         Button('读取身份').enabled(this.authenticated && this.sessionAllowed && this.foreground && !this.busy)
           .onClick((): void => { this.probe('identity'); })

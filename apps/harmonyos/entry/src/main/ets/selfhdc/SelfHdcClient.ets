@@ -8,7 +8,19 @@ import { SelfHdcHandshake, SelfHdcPacket, SelfHdcPacketStream, HDC_CLOSE, HDC_EC
   hdcEncodePacket, hdcEncodeTlv, hdcJoin, hdcRequire, hdcShellCommand, hdcShellTail,
   hdcText, hdcUtf8 } from './SelfHdcProtocol';
 
-export interface SelfHdcStatus { state: string; error: string; authenticated: boolean; }
+export interface SelfHdcStatus {
+  state: string;
+  error: string;
+  authenticated: boolean;
+  stage?: string;
+  nativeCode?: number;
+}
+
+function boundedNativeCode(error: BusinessError): number | undefined {
+  const code: number = error.code;
+  // SDK numeric codes only; never copy a message, challenge or socket payload.
+  return Number.isSafeInteger(code) && code > 0 && code <= 99999999 ? code : undefined;
+}
 export interface SelfHdcShellResult {
   stdout: Uint8Array;
   completed: boolean;
@@ -44,7 +56,7 @@ class ShellWait {
 // One session and one command at a time. No listener, external address or PC helper.
 export class SelfHdcClient {
   private context: common.Context;
-  private current: SelfHdcStatus = { state: 'idle', error: '', authenticated: false };
+  private current: SelfHdcStatus = { state: 'idle', error: '', authenticated: false, stage: 'idle' };
   private tcp: socket.TCPSocket | undefined = undefined;
   private identity: SelfHdcIdentity | undefined = undefined;
   private stream: SelfHdcPacketStream = new SelfHdcPacketStream();
@@ -68,7 +80,8 @@ export class SelfHdcClient {
   constructor(context: common.Context) { this.context = context; }
 
   status(): SelfHdcStatus {
-    return { state: this.current.state, error: this.current.error, authenticated: this.current.authenticated };
+    return { state: this.current.state, error: this.current.error, authenticated: this.current.authenticated,
+      stage: this.current.stage, nativeCode: this.current.nativeCode };
   }
 
   async connect(port: number, budgetMs: number = 90000): Promise<SelfHdcStatus> {
@@ -80,12 +93,12 @@ export class SelfHdcClient {
     this.port = port; this.stream = new SelfHdcPacketStream(); this.queue = Promise.resolve(); this.queuedBytes = 0;
     this.modern = false; this.authSuccess = false; this.closeAcknowledged = false;
     this.signingCount = 0; this.publicKeySent = false;
-    this.current = { state: 'connecting', error: '', authenticated: false };
+    this.current = { state: 'connecting', error: '', authenticated: false, stage: 'identity' };
     const authentication = new AuthWait(); this.authentication = authentication;
     this.authTimer = setTimeout((): void => { this.fail('selfhdc_authorization_timeout', generation); }, budgetMs);
     // Includes crypto/key generation and socket setup in the same total authorization budget.
-    this.startConnect(generation).catch((_error: Error): void => {
-      this.fail('selfhdc_connection_or_identity_failed', generation);
+    this.startConnect(generation).catch((error: BusinessError): void => {
+      this.fail('selfhdc_connection_or_identity_failed', generation, boundedNativeCode(error));
     });
     try { await authentication.promise; }
     catch (_error) { /* status is the bounded public failure, never raw daemon/key material */ }
@@ -104,6 +117,7 @@ export class SelfHdcClient {
     const random = await SelfHdcIdentity.randomBytes(4);
     if (!this.live(generation)) { return; }
     this.session = new DataView(random.buffer, random.byteOffset, 4).getUint32(0, false) || 1;
+    this.current.stage = 'socket_bind';
     const tcp = socket.constructTCPSocketInstance(); this.tcp = tcp;
     tcp.on('message', (event: socket.SocketMessageInfo): void => {
       if (!this.live(generation)) { return; }
@@ -121,12 +135,16 @@ export class SelfHdcClient {
         this.fail(/^selfhdc_[a-z_]{1,64}$/.test(error.message) ? error.message : 'selfhdc_protocol_error', generation);
       });
     });
-    tcp.on('error', (_error: BusinessError): void => { this.fail('selfhdc_socket_error', generation); });
+    tcp.on('error', (error: BusinessError): void => {
+      this.fail('selfhdc_socket_error', generation, boundedNativeCode(error));
+    });
     tcp.on('close', (): void => { if (this.live(generation)) { this.fail('selfhdc_disconnected', generation); } });
     await tcp.bind({ address: '127.0.0.1', family: 1, port: 0 });
     if (!this.live(generation)) { return; }
+    this.current.stage = 'socket_connect';
     await tcp.connect({ address: { address: '127.0.0.1', family: 1, port: this.port }, timeout: 8000 });
     if (!this.live(generation)) { return; }
+    this.current.stage = 'handshake';
     await this.handshake(0, hdcEncodeTlv('authtype', '1'), generation);
   }
 
@@ -170,6 +188,7 @@ export class SelfHdcClient {
       request.resolve({ stdout: tail.stdout, completed: tail.completed, dispatched: request.dispatched,
         exitCode: tail.exitCode });
       if (!tail.completed) { this.fail('selfhdc_command_outcome_unknown', generation); }
+      else { this.current.stage = 'ready'; }
       return;
     }
     if (packet.command === HDC_ECHO) {
@@ -178,7 +197,7 @@ export class SelfHdcClient {
         // Pending trust notices are not success and must never release shell execution.
         if (packet.channel === 0 && !this.current.authenticated &&
           /unauthor|confirm|authoriz|未授权|授权|允许|弹窗/i.test(hdcText(packet.data.slice(1)))) {
-          this.current.state = 'awaiting_trust'; return;
+          this.current.state = 'awaiting_trust'; this.current.stage = 'awaiting_trust'; return;
         }
         this.fail('selfhdc_daemon_rejected', generation);
       }
@@ -209,7 +228,8 @@ export class SelfHdcClient {
       }
       const auth = fields.get('authtype');
       hdcRequire(auth === undefined || auth === '0' || auth === '1', 'selfhdc_auth_algorithm');
-      this.modern = auth === '1'; this.publicKeySent = true; this.current.state = 'awaiting_trust';
+      this.modern = auth === '1'; this.publicKeySent = true;
+      this.current.state = 'awaiting_trust'; this.current.stage = 'awaiting_trust';
       await this.handshake(3, hdcUtf8('AMITA Native\f' + identity.publicPem), generation); return;
     }
     if (value.auth === 2) {
@@ -217,7 +237,7 @@ export class SelfHdcClient {
       if (!this.publicKeySent || identity === undefined || this.signingCount !== 0) {
         throw new Error('selfhdc_signature_sequence');
       }
-      this.signingCount++;
+      this.signingCount++; this.current.stage = 'handshake';
       const signature = await identity.sign(value.data, this.modern);
       if (this.live(generation)) { await this.handshake(2, hdcUtf8(signature), generation); }
       return;
@@ -226,7 +246,8 @@ export class SelfHdcClient {
       const fields = hdcDecodeTlv(value.data);
       const status = fields.get('daemonauthstatus');
       if (status === 'DAEMON_UNAUTH') {
-        this.authSuccess = false; this.closeAcknowledged = false; this.current.state = 'awaiting_trust'; return;
+        this.authSuccess = false; this.closeAcknowledged = false;
+        this.current.state = 'awaiting_trust'; this.current.stage = 'awaiting_trust'; return;
       }
       if (status !== 'SUCCESS') { this.fail('selfhdc_authorization_rejected', generation); return; }
       this.authSuccess = true; this.maybeReady(); return;
@@ -237,7 +258,7 @@ export class SelfHdcClient {
   private maybeReady(): void {
     if (this.authSuccess && this.closeAcknowledged && this.authentication !== undefined) {
       clearTimeout(this.authTimer); this.authTimer = -1;
-      this.current = { state: 'ready', error: '', authenticated: true };
+      this.current = { state: 'ready', error: '', authenticated: true, stage: 'ready' };
       if (this.sessionTimer < 0) {
         const generation = this.generation;
         this.sessionTimer = setTimeout((): void => { this.fail('selfhdc_session_expired', generation); }, 300000);
@@ -254,11 +275,16 @@ export class SelfHdcClient {
     hdcRequire(Number.isInteger(timeoutMs) && timeoutMs >= 100 && timeoutMs <= 60000, 'selfhdc_timeout_invalid');
     // Validate before consuming randomness or reserving a command.
     hdcShellCommand(command, 'AMITA_HDC_00000000000000000000000000000000');
+    this.current.stage = 'command';
     this.commandPreparing = true;
     const generation = this.generation;
     let random: Uint8Array;
     try { random = await SelfHdcIdentity.randomBytes(16); }
-    catch (_error) { this.commandPreparing = false; throw new Error('selfhdc_random_failed'); }
+    catch (_error) {
+      this.commandPreparing = false;
+      if (this.live(generation)) { this.current.stage = 'ready'; }
+      throw new Error('selfhdc_random_failed');
+    }
     this.commandPreparing = false;
     if (!this.live(generation) || !this.current.authenticated) {
       return { stdout: new Uint8Array(0), completed: false, dispatched: false };
@@ -270,15 +296,16 @@ export class SelfHdcClient {
     // Mark before send: a rejected socket send can still have delivered bytes. Never replay automatically.
     request.dispatched = true;
     this.send(request.channel, HDC_EXECUTE,
-      hdcUtf8(hdcShellCommand(command, request.marker) + '\0'), generation).catch((_error: Error): void => {
-      this.fail('selfhdc_command_transport_unknown', generation);
+      hdcUtf8(hdcShellCommand(command, request.marker) + '\0'), generation).catch((error: BusinessError): void => {
+      this.fail('selfhdc_command_transport_unknown', generation, boundedNativeCode(error));
     });
     return request.promise;
   }
 
-  private fail(error: string, generation: number): void {
+  private fail(error: string, generation: number, nativeCode?: number): void {
     if (generation !== this.generation || this.current.state === 'closed' || this.current.state === 'error') { return; }
-    this.current = { state: 'error', error: error, authenticated: false };
+    this.current = { state: 'error', error: error, authenticated: false,
+      stage: this.current.stage, nativeCode: nativeCode };
     this.finish();
   }
 
@@ -299,7 +326,7 @@ export class SelfHdcClient {
   }
 
   close(): void {
-    this.current = { state: 'closed', error: '', authenticated: false };
+    this.current = { state: 'closed', error: '', authenticated: false, stage: 'closed' };
     this.finish(); this.authentication = undefined; this.generation++;
   }
 }
