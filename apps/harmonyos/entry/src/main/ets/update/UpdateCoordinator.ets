@@ -16,12 +16,15 @@ export class UpdateCoordinator {
   private stopped: boolean = false;
   private deadline: number = 0;
   private used: number = 0;
+  private ownerAllowed: () => boolean = (): boolean => true;
   constructor(context: common.Context) { this.context = context; }
   cancel(): void {
     this.stopped = true;
     if (this.activeRequest !== null) { this.activeRequest.destroy(); this.activeRequest = null; }
   }
-  private available(): void { requireUpdate(!this.stopped && Date.now() < this.deadline, 'update_budget_or_stop'); }
+  private available(): void {
+    requireUpdate(!this.stopped && Date.now() < this.deadline && this.ownerAllowed(), 'update_budget_or_stop');
+  }
   private async get(url: string, credential: NodeCredential, limit: number): Promise<Uint8Array> {
     this.available();
     requireUpdate(this.used + limit <= BACKGROUND_BYTES, 'update_small_budget_exceeded');
@@ -47,9 +50,12 @@ export class UpdateCoordinator {
   }
   // Trusted in-process callers may reuse their existing update/self-maintenance
   // lease. No wire request supplies these objects or an owner string.
-  async syncSmall(heldDB: UpdateDB | null = null, heldOwner: string = '', budgetMs: number = 90000): Promise<void> {
+  async syncSmall(heldDB: UpdateDB | null = null, heldOwner: string = '', budgetMs: number = 90000,
+    ownerAllowed: () => boolean = (): boolean => true): Promise<void> {
     requireUpdate(Number.isSafeInteger(budgetMs) && budgetMs >= 1 && budgetMs <= 90000, 'update_remaining_budget_required');
     this.stopped = false; this.deadline = Date.now() + budgetMs; this.used = 0;
+    this.ownerAllowed = ownerAllowed;
+    this.available();
     const db: UpdateDB = heldDB === null ? await UpdateDB.open(this.context) : heldDB;
     let owner: string = '';
     const timeout: number = setTimeout((): void => this.cancel(), budgetMs);

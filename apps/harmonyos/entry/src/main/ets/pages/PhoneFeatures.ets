@@ -10,6 +10,8 @@ import { MaintenanceService } from '../update/MaintenanceService';
 import { UpdateStatus } from '../update/Manifest';
 import { MaintenanceSupervisor } from '../maintenance/MaintenanceSupervisor';
 import { SelfMaintenanceClient, MaintenanceStatus } from '../selfmaintenance/SelfMaintenanceClient';
+import { LocalRepairPolicy, noLocalRepairs } from '../selfmaintenance/LocalRepair';
+import { UpdateDB } from '../update/UpdateDB';
 import { NativeUpgrade } from '../upgrade/NativeUpgrade';
 
 // Local owner controls, separate from the real Accessibility service lifecycle.
@@ -24,6 +26,7 @@ export struct PhoneFeatures {
   @State busy: boolean = false;
   @State message: string = '';
   @State controlLabel: string = '尚未启用手机操控';
+  @State systemServiceProbe: string = '';
   @State dataLabel: string = '尚未配置数据更新';
   @State maintenanceLabel: string = '等待系统维护机会';
   @State cognitionLabel: string = '本机监督按需运行；认知路由尚未确认';
@@ -50,6 +53,7 @@ export struct PhoneFeatures {
       this.versionLabel = info.versionName;
     } catch (_) { this.versionLabel = '版本暂不可读'; }
     await this.refresh();
+    this.systemServiceProbe = await PhoneControlBridge.probeSystemRegistration(context);
     this.timer = setInterval((): void => { if (this.foreground) { this.refresh(); } }, 5000);
   }
   aboutToDisappear(): void {
@@ -117,7 +121,14 @@ export struct PhoneFeatures {
   private async data(value: boolean): Promise<void> {
     if (this.busy || !this.foreground || this.maintenance === null) { return; }
     this.busy = true;
-    try { await this.maintenance.setEnabled(value); await this.refresh(); }
+    try {
+      await this.maintenance.setEnabled(value);
+      if (this.self !== null && this.selfEnabled) {
+        const policy: LocalRepairPolicy = this.self.getRepairPolicy();
+        policy.sync_signed_data = value; await this.self.setRepairPolicy(policy);
+      }
+      await this.refresh();
+    }
     catch (_) { this.message = '系统维护调度未确认；原数据保留'; }
     finally { this.busy = false; }
   }
@@ -125,9 +136,13 @@ export struct PhoneFeatures {
     if (this.busy || !this.foreground || this.self === null) { return; }
     this.busy = true;
     try {
+      const policy: LocalRepairPolicy = value ? { sync_signed_data: this.dataEnabled,
+        observe_receipts: true, rollback_versions: [] } : noLocalRepairs();
+      // Revoke the independent local grant before a potentially busy DB lease.
+      await this.self.setRepairPolicy(policy);
       await this.self.setEnabled(value); this.selfEnabled = value;
       if (this.maintenance !== null) { await this.maintenance.restoreSchedule(); }
-      this.cognitionLabel = value ? '本机监督已允许；认知任务须由合格 Mesh Agent 处理' : '自主诊断已关闭';
+      this.cognitionLabel = value ? '已允许诊断、原回执只读核对，以及已开启的数据同步；原生升级和权限不会自动修改' : '自主诊断与数据自修授权已关闭';
     } catch (_) { this.message = '自主诊断授权未确认'; }
     finally { this.busy = false; }
   }
@@ -144,6 +159,7 @@ export struct PhoneFeatures {
       this.selfEnabled = result.enabled;
       this.cognitionLabel = !result.enabled ? '自主诊断已关闭' : result.execution === 'healthy' ? '本机监督未发现待处理故障' :
         result.execution === 'not_configured' ? '本机监督已允许，认知维护通道尚未配置' : '维护任务：' + result.execution + ' ' + result.task_status;
+      if (result.repair_state !== undefined) { this.cognitionLabel += ' · 本机修复：' + result.repair_state; }
       await this.refresh();
     } catch (_) { this.message = '自检未确认；原事件和回执保留'; }
     finally { this.busy = false; }
@@ -161,6 +177,28 @@ export struct PhoneFeatures {
       await PhoneControlBridge.postDecision(this.context(), value);
       this.pendingValid = false; this.message = '已记录本人的决定；是否执行以原任务回执为准';
     } catch (_) { this.message = '原决定未确认；没有自动重试'; }
+  }
+  private async reviewed(): Promise<void> {
+    if (!this.foreground || this.pending === null || !this.pendingValid) { return; }
+    try {
+      await PhoneControlBridge.markPendingReviewed(this.context(), this.pending.approval_id,
+        this.pending.nonce, this.pendingBody);
+      this.message = '仅记录完整内容已核对。返回原应用后，再从通知或实况窗明确允许这一步';
+    } catch (_) { this.message = '原内容或请求已变更，没有记录其他内容为已核对'; }
+  }
+  private async allowPreviousRollback(): Promise<void> {
+    if (!this.foreground || !this.selfEnabled || this.self === null || this.busy) { return; }
+    this.busy = true;
+    try {
+      const db: UpdateDB = await UpdateDB.open(this.context());
+      let version: number = 0;
+      try { version = (await db.state()).previous; } finally { await db.close(); }
+      if (version <= 0) { this.message = '尚无已保留的上一数据版本'; return; }
+      const policy: LocalRepairPolicy = this.self.getRepairPolicy();
+      policy.rollback_versions = [version]; await this.self.setRepairPolicy(policy);
+      this.message = '仅允许维护计划在完整验签后回退到数据版本 ' + version + '，不允许回退原生应用';
+    } catch (_) { this.message = '回退授权未确认；原版本和原任务保留'; }
+    finally { this.busy = false; }
   }
   private async nativeUpdate(distribution: boolean): Promise<void> {
     if (this.busy || !this.foreground || this.upgrade === null || this.maintenance === null) { return; }
@@ -191,6 +229,7 @@ export struct PhoneFeatures {
     Column({ space: 12 }) {
       Text('手机操控').fontSize(18).fontWeight(FontWeight.Bold)
       Text(this.controlLabel).fontSize(13)
+      Text(this.systemServiceProbe).fontSize(12)
       Row({ space: 12 }) {
         Toggle({ type: ToggleType.Switch, isOn: this.controlEnabled }).enabled(this.memberReady && !this.busy)
           .onChange((value: boolean): void => { if (value !== this.controlEnabled) { this.control(value); } })
@@ -205,8 +244,8 @@ export struct PhoneFeatures {
       if (this.pendingSummary.length > 0) {
         Text('待本人决定：' + this.pendingSummary).fontSize(14)
         Text(this.pendingBody).fontSize(12)
+        Button('已核对完整内容').enabled(this.pendingValid).onClick((): void => { this.reviewed(); })
         Row({ space: 8 }) {
-          Button('同意这一步').enabled(this.pendingValid).onClick((): void => { this.decide('approve'); })
           Button('拒绝').enabled(this.pendingValid).onClick((): void => { this.decide('deny'); })
           Button('刷新请求').onClick((): void => { this.pending = null; this.pendingSummary = ''; this.pendingBody = ''; this.refresh(); })
         }
@@ -226,6 +265,8 @@ export struct PhoneFeatures {
         Text('允许自主诊断与 Mesh 维护任务').fontSize(13)
       }
       Text(this.cognitionLabel).fontSize(12)
+      Button('允许必要时回退当前上一数据版本').enabled(this.memberReady && this.selfEnabled && !this.busy)
+        .onClick((): void => { this.allowPreviousRollback(); })
       Button('同步与自检').enabled(this.memberReady && !this.busy).onClick((): void => { this.sync(); })
       Divider()
       Text('应用升级 · ' + this.versionLabel).fontSize(18).fontWeight(FontWeight.Bold)

@@ -61,6 +61,7 @@ struct Index {
     this.memberConfigured = value.configured;
     this.workStatus = '连接：' + value.connection + ' · 完成 ' + value.settled + '/' + value.tasks +
       ' · 待核对 ' + value.unknown + ' · 待回传 ' + value.pending_results;
+    if (value.runtime_config_error.length > 0) { this.workStatus += ' · 新运行配置被拒绝，保留原路由'; }
     this.workTasks = value.task_states.map((row: WorkTaskStatus): string =>
       row.task_id + ' · ' + row.state + ' · 原任务期次 ' + row.task_epoch +
       ' · 租约截至 ' + new Date(row.lease_deadline * 1000).toLocaleString()).join('\n');

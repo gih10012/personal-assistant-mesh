@@ -22,6 +22,7 @@ import {
 } from './PhoneControlBridge';
 import { PhoneControlInput, controlBlob, controlDigest, decodeControlInput } from './PhoneControlJSON';
 import { RuntimeApprovalGate, RuntimePermit } from './RuntimeApprovalGate';
+import { TrustedRuntimeConfig } from '../update/TrustedRuntimeConfig';
 import { BackgroundDecisionBridge } from './BackgroundDecisionBridge';
 import { PhoneControlReviewAcknowledgement } from './PhoneControlBridge';
 
@@ -66,6 +67,9 @@ export class PhoneControlRuntime implements WorkHost {
   private deciding: boolean = false;
   private timer: number = -1;
   private lastTick: number = 0;
+  private runtimeChecked: number = 0;
+  private trustedMember: WorkConfig | null = null;
+  private signedLiveviewEvent: string = '';
   private lastDecision: string = '';
   private lastReview: string = '';
   private surfaceBusy: boolean = false;
@@ -125,21 +129,39 @@ export class PhoneControlRuntime implements WorkHost {
     const member: WorkSnapshot = JSON.parse(memberRaw) as WorkSnapshot;
     if (member.config === null) { return; }
     validateWorkConfig(member.config, this.nodeId);
+    if (this.trustedMember === null || Date.now() - this.runtimeChecked >= 30000 ||
+      this.trustedMember.session_id !== member.config.session_id) {
+      this.runtimeChecked = Date.now();
+      try {
+        const runtime = await new TrustedRuntimeConfig(this.context).load(member.config);
+        this.trustedMember = runtime === null ? member.config : runtime.work;
+        this.signedLiveviewEvent = runtime === null ? '' : runtime.liveviewEvent;
+      } catch (_) {
+        this.state.error = 'phone_control_signed_runtime_rejected_old_route_retained';
+        if (this.trustedMember === null) { this.trustedMember = member.config; }
+      }
+    }
+    const base: WorkConfig = this.trustedMember as WorkConfig;
     requireValue(member.config.session_id !== this.identity.control_session_id, 'phone_control_independent_session_required');
-    const config: WorkConfig = { format: member.config.format, resource_url: member.config.resource_url,
-      node_id: member.config.node_id, session_id: this.identity.control_session_id,
-      mesh_id: member.config.mesh_id, authority_id: member.config.authority_id };
+    const config: WorkConfig = { format: base.format, resource_url: base.resource_url,
+      node_id: base.node_id, session_id: this.identity.control_session_id,
+      mesh_id: base.mesh_id, authority_id: base.authority_id };
     if (this.engine !== null) {
-      requireValue(this.engine.snapshot.config === null || JSON.stringify(this.engine.snapshot.config) === JSON.stringify(config),
-        'phone_control_original_route_changed');
-      if (this.engine.snapshot.config === null) { this.engine.snapshot.config = config; await this.save(this.engine.snapshot); }
+      const old: WorkConfig | null = this.engine.snapshot.config;
+      requireValue(old === null || old.node_id === config.node_id && old.mesh_id === config.mesh_id &&
+        old.authority_id === config.authority_id && old.session_id === config.session_id,
+        'phone_control_original_identity_changed');
+      if (old === null || old.resource_url !== config.resource_url) {
+        this.engine.snapshot.config = config; await this.save(this.engine.snapshot); this.connected = false;
+      }
       return;
     }
     const raw: string = this.store.getSync('work_snapshot', '') as string;
     const snapshot: WorkSnapshot = raw.length === 0 ? freshWorkSnapshot(this.nodeId) : JSON.parse(raw) as WorkSnapshot;
     coldResumeWork(snapshot, this.nodeId);
-    requireValue(snapshot.config === null || JSON.stringify(snapshot.config) === JSON.stringify(config),
-      'phone_control_original_route_changed');
+    requireValue(snapshot.config === null || snapshot.config.node_id === config.node_id &&
+      snapshot.config.mesh_id === config.mesh_id && snapshot.config.authority_id === config.authority_id &&
+      snapshot.config.session_id === config.session_id, 'phone_control_original_identity_changed');
     snapshot.config = config;
     this.engine = new WorkEngine(snapshot, this);
     await this.save(snapshot);
@@ -413,7 +435,8 @@ export class PhoneControlRuntime implements WorkHost {
       const useBackground: boolean = this.background.status().subscribed;
       const actions = await buildApprovalWantAgents(display, useBackground);
       p.background_agents_verified = useBackground;
-      const surface: ApprovalSurface = new ApprovalSurface(731901, this.owner.liveview_event);
+      const surface: ApprovalSurface = new ApprovalSurface(731901,
+        this.owner.liveview_event.length > 0 ? this.owner.liveview_event : this.signedLiveviewEvent);
       const presentation = await surface.present(display, actions);
       this.lastSurface = presentation.surface;
       if (presentation.presented) { this.gate.armHardware(); }

@@ -2,7 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { http } from '@kit.NetworkKit';
 import { NodeCredential } from '../security/NodeCredentialStore';
-import { PhoneResponse, ProviderAllocation, ProviderDispatch, WorkConfig, WorkSnapshot, validateWorkConfig } from '../core/WorkProtocol';
+import { PhoneResponse, ProviderAllocation, ProviderDispatch, ReportArguments, WorkConfig, WorkSnapshot, validateWorkConfig } from '../core/WorkProtocol';
 import { DataManifest, UpdateTrust, requireUpdate, validateTrust } from '../update/Manifest';
 import { UpdateDB, UpdateState } from '../update/UpdateDB';
 import { UpdateFiles } from '../update/UpdateFiles';
@@ -10,6 +10,7 @@ import { digest, verifyEnvelope } from '../update/UpdateCrypto';
 import { UpdateCoordinator } from '../update/UpdateCoordinator';
 import { RepairPlan } from './LocalRepair';
 import { RepairCheckpoint, RepairEvidence } from './SelfMaintenance';
+interface RepairInspectRequest { action: string; arguments: ReportArguments; }
 
 // These dependencies are deployment code objects, not model request fields.
 // The existing SelfMaintenanceClient retains its update lease and journal.
@@ -20,13 +21,15 @@ export class SafeRepairActions {
   private work: WorkSnapshot;
   private credential: NodeCredential;
   private remaining: () => number;
+  private ownerAllowed: () => boolean;
   private stopped: boolean = false;
   private coordinator: UpdateCoordinator | null = null;
   private request: http.HttpRequest | null = null;
   constructor(context: common.Context, updates: UpdateDB, owner: string, work: WorkSnapshot,
-    credential: NodeCredential, remaining: () => number) {
+    credential: NodeCredential, remaining: () => number, ownerAllowed: () => boolean = (): boolean => true) {
     this.context = context; this.updates = updates; this.owner = owner;
     this.work = work; this.credential = credential; this.remaining = remaining;
+    this.ownerAllowed = ownerAllowed;
     requireUpdate(work.node_id === credential.nodeId && work.config !== null, 'repair_original_node_required');
     requireUpdate(Array.isArray(work.records) && work.records.length <= 256, 'repair_original_work_journal_required');
     validateWorkConfig(work.config as WorkConfig, credential.nodeId);
@@ -37,7 +40,7 @@ export class SafeRepairActions {
     if (this.request !== null) { this.request.destroy(); this.request = null; }
   }
   private async state(): Promise<UpdateState> {
-    requireUpdate(!this.stopped && this.remaining() > 0, 'repair_budget_or_stop');
+    requireUpdate(!this.stopped && this.remaining() > 0 && this.ownerAllowed(), 'repair_budget_or_stop');
     const state: UpdateState = await this.updates.state();
     requireUpdate(!this.stopped && this.remaining() > 0 && state.lease === this.owner && this.owner.length > 0,
       'repair_original_lease_required');
@@ -70,7 +73,8 @@ export class SafeRepairActions {
     if (plan.action === 'observe_receipts') { return this.inspectReceipts(); }
     if (plan.action === 'sync_signed_data') {
       this.coordinator = new UpdateCoordinator(this.context);
-      try { await this.coordinator.syncSmall(this.updates, this.owner, Math.min(90000, Math.floor(this.remaining() - 500))); }
+      try { await this.coordinator.syncSmall(this.updates, this.owner,
+        Math.min(90000, Math.floor(this.remaining() - 500)), this.ownerAllowed); }
       finally { this.coordinator = null; }
       state = await this.state();
       if (state.active > 0 && state.pending.length === 0) {
@@ -111,12 +115,13 @@ export class SafeRepairActions {
       const transport: http.HttpRequest = http.createHttp(); this.request = transport;
       try {
         const timeout: number = Math.max(1, Math.min(5000, this.remaining()));
+        const args: ReportArguments = { session_id: config.session_id, report_id: util.generateRandomUUID(),
+          provider: { action: 'inspect', arguments: { operation_id: row.operation_id, capability_id: row.capability_id } } };
+        const request: RepairInspectRequest = { action: 'mesh_work_report', arguments: args };
         const response: http.HttpResponse = await transport.request(config.resource_url, {
           method: http.RequestMethod.POST,
           header: { 'Authorization': 'Bearer ' + this.credential.token, 'Content-Type': 'application/json' },
-          extraData: JSON.stringify({ action: 'mesh_work_report', arguments: { session_id: config.session_id,
-            report_id: util.generateRandomUUID(), provider: { action: 'inspect', arguments: {
-              operation_id: row.operation_id, capability_id: row.capability_id } } } }),
+          extraData: JSON.stringify(request),
           expectDataType: http.HttpDataType.STRING, usingCache: false, maxLimit: 131072, maxRedirects: 0,
           connectTimeout: timeout, readTimeout: timeout
         });

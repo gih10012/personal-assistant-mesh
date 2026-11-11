@@ -1,6 +1,8 @@
 import { common, Want } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { util } from '@kit.ArkTS';
+import { accessibility } from '@kit.AccessibilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { ApprovalTicket, OwnerControlDecision } from './ControlSession';
 
 export class PhoneControlOwnerOptions {
@@ -69,6 +71,27 @@ export function readPhoneControlOwner(context: common.Context): PhoneControlOwne
 // decision mailbox are UI-written; runtime status/pending are service-written.
 // Do not register these local authority methods as remote Mesh tools.
 export class PhoneControlBridge {
+  static async probeSystemRegistration(context: common.Context): Promise<string> {
+    let installed: boolean = false;
+    let enabled: boolean = false;
+    let code: number = 0;
+    try {
+      const all: accessibility.AccessibilityAbilityInfo[] = await accessibility.getAccessibilityExtensionList('all', 'install');
+      installed = all.some((item: accessibility.AccessibilityAbilityInfo): boolean =>
+        item.bundleName === 'org.personalassistant.mesh' && item.name === 'PhoneControlExtension');
+      const active: accessibility.AccessibilityAbilityInfo[] = await accessibility.getAccessibilityExtensionList('all', 'enable');
+      enabled = active.some((item: accessibility.AccessibilityAbilityInfo): boolean =>
+        item.bundleName === 'org.personalassistant.mesh' && item.name === 'PhoneControlExtension');
+    } catch (error) {
+      const value: number = (error as BusinessError).code;
+      code = Number.isSafeInteger(value) ? value : -1;
+    }
+    const store: preferences.Preferences = freshControlPreferences(context, 'amita_control_system_probe_v1');
+    const result: string = '系统辅助服务登记：' + (installed ? '已列出' : '未列出') +
+      ' · ' + (enabled ? '已启用' : '未启用') + ' · code=' + code;
+    store.putSync('result', result); await store.flush();
+    return result;
+  }
   static async configure(context: common.UIAbilityContext, options: PhoneControlOwnerOptions): Promise<void> {
     const old: PhoneControlOwnerOptions = readPhoneControlOwner(context);
     if (typeof options.enabled !== 'boolean' || typeof options.gesture_fallback !== 'boolean' ||
@@ -110,9 +133,11 @@ export class PhoneControlBridge {
       operation_id: t.operation_id, task_id: t.task_id, revision: t.revision,
       expires_at: t.expires_at, decision: decision });
   }
-  static async markPendingReviewed(context: common.UIAbilityContext): Promise<void> {
+  static async markPendingReviewed(context: common.UIAbilityContext, approvalId: string,
+    nonce: string, inputJson: string): Promise<void> {
     const pending: PhoneControlPending | null = PhoneControlBridge.pendingForOwner(context);
-    if (pending === null || pending.ticket.expires_at <= Date.now()) { throw new Error('phone_control_no_pending_review'); }
+    if (pending === null || pending.ticket.expires_at <= Date.now() || pending.ticket.approval_id !== approvalId ||
+      pending.ticket.nonce !== nonce || pending.input_json !== inputJson) { throw new Error('phone_control_no_pending_review'); }
     const t: ApprovalTicket = pending.ticket;
     const ack: PhoneControlReviewAcknowledgement = { approval_id: t.approval_id, nonce: t.nonce,
       operation_id: t.operation_id, task_id: t.task_id, revision: t.revision,

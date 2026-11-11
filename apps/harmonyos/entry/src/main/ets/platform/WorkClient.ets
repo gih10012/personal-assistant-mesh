@@ -10,6 +10,7 @@ import {
 } from '../core/WorkProtocol';
 import { NodeCredential, NodeCredentialStore } from '../security/NodeCredentialStore';
 import { NativeServices } from './NativeServices';
+import { TrustedRuntimeConfig } from '../update/TrustedRuntimeConfig';
 
 interface RegistrationReceipt {
   format: string; operation_id: string; authority_id: string; publication_sha256: string; registry_ref: string;
@@ -32,6 +33,7 @@ export class WorkStatus {
   unknown: number = 0;
   pending_results: number = 0;
   error: string = '';
+  runtime_config_error: string = '';
   task_states: WorkTaskStatus[] = [];
 }
 export interface WorkTaskStatus {
@@ -55,8 +57,11 @@ export class WorkClient implements WorkHost {
   private timer: number = -1;
   private notify: (status: string) => void;
   private state: WorkStatus = new WorkStatus();
+  private context: common.Context;
+  private runtimeChecked: number = 0;
 
   constructor(context: common.UIAbilityContext, native: NativeServices, notify: (status: string) => void) {
+    this.context = context;
     this.native = native; this.notify = notify;
     this.store = preferences.getPreferencesSync(context, { name: 'mesh_work_v1' });
   }
@@ -186,6 +191,18 @@ export class WorkClient implements WorkHost {
     this.busy = true;
     const engine: WorkEngine = this.engine;
     try {
+      if (this.foreground && Date.now() - this.runtimeChecked >= 30000) {
+        this.runtimeChecked = Date.now();
+        try {
+          const runtime = await new TrustedRuntimeConfig(this.context).load(engine.snapshot.config as WorkConfig);
+          if (runtime !== null && runtime.work.resource_url !== (engine.snapshot.config as WorkConfig).resource_url) {
+            engine.snapshot.config = runtime.work;
+            await this.save(engine.snapshot);
+            this.connected = false;
+          }
+          this.state.runtime_config_error = '';
+        } catch (_) { this.state.runtime_config_error = 'mesh_work_signed_runtime_rejected_old_route_retained'; }
+      }
       if (!this.foreground || this.closed) {
         // Best effort withdrawal; local execution stops immediately even offline.
         if (this.connected || engine.snapshot.pending_control !== null) { this.observe(await engine.control(false, [])); }
