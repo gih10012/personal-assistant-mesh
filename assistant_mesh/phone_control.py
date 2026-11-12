@@ -31,8 +31,10 @@ def validate_adapter(node):
         return
     _identifier(session, 'phone_control_session')
     if (session == node['session_id'] or not isinstance(adapter, dict)
-            or set(adapter) != {'enabled', 'capability_id', 'contract', 'actions', 'epoch'}
+            or not {'enabled', 'capability_id', 'contract', 'actions', 'epoch'} <= set(adapter)
+            or set(adapter) - {'enabled', 'capability_id', 'contract', 'actions', 'epoch', 'screen_share_enabled'}
             or type(adapter['enabled']) is not bool
+            or type(adapter.get('screen_share_enabled', False)) is not bool
             or adapter['capability_id'] != node['node_id'] + ':ui-control-v1'
             or adapter['capability_id'] in node['capabilities'] or adapter['contract'] != CONTRACT
             or type(adapter['epoch']) is not int or adapter['epoch'] < 1
@@ -43,10 +45,14 @@ def validate_adapter(node):
 
 
 def spec(adapter):
-    return {'contract': CONTRACT, 'actions': sorted(adapter['actions']),
+    value = {'contract': CONTRACT, 'actions': sorted(adapter['actions']),
             'installation_authority': 'owner_installed_adapter',
             'execution_verification': 'declared_only', 'local_approval_required': True,
             'human_input_fence_required': True, 'max_json_bytes': 65536}
+    if adapter.get('screen_share_enabled', False):
+        value['screen_share'] = {'format': 'amita-phone-screen-share/1', 'command': 'screen_share',
+                                'max_duration_ms': 300000, 'max_fps': 2}
+    return value
 
 
 class PhoneControl:

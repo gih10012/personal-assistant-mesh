@@ -20,6 +20,7 @@ from .session_nodes import FORMAT, TOOLS
 from .store import Conflict
 from .phone_control import PhoneControl, validate_adapter, spec as control_spec, KIND as CONTROL_KIND
 from .provider_runtime import _owner_bytes
+from .phone_screen_share import PhoneScreenShare, ACTIONS as SCREEN_SHARE_ACTIONS
 
 
 def _json(value):
@@ -114,6 +115,7 @@ class PhoneAuthority:
         self.control = PhoneControl(self)
         for node in self.installed['nodes']:
             self.control.install(node)
+        self.screen_share = PhoneScreenShare(self)
         previous_request = self.sessions.request
         def session_request(*args, **kwargs):
             with self.lock:
@@ -355,6 +357,12 @@ class PhoneAuthority:
         node = self.principal(token, 'phone:node')
         if not isinstance(envelope, dict) or set(envelope) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_request')
+        if envelope['action'] in SCREEN_SHARE_ACTIONS:
+            value = envelope['arguments']
+            if not isinstance(value, dict):
+                raise ValueError('invalid_phone_request')
+            node = self.control.select(node, value.get('session_id'))
+            return self.screen_share.request(node, envelope)
         action, value = TOOLS.get(envelope['action']), envelope['arguments']
         if action is None or not isinstance(value, dict):
             raise PermissionError('phone_session_binding_required')
