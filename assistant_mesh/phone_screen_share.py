@@ -184,8 +184,7 @@ class PhoneScreenShare:
                         else:
                             if slot.frame and frame['capture_timestamp'] < slot.frame['capture_timestamp']:
                                 raise Conflict('screen_share_capture_timestamp_reversed')
-                            if slot.frame and (self.service.store.clock() - slot.last_frame_at < 1 / slot.max_fps
-                                    or frame['capture_timestamp'] - slot.frame['capture_timestamp'] < 1000 / slot.max_fps):
+                            if slot.frame and self.service.store.clock() - slot.last_frame_at < 1 / slot.max_fps:
                                 raise Conflict('screen_share_frame_rate_exceeded')
                             slot.frame, slot.body = frame, raw
                             slot.last_frame_at = self.service.store.clock()

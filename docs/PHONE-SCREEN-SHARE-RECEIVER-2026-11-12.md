@@ -58,8 +58,9 @@ dimensions, finite nonnegative capture monotonic timestamp (never substituted
 wall-clock time), exact actual body length, canonical base64 and SHA256. Equal
 revision is accepted only for identical prior content; conflicting or reversed
 revisions/timestamps fail. The source stores only latest bytes in memory. The
-dedicated workload's max_fps also limits new frames by source receive time and
-actual capture timestamp spacing; identical revision retries are not new frames.
+dedicated workload's max_fps limits new frames by source receive time; actual
+capture timestamps must remain monotonic. A frame may be captured earlier and
+held until the delivery interval. Identical revision retries are not new frames.
 
 ACK format `amita-phone-screen-share-ack/1` echoes only stream_id, task_id,
 task_epoch, operation_id, capability_id, binding_digest, expires_at, active,
@@ -133,3 +134,46 @@ Serve with existing private/no-store handling, and do not log body/response byte
 Root still owns HTTPS phone sink/receiver ACK binding, private worker route,
 commercial SDK build/signing, production deployment and actual phone-to-source
 frame acceptance. Synthetic unittest evidence proves these software fences only.
+
+Phone adapter is now implemented as `screenshare/PhoneScreenShareSink.ets`:
+
+```arkts
+const sink = new PhoneScreenShareSink(pinnedWorkConfig, actualControlSessionId,
+  actualOriginalWorkRecord, originalLocalScope, trustedGate);
+await sink.open(); // verified original source open, not frame/capture proof
+session.start(uiAbilityContext, originalLocalScope, authorizationAdapter, sink);
+// On explicit finalization; keep original WorkRecord attempted until cleanup:
+await session.stop();
+await sink.close(); // one cleanup request, unknown close is never retried
+```
+
+The config is the existing validated WorkConfig from the original WorkEngine.
+Record must be the actual durable `attempted` record after original provider
+start, with its original dispatch_json, receipt and invocation. Sink verifies
+the stream workload's bytes/base64/hash, explicit format/duration/max_fps and
+exact task/epoch/provider/capability. It accepts positive actual capability
+epochs; it does not silently assume the legacy epoch1 contract supports streams.
+Root must separately update WorkEngine/runtime stream eligibility when enabling
+a new owner-installed Registry epoch. `trustedGate.valid(scope)` checks the
+existing original owner authorization/lease; `serviceLive()` reads actual
+control-service state. Neither callback may fabricate or renew presence.
+
+Only the pinned HTTPS /phone/node URL is used, with an app Asset NodeCredential
+whose node and phone:node scope match. HTTP1.1, system TLS verification, no
+redirects/cache, 64KiB body/response limits and an 8-second total operation
+deadline apply. No frame method accepts a URL/token or saves credentials/images.
+Opaque stream ID and binding digest are derived from the captured internal
+scope and original identities; no raw approval, nonce, invocation or local
+permission value enters JSON. Each frame body is copied before awaits and is
+posted once. Any unknown/mismatched ACK invalidates the sink and notifies the
+session, cancelling capture via its existing disconnect hook.
+
+The adapter waits from the last verified frame ACK plus the granted delivery
+interval before the next POST. One pending real frame may wait behind a status
+request; no dropped frame receives a fabricated ACK. Static scenes use status
+every 10 seconds while actually attached, authorized and service-live. This
+refreshes only the receiver cache's idle TTL, never the original expiry, source
+task, Allocation or control presence. First open/status without a real frame is
+not capture/background qualification. detach() immediately cancels local
+requests/timers; Root calls and awaits close() once to observe source cleanup.
+No automatic reopen/retry occurs after unknown outcome or process restart.
