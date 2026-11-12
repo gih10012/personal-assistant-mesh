@@ -1,0 +1,11 @@
+{
+  "source_commit": "9ed4aa82e8089e788d9735cd0a91a23b2aaf3d49",
+  "run_id": "43153105993",
+  "files": {
+    "wasm/amita_raft_portability.js": "46643281392f321fdc0c92203589d619fa45f75ed28db9a80b545e8829ec1bb4",
+    "wasm/amita_raft_portability_bg.wasm": "5478f7883b27f9c1c52f060f957095193402a853cdb7c35eb5ac12484993ce50",
+    "wasm/amita_raft_portability.d.ts": "4bce9ba37b63b1b48a514ddf978dc062697f890f0e599c8d4c919c205359a942",
+    "wasm/amita_raft_portability_bg.wasm.d.ts": "0559c5c6055bf54e28787e7cdb46102bd026d28bec4e7a96a315381253969f48",
+    "wasm/package.json": "89c47db7851f89caec72da4f215ebc21cf1e294aeef3b45d2583562d846ab035"
+  }
+}
