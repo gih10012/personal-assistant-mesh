@@ -1,6 +1,7 @@
 export interface ScreenShareScope {
   sessionId: string;
   taskId: string;
+  taskEpoch: number;
   operationId: string;
   approvalId: string;
   nonce: string;
@@ -28,19 +29,20 @@ function requireShare(value: boolean, code: string): void {
 }
 
 export function copyScreenShareScope(value: ScreenShareScope): ScreenShareScope {
-  return { sessionId: value.sessionId, taskId: value.taskId, operationId: value.operationId,
+  return { sessionId: value.sessionId, taskId: value.taskId, taskEpoch: value.taskEpoch, operationId: value.operationId,
     approvalId: value.approvalId, nonce: value.nonce, revision: value.revision, expiresAt: value.expiresAt };
 }
 
 export function validScreenShareScope(value: ScreenShareScope, now: number): boolean {
   return [value.sessionId, value.taskId, value.operationId, value.approvalId, value.nonce].every(
     (part: string): boolean => typeof part === 'string' && part.length > 0 && part.length <= 512) &&
+    Number.isSafeInteger(value.taskEpoch) && value.taskEpoch > 0 &&
     Number.isSafeInteger(value.revision) && value.revision >= 0 &&
     Number.isSafeInteger(value.expiresAt) && value.expiresAt > now;
 }
 
 export function sameScreenShareScope(left: ScreenShareScope, right: ScreenShareScope): boolean {
-  return left.sessionId === right.sessionId && left.taskId === right.taskId &&
+  return left.sessionId === right.sessionId && left.taskId === right.taskId && left.taskEpoch === right.taskEpoch &&
     left.operationId === right.operationId && left.approvalId === right.approvalId && left.nonce === right.nonce &&
     left.revision === right.revision && left.expiresAt === right.expiresAt;
 }

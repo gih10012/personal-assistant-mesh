@@ -19,14 +19,28 @@ share.foregroundChanged();
 await share.stop();
 ```
 
-`originalScope` contains sessionId, taskId, operationId, approvalId, nonce,
-revision and expiresAt (wall-clock ms). It is copied and never renewed by this
+`originalScope` contains sessionId, taskId, mandatory positive-integer taskEpoch,
+operationId, approvalId, nonce, revision and expiresAt (wall-clock ms). taskEpoch
+must be read from the actual original SourceWorkRecord; never infer or generate
+an epoch from task ID, current time, UI state or a local counter. The entire
+binding including taskEpoch is copied, validated and compared, never renewed by this
 module. These values must come from the original durable trusted task/approval
 path; deserializing a remote flag or copying a previous successful receipt does
 not authorize a new session. The adapter checks the exact original tuple,
 current node credential/lease, owner revocation and dispatch state on every
 valid() call. Root must prevent replay across app restarts; this in-memory
 session also refuses to restart its consumed original scope.
+
+The scope is strictly **internal to the app**. In particular approvalId and nonce
+are local owner UI/action data and MUST NOT be serialized into a remote frame
+request, source record, URL, log or remote acknowledgement. The sink receives
+the internal scope only to validate against its captured original binding.
+Root's transport sends an opaque session-binding digest plus original task ID,
+operation ID, task epoch, frame hash and frame revision. After verifying the
+remote receiver ACK for those public binding fields and actual frame bytes, the
+adapter constructs the in-process `ack.scope` from its captured original local
+scope. It must never require the source to receive or echo the local UI action
+nonce, or copy arbitrary remote scope fields into that acknowledgement.
 
 Required `ScreenShareAuthorization` methods:
 
@@ -47,8 +61,10 @@ Required `ScreenShareFrameSink` methods:
 - `sendFrame(scope, frame): Promise<ScreenShareFrameAck>`: deliver the actual
   native JPEG bytes, <= 42000 bytes and <= 640 per edge, with native monotonic
   capture timestamp and increasing revision. Resolve only after the original
-  receiver's acknowledgement is verified. Return the exact original scope,
-  frameRevision, byte count and acknowledged=true. A no-op/local success result,
+  receiver's acknowledgement is verified. Return the exact captured in-process
+  original scope (including taskEpoch), frameRevision, byte count and
+  acknowledged=true. This return object is local; it is not the remote wire ACK.
+  A no-op/local success result,
   D1 metadata, a replaced task or an accepted outbound queue is not an ACK.
 - `detach(scope): void`: detach/cancel only this session's frame route and
   in-flight delivery; preserve the shared Mesh node connection and original

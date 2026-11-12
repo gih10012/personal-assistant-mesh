@@ -7,6 +7,10 @@ import { ScreenShareScope, ScreenShareFrame, ScreenShareFrameAck, ScreenSharePol
 
 // Implement only in the existing trusted node/task transport adapter. No URL,
 // socket destination, credential, approval boolean or noop default is accepted.
+// Scope is an INTERNAL argument, never a wire payload: approvalId/nonce stay
+// local. The adapter sends only an opaque binding digest plus task/op/epoch,
+// frame hash/revision; after verifying the remote ACK it constructs ack.scope
+// from the captured original in-process binding, not from remote scope fields.
 export interface ScreenShareFrameSink {
   isLive: (scope: ScreenShareScope) => boolean;
   onDisconnect: (listener: () => void) => () => void;

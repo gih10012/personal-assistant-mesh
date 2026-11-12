@@ -5,7 +5,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import * as policyModule from './ScreenSharePolicy.ts';
 
 const scope = () => ({ sessionId: 'synthetic-session', taskId: 'original-task', operationId: 'original-operation',
-  approvalId: 'original-approval', nonce: 'synthetic-nonce', revision: 3, expiresAt: Date.now() + 300000 });
+  taskEpoch: 7, approvalId: 'original-approval', nonce: 'synthetic-nonce', revision: 3, expiresAt: Date.now() + 300000 });
 const frame = (revision = 1) => ({ bytes: new Uint8Array([255, 216, 255, 0, 255, 217]),
   width: 640, height: 320, timestamp: 1234.5 + revision, revision });
 const ack = (binding, item) => ({ scope: { ...binding }, frameRevision: item.revision,
@@ -69,12 +69,19 @@ function fixture() {
 
 test('policy requires actual capture, exact frame ACK and OS ticket; static screens stay valid', () => {
   const binding = scope(), policy = new policyModule.ScreenSharePolicy(binding, Date.now()), item = frame();
+  for (const invalidEpoch of [undefined, 0, -1, 1.5, NaN, '7']) {
+    assert.throws(() => new policyModule.ScreenSharePolicy({ ...binding, taskEpoch: invalidEpoch }, Date.now()),
+      /original_scope_required/);
+  }
+  assert.equal(policyModule.copyScreenShareScope(binding).taskEpoch, 7);
   assert.equal(policy.canRequestBackground(true, true, Date.now()), false);
   assert.throws(() => policy.acceptFrame(item, true, true, Date.now()), /capture_not_active/);
   policy.started(); policy.acceptFrame(item, true, true, Date.now());
   assert.equal(policy.canRequestBackground(true, true, Date.now()), false);
   assert.throws(() => policy.acknowledge(item, { ...ack(binding, item),
     scope: { ...binding, operationId: 'wrong-operation' } }, Date.now()), /ack_unconfirmed/);
+  assert.throws(() => policy.acknowledge(item, { ...ack(binding, item),
+    scope: { ...binding, taskEpoch: binding.taskEpoch + 1 } }, Date.now()), /ack_unconfirmed/);
   policy.acknowledge(item, ack(binding, item), Date.now());
   assert.equal(policy.canRequestBackground(true, true, Date.now()), true);
   assert.equal(policy.canRemainBackground(true, true, Date.now()), false);
