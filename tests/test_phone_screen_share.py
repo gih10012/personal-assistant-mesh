@@ -201,14 +201,21 @@ class PhoneScreenShareTests(unittest.TestCase):
     def test_invalid_old_stream_does_not_block_new_task_and_late_old_close_preserves_replacement(self):
         self.call('open'); self.call('frame', frame=self.frame())
         self.f.bridge.unknown('node:cloud', 'gui-operation', self.control.gui, 3)
+        # The real Store permits only one running task per worker. Its caller
+        # explicitly yields the old task; this does not settle its unknown op.
+        self.f.store.update_task(self.f.task['id'], 'laptop', self.f.task['epoch'], status='waiting_backend')
         self.f.store.create_task('synthetic independent original request', task_id='next-original-task')
         self.f.task = self.f.store.claim('laptop')
         self.assertEqual('next-original-task', self.f.task['id'])
         self.control.reserve(workload={'input': control_fixtures.blob(
             b'{"format":"amita-phone-screen-share/1","command":"screen_share","duration_ms":60000,"max_fps":2}')},
             operation='next-operation')
-        accepted = self.control.report('accept', operation_id='next-operation', epoch=1, receipt_id='next-original-receipt')
-        self.control.report('start', operation_id='next-operation', epoch=accepted['epoch'], receipt_id='next-original-receipt')
+        accepted = self.control.call('mesh_work_report', report_id='next-operation-accept', provider={
+            'action': 'accept', 'arguments': {'operation_id': 'next-operation', 'capability_id': self.control.gui,
+                'epoch': 1, 'receipt_id': 'next-original-receipt'}})['provider']
+        self.control.call('mesh_work_report', report_id='next-operation-start', provider={
+            'action': 'start', 'arguments': {'operation_id': 'next-operation', 'capability_id': self.control.gui,
+                'epoch': accepted['epoch'], 'receipt_id': 'next-original-receipt'}})
         replacement = dict(self.binding, stream_id='replacement-stream', binding_digest='c' * 64,
                            task_id=self.f.task['id'], task_epoch=self.f.task['epoch'], operation_id='next-operation')
         self.assertTrue(self.call('open', binding=replacement)['active'])  # no retry to evict stale slot
