@@ -28,10 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/amita-raft-target
       RUSTUP_DIST_SERVER: https://static.rust-lang.org
-      AMITA_TOOL_DIR: ${{ runner.temp }}/amita-raft-tools
-      AMITA_BUNDLE_DIR: ${{ runner.temp }}/amita-raft-public-bundle
     defaults:
       run:
         shell: bash
@@ -45,6 +42,13 @@ jobs:
           sparse-checkout: |
             /deploy/raft-portability/
             /LICENSE
+
+      - name: Set runner-local output directories after allocation
+        run: |
+          printf 'CARGO_TARGET_DIR=%s\nAMITA_TOOL_DIR=%s\nAMITA_BUNDLE_DIR=%s\n' \
+            "$RUNNER_TEMP/amita-raft-target" \
+            "$RUNNER_TEMP/amita-raft-tools" \
+            "$RUNNER_TEMP/amita-raft-public-bundle" >> "$GITHUB_ENV"
 
       - name: Install one official compiler and both standard libraries
         run: |

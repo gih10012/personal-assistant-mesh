@@ -1,5 +1,15 @@
 # Public standard-runner build slice, continued 2026-11-11
 
+2026-11-12 actual first hosted attempt: Root pushed `827c4fd`; run
+[43149651697](https://github.com/gih10012/personal-assistant-mesh/actions/runs/43149651697)
+failed workflow validation with zero jobs. Its actual annotation reports
+`Unrecognized named-value: 'runner'` at lines 31, 33 and 34, the three job-level
+`env` expressions using `runner.temp`. No Rust install, build or test ran. The
+continuation moves those three directories into the first step after checkout,
+using allocated `$RUNNER_TEMP` values written to `$GITHUB_ENV`. The constant
+Rust distribution URL and the artifact upload step remain unchanged. Root owns
+the next source push; this fix does not turn that failed attempt into a pass.
+
 Prepared source only: Root owns review, public push, hosted execution and result
 collection. No workflow has been pushed or run by this specialist. Native
 Click runner errors and the earlier actual WASM E0514 remain recorded in
