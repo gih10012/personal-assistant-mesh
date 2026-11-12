@@ -1,0 +1,6 @@
+{
+  "name": "libamita_screenshare.so",
+  "version": "0.1.0",
+  "types": "./Index.d.ts",
+  "description": "AMITA owner-authorized native video-only screen capture"
+}
