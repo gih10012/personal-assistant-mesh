@@ -2,12 +2,14 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { MaintenanceService } from '../update/MaintenanceService';
 import { PhoneControlBridge } from '../control/PhoneControlBridge';
+import { ScreenShareOwner } from '../screenshare/ScreenShareOwner';
 
 export default class EntryAbility extends UIAbility {
   private maintenance: MaintenanceService | null = null;
   private poll: number = -1;
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     AppStorage.setOrCreate<boolean>('meshForeground', false);
+    ScreenShareOwner.attach(this.context);
     AppStorage.setOrCreate<string>('meshUpdateStatus', '{"state":"initializing"}');
     this.maintenance = new MaintenanceService(this.context);
     PhoneControlBridge.onNewWant(this.context, want).catch((): void => {});
@@ -24,6 +26,7 @@ export default class EntryAbility extends UIAbility {
   }
   onForeground(): void {
     AppStorage.setOrCreate<boolean>('meshForeground', true);
+    ScreenShareOwner.foregroundChanged();
     if (this.maintenance !== null) {
       this.maintenance.restoreSchedule().catch((): void => {}).then((): Promise<void> => this.publish());
       this.maintenance.syncForeground().catch((): void => {}).then((): Promise<void> => this.publish());
@@ -37,8 +40,12 @@ export default class EntryAbility extends UIAbility {
   }
   onBackground(): void {
     AppStorage.setOrCreate<boolean>('meshForeground', false);
+    ScreenShareOwner.foregroundChanged();
     if (this.poll !== -1) { clearInterval(this.poll); this.poll = -1; }
     if (this.maintenance !== null) { this.maintenance.stop(); }
   }
-  onDestroy(): void { this.onBackground(); }
+  onDestroy(): void {
+    this.onBackground();
+    ScreenShareOwner.destroyed().catch((): void => {});
+  }
 }

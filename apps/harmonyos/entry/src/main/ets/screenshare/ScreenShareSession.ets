@@ -70,7 +70,7 @@ export class ScreenShareSession {
   };
 
   private onBackgroundSuspend = (event: backgroundTaskManager.ContinuousTaskSuspendInfo): void => {
-    if (this.policy !== null && event.id === this.policy.backgroundTaskId) {
+    if (this.policy !== null && event.suspendState && event.continuousTaskId === this.policy.backgroundTaskId) {
       this.stop('screen_share_continuous_task_suspended');
     }
   };

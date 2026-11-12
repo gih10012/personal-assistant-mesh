@@ -149,4 +149,11 @@ test('wrong receiver ACK and OS cancellation stop sharing instead of faking qual
   await canceled.session.stop();
   assert.equal(canceled.session.status().error, 'screen_share_continuous_task_canceled');
   assert.deepEqual(canceled.backgroundStops, [77]);
+  const suspended = fixture(); suspended.start(); suspended.started(); suspended.frame(frame()); await settle();
+  suspended.callbacks.get('continuousTaskSuspend')({ continuousTaskId: 77, suspendState: false, suspendReason: 0 });
+  assert.equal(suspended.session.status().backgroundActive, true);
+  suspended.callbacks.get('continuousTaskSuspend')({ continuousTaskId: 77, suspendState: true, suspendReason: 0 });
+  await suspended.session.stop();
+  assert.equal(suspended.session.status().error, 'screen_share_continuous_task_suspended');
+  assert.deepEqual(suspended.backgroundStops, [77]);
 });
