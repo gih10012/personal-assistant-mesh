@@ -103,6 +103,8 @@ def start(api, config_path, *, origin, port, relays=(), updates=None,
     from .phone_owner import install_dispatch
     try:
         install_dispatch(api, service, origin)
+        from .phone_screen_share_reader import install_dispatch as install_screen_reader
+        install_screen_reader(api, service)
     except Exception:
         api.dispatch = previous
         del api.phone_authority

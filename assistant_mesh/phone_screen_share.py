@@ -5,7 +5,6 @@ Opaque wire bindings correlate an already running read-only dispatch; they
 never authorize it. Local owner UI approval IDs/nonces are not wire fields.
 """
 import base64
-from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -54,15 +53,13 @@ def stream_policy(body):
     return body
 
 
-@dataclass(repr=False)
 class _Slot:
-    binding: dict = field(repr=False)
-    idle_until: float
-    max_fps: int
-    active: bool = True
-    last_frame_at: float = 0
-    frame: dict = field(default_factory=dict, repr=False)
-    body: bytes = field(default=b'', repr=False)
+    # The actual legacy receiver uses Python 3.6: no dataclasses dependency.
+    # Default object repr deliberately never includes private frame bytes.
+    def __init__(self, binding, idle_until, max_fps, active=True):
+        self.binding, self.idle_until, self.max_fps = binding, idle_until, max_fps
+        self.active, self.last_frame_at = active, 0
+        self.frame, self.body = {}, b''
 
 
 class PhoneScreenShare:
@@ -281,6 +278,44 @@ class PhoneScreenShare:
                     raise Conflict('screen_share_frame_not_available')
                 # No provider/owner UI credentials, prior images, history or URLs.
                 result = dict(self._public(binding), format='amita-phone-screen-share-frame/1',
+                              frame=dict(slot.frame, base64=base64.b64encode(slot.body).decode('ascii')))
+                _encoded(result)
+                return result
+
+    def lookup(self, actor, arguments):
+        """Original caller knows its task/operation, never producer stream IDs."""
+        fields = {'operation_id', 'capability_id', 'task_id', 'task_epoch'}
+        _encoded(arguments)
+        if not isinstance(arguments, dict) or set(arguments) != fields:
+            raise ValueError('screen_share_lookup_arguments_required')
+        for key in fields - {'task_epoch'}:
+            _identifier(arguments[key], 'screen_share_' + key)
+        if type(arguments['task_epoch']) is not int or not 0 < arguments['task_epoch'] < 2 ** 53:
+            raise ValueError('screen_share_original_binding_required')
+        with self.service.lock:
+            self._expire()
+            with self.service.store.transaction() as db:
+                allocation = self.service.api.allocations._allocation(db, arguments['operation_id'])
+                if actor != allocation['actor']:
+                    raise PermissionError('screen_share_original_reader_required')
+                if (allocation['task_id'] != arguments['task_id']
+                        or allocation['task_epoch'] != arguments['task_epoch']):
+                    raise PermissionError('screen_share_original_reader_task_required')
+                node = next((item for item in self.service.installed['nodes']
+                             if item.get('installed_control_adapter', {}).get('capability_id') == arguments['capability_id']), None)
+                if node is None:
+                    raise PermissionError('screen_share_installed_read_only_adapter_required')
+                slot = self._slots.get(node['node_id'])
+                if slot is None or any(slot.binding[key] != arguments[key] for key in fields):
+                    raise Conflict('screen_share_frame_not_available')
+                try:
+                    self._guard(db, node['node_id'], slot.binding, reader=actor)
+                except (PermissionError, Conflict, ValueError):
+                    self._slots.pop(node['node_id'], None)
+                    raise
+                if not slot.active or not slot.frame:
+                    raise Conflict('screen_share_frame_not_available')
+                result = dict(self._public(slot.binding), format='amita-phone-screen-share-frame/1',
                               frame=dict(slot.frame, base64=base64.b64encode(slot.body).decode('ascii')))
                 _encoded(result)
                 return result

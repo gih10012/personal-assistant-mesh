@@ -2,13 +2,30 @@
 
 Build source only; no Store, account, private configuration or incumbent runtime
 is imported. The installed receiver's captured public parent is the input.
-The source commit applies to the four new phone modules. The parent launcher,
+The source commit applies only to the explicit seven-phone-module allowlist. Newly
+built overlays also pin `phone_screen_share`, `phone_screen_share_reader` and the
+new copied `phone_http` ready hook;
+the launcher preloads these inert modules after all inherited pin checks.
+The receiver uses only Python 3.6 stdlib (including a plain latest-frame slot,
+without the Python 3.7 dataclasses dependency). The parent launcher,
 namespace initializer, three native-partial modules and original manifest remain
 byte-identical; `parent_launch_receiver.py` retains the original launcher.
 The new `launch_receiver.py` checks every inherited runtime pin plus actual
 parent-release pins and candidate module hashes, then calls the unchanged
-parent's `_entry.main()`. It adds no ready callback and forwards the original
-argv. Existing namespace fallback supplies protected core and phone_http.
+parent's `_entry.main()` and forwards the original argv. Existing namespace
+fallback supplies protected core; the new copied phone_http is explicitly pinned.
+
+The new copied `phone_http.start` composes the frame reader into the ACTUAL
+existing phone ready chain: after phone_owner.install_dispatch in its existing
+try/rollback block, before starting the phone HTTP server thread. The frame
+installer opens no listener/Store and retains original dispatch for unrelated
+routes. It receives the incumbent API's already authenticated peer exactly as
+the old private /v1/phone/result seam; it never accepts a JSON actor or promotes
+operator to an original task worker. Lookup independently requires exact
+allocation.actor and current original task/epoch/permission fences. No protected
+server hash or parent ready function is rewritten. The manifest records
+`screen_share_reader_auto_installed=true`, describing this source hook, not proof
+that Root has deployed or exercised it in production.
 
 Reproduce the 2026-11-09 candidate into a **new** destination:
 

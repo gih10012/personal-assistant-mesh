@@ -15,7 +15,8 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('phone_authority', 'phone_owner', 'phone_control', 'phone_maintenance')
+MODULES = ('phone_authority', 'phone_owner', 'phone_control', 'phone_maintenance',
+           'phone_screen_share', 'phone_screen_share_reader', 'phone_http')
 PARENT_MANIFEST = 'native-partial-overlay.json'
 PROTECTED = ('store', 'server', 'worker', 'entrance', 'native_history', 'sessions')
 
@@ -106,6 +107,10 @@ def build(parent_snapshot, parent_manifest_sha256, source_commit, destination,
         "    if _path.is_symlink() or not _path.is_file() or hashlib.sha256(_path.read_bytes()).hexdigest() != _expected:\n"
         "        raise RuntimeError('phone_autonomy_overlay_runtime_pin_changed')\n"
         "# Preserve the namespace before the unchanged nested launchers run.\nimport assistant_mesh\n"
+        "# These explicit pinned phone imports are inert; they open no Store/listener.\n"
+        "import assistant_mesh.phone_screen_share\n"
+        "from assistant_mesh.phone_screen_share_reader import install_dispatch as install_screen_share_reader\n"
+        "import assistant_mesh.phone_http\n"
         "_spec = importlib.util.spec_from_file_location('_amita_phone_autonomy_parent', str(_root / 'parent_launch_receiver.py'))\n"
         "_parent = importlib.util.module_from_spec(_spec)\nsys.modules[_spec.name] = _parent\n"
         "_spec.loader.exec_module(_parent)\n"
@@ -117,9 +122,13 @@ def build(parent_snapshot, parent_manifest_sha256, source_commit, destination,
         'parent_manifest': manifest, 'inherited_runtime_pins': old_pins, 'runtime_pins': pins,
         'source_sha256': {n: sha(data) for n, data in outputs.items()}, 'added_modules': list(MODULES),
         'parent_launcher_copy': 'parent_launch_receiver.py', 'original_ready_preserved': True,
+        'screen_share_reader_ready_hook': 'assistant_mesh.phone_screen_share_reader.install_dispatch',
+        'screen_share_reader_auto_installed': True,
         'namespace_init_preserved': True, 'protected_core_modules_preserved': list(PROTECTED),
         'adjacent_protocols': ['mesh-phone-authority/1', 'mesh-interactive-node/1', 'mesh-phone-maintenance/1',
-                               'amita-phone-ui-control/1', 'amita-phone-owner-result/1'],
+                               'amita-phone-ui-control/1', 'amita-phone-owner-result/1',
+                               'amita-phone-screen-share/1', 'amita-phone-screen-share-ack/1',
+                               'amita-phone-screen-share-frame/1'],
         'production_installed': False, 'end_to_end_verified': False, 'ledger_opened': False,
         'incumbent_files_modified': False, 'models_called': False}
     outputs['phone-autonomy-overlay.json'] = (json.dumps(report, sort_keys=True, indent=2) + '\n').encode('utf8')

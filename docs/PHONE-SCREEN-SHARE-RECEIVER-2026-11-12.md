@@ -133,26 +133,41 @@ Before rejecting a new valid stream as busy, the receiver revalidates an old
 slot and evicts it if its original fences are no longer live. Unknown/finished
 old work therefore cannot block an unrelated valid original task.
 
-Private reader hook Root must attach to the **existing** authenticated worker/
-operator API dispatch, without a new listener or arbitrary bearer endpoint:
-
-```python
-# Exact POST path, no query/other methods; same authenticated peer handling as
-# existing /v1/phone/result. NodeToken/provider /phone/node does NOT expose pixels.
-if path.split('?', 1)[0] == '/v1/phone/screen-share/frame':
-    if method != 'POST' or path != '/v1/phone/screen-share/frame' or peer.get('role') not in ('operator', 'worker'):
-        raise PermissionError('screen_share_reader_route_not_authorized')
-    actor = 'operator' if peer['role'] == 'operator' else 'node:' + peer.get('node', '')
-    return service.screen_share.read(actor, payload)
-```
-
-Payload is exactly the public binding above. `read()` independently requires
+Private reader hook Root attaches to the **existing** authenticated worker/
+operator API dispatch, without a new listener or arbitrary bearer endpoint.
+Use the actual installer described below, not a new role-to-actor shortcut
+around protected runtime task-scoped authentication. `read()` independently requires
 actor == original allocation.actor; operator role alone, other workers, phone
 provider and other Mesh members cannot read pixels. Existing API authentication
 must select that original worker; do not copy a phone token or accept an actor
 from JSON. Response `amita-phone-screen-share-frame/1` has public binding fields
 and latest `frame` including canonical base64, never prior frames or a URL.
 Serve with existing private/no-store handling, and do not log body/response bytes.
+
+The executable private route adapter is now `phone_screen_share_reader.install_dispatch`,
+installed by the new copied phone_http.start after phone_owner ready succeeds,
+inside its same rollback block and before the phone HTTP server thread starts.
+Original callers need no producer-random stream ID/digest: authenticated
+`POST /v1/phone/screen-share/frame` accepts exactly operation_id,
+capability_id, task_id and integer task_epoch in the JSON body. These
+come from the caller's original WorkEngine/Allocation, and must match the exact
+allocation.actor/current original task and epoch. A positive canonical decimal
+task_epoch is required. The source locates its single matching live private slot
+and returns the public binding plus latest frame only after all original fences.
+No GET/query route, listing, wildcard operation, viewer or NodeToken reader is
+provided. Exact POST also accepts the full old binding for backward
+compatibility; full-binding `read()` remains unchanged.
+
+Install only on the original API/PhoneAuthority sharing the same Store. Today's
+API supplies its already authenticated peer to this hook, just as its existing
+private /v1/phone/result route. Actor is authenticated worker peer.node or
+literal operator; operator is not promoted to a task's worker. There is no
+guessed `_resource_actor`/`_task_actor` signature or JSON-selected actor fallback. Source
+lookup itself independently enforces actor == original allocation.actor, task
+ID/epoch, selected provider, live dedicated stream grant and control presence.
+The seven-module overlay pins that new phone ready hook without rewriting the
+protected API. Root still owns source package build, deployment and actual
+acceptance, including existing private/no-store transport behavior.
 
 Root still owns HTTPS phone sink/receiver ACK binding, private worker route,
 commercial SDK build/signing, production deployment and actual phone-to-source
