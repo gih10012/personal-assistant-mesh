@@ -361,7 +361,8 @@ class PhoneAuthority:
             value = envelope['arguments']
             if not isinstance(value, dict):
                 raise ValueError('invalid_phone_request')
-            node = self.control.select(node, value.get('session_id'))
+            if envelope['action'] != 'mesh_screen_share_close':
+                node = self.control.select(node, value.get('session_id'))
             return self.screen_share.request(node, envelope)
         action, value = TOOLS.get(envelope['action']), envelope['arguments']
         if action is None or not isinstance(value, dict):

@@ -110,6 +110,29 @@ task/epoch/grant/capability/owner/presence invalidation deletes them on the next
 admission/read. No timer/background daemon is added merely to maintain this
 cache; expiration is enforced and lazy eviction occurs on receiver access.
 
+Lifetime is tied to the **original fixed Allocation deadline**, not a snapshot
+of a shorter rolling task lease. Allocations.reserve fixes its deadline to the
+minimum of requested lease and then-current task/grant/capability/pool/metric
+limits; pending dispatch.deadline is that allocation deadline. There is no
+Allocation-renew operation. Every frame/status/read still calls the existing
+Allocation admission path, which checks the CURRENT original task owner/epoch
+and actual deadline. A legitimate caller task renewal can keep the session live
+within its original fixed allocation/scope; it never extends that allocation.
+The sink/receiver do not issue task, grant, capability or Allocation renewals.
+
+`mesh_screen_share_close` is a separate **delete-only** cleanup operation. It
+still requires the exact authenticated producer node, installed primary/control
+session identity, historical original allocation/provider and task ID/epoch.
+It does not require current task/grant/presence permission to erase an exact
+old slot after normal task end or revocation. Its response contains no image,
+is always inactive/unacknowledged with zero bytes, and creates/renews no slot,
+operation, task, lease or receipt. An already absent old binding returns that
+same bounded absence ACK; a late old close never deletes a different replacement
+stream. Node token revocation and node identity mismatches remain denied.
+Before rejecting a new valid stream as busy, the receiver revalidates an old
+slot and evicts it if its original fences are no longer live. Unknown/finished
+old work therefore cannot block an unrelated valid original task.
+
 Private reader hook Root must attach to the **existing** authenticated worker/
 operator API dispatch, without a new listener or arbitrary bearer endpoint:
 

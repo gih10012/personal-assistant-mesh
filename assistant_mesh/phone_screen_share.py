@@ -72,14 +72,15 @@ class PhoneScreenShare:
         # A closed slot retains only its public binding until its short expiry.
         self._slots = {}
 
-    def _binding(self, arguments):
+    def _binding(self, arguments, *, live=True):
         binding = {key: arguments[key] for key in BINDING_FIELDS}
         for key in BINDING_FIELDS - {'task_epoch', 'expires_at', 'binding_digest'}:
             _identifier(binding[key], 'screen_share_' + key)
         now = self.service.store.clock()
         if (type(binding['task_epoch']) is not int or not 0 < binding['task_epoch'] < 2 ** 53
                 or not _digest(binding['binding_digest']) or not _finite(binding['expires_at'])
-                or not now < binding['expires_at'] <= now + MAX_SCOPE_TTL):
+                or binding['expires_at'] <= 0
+                or live and not now < binding['expires_at'] <= now + MAX_SCOPE_TTL):
             raise ValueError('screen_share_original_binding_required')
         return binding
 
@@ -147,6 +148,32 @@ class PhoneScreenShare:
                     frame_revision=slot.frame.get('revision', 0), frame_sha256=slot.frame.get('sha256', ''),
                     bytes=slot.frame.get('bytes', 0))
 
+    def _close(self, db, node_id, binding):
+        """Privacy cleanup only, not operation admission or a frame reader.
+
+        Authenticated producer and immutable historical allocation identity
+        suffice to erase its exact old slot after task/grant/presence expiry.
+        Never erase a replacement binding or create a slot, lease or receipt.
+        """
+        node = self._current_node(node_id)
+        adapter = node.get('installed_control_adapter')
+        if (adapter is None or binding['primary_session_id'] != node['session_id']
+                or binding['session_id'] != node.get('control_session_id')
+                or binding['capability_id'] != adapter['capability_id']):
+            raise PermissionError('screen_share_original_producer_required')
+        allocations = self.service.api.allocations
+        allocation = allocations._allocation(db, binding['operation_id'])
+        allocations._dispatch(db, binding['operation_id'], binding['capability_id'], 'node:' + node_id)
+        if allocation['task_id'] != binding['task_id'] or allocation['task_epoch'] != binding['task_epoch']:
+            raise PermissionError('screen_share_original_producer_required')
+        slot = self._slots.get(node_id)
+        if slot is not None and slot.binding == binding:
+            slot.active, slot.body, slot.frame = False, b'', {}
+            return self._reply(slot)
+        # Exact old binding is already absent. Report only its absence without
+        # exposing or deleting another currently active stream's public state.
+        return self._reply(_Slot(binding, self.service.store.clock(), 1, active=False))
+
     def request(self, node, envelope):
         _encoded(envelope)
         if (not isinstance(envelope, dict) or set(envelope) != {'action', 'arguments'}
@@ -157,6 +184,10 @@ class PhoneScreenShare:
             raise ValueError('screen_share_arguments_required')
         with self.service.lock:
             self._expire()
+            if action == 'mesh_screen_share_close':
+                binding = self._binding(args, live=False)
+                with self.service.store.transaction() as db:
+                    return self._close(db, node['node_id'], binding)
             try:
                 binding = self._binding(args)
                 with self.service.store.transaction() as db:
@@ -164,7 +195,13 @@ class PhoneScreenShare:
                     slot = self._slots.get(node['node_id'])
                     if action == 'mesh_screen_share_open':
                         if slot is not None and slot.binding != binding and slot.active:
-                            raise Conflict('screen_share_node_slot_busy')
+                            try:
+                                self._guard(db, node['node_id'], slot.binding)
+                            except (PermissionError, Conflict, ValueError):
+                                del self._slots[node['node_id']]
+                                slot = None
+                            else:
+                                raise Conflict('screen_share_node_slot_busy')
                         if slot is None or slot.binding != binding:
                             if binding['expires_at'] > self.service.store.clock() + policy['duration_ms'] / 1000:
                                 raise ValueError('screen_share_duration_exceeded')
@@ -173,9 +210,6 @@ class PhoneScreenShare:
                             self._slots[node['node_id']] = slot
                     if slot is None or slot.binding != binding or not slot.active:
                         raise Conflict('screen_share_original_stream_not_live')
-                    if action == 'mesh_screen_share_close':
-                        slot.active, slot.body, slot.frame = False, b'', {}
-                        return self._reply(slot)
                     if action == 'mesh_screen_share_frame':
                         frame, raw = self._frame(args['frame'])
                         if slot.frame and frame['revision'] <= slot.frame['revision']:

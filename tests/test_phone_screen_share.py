@@ -154,6 +154,73 @@ class PhoneScreenShareTests(unittest.TestCase):
         with self.assertRaises(Conflict): self.call('open')
         with self.assertRaises(Conflict): self.service.screen_share.read(self.f.actor, self.binding)
 
+    def test_rolling_parent_task_lease_is_rechecked_without_shortening_or_extending_original_allocation(self):
+        # Original allocation is valid to t=1040; a temporarily shorter current
+        # parent lease may be legitimately renewed by its real worker before loss.
+        with self.f.store.transaction() as db:
+            db.execute('UPDATE tasks SET deadline=? WHERE id=?', (self.f.now + 5, self.f.task['id']))
+        self.call('open'); self.call('frame', frame=self.frame())
+        self.f.now += 4
+        self.f.store.update_task(self.f.task['id'], 'laptop', self.f.task['epoch'], checkpoint={'synthetic_alive': True})
+        self.f.now += 2  # beyond the old task deadline, same actual task epoch
+        self.assertTrue(self.call('status')['active'])
+        with self.assertRaises(Conflict):
+            self.call('open', binding=dict(self.binding, expires_at=1045))  # never extend the original allocation
+        with self.f.store.transaction() as db:
+            self.assertEqual(1040, self.f.bridge._allocation(db, 'gui-operation')['deadline'])
+            db.execute('UPDATE tasks SET deadline=? WHERE id=?', (self.f.now, self.f.task['id']))
+        with self.assertRaises(Conflict): self.call('status')
+        self.assertNotIn('cloud', self.service.screen_share._slots)
+
+    def test_exact_producer_close_is_delete_only_after_task_end_revocation_or_expiry(self):
+        self.call('open'); self.call('frame', frame=self.frame())
+        with self.assertRaises(PermissionError):
+            self.call('close', binding=dict(self.binding, task_epoch=self.binding['task_epoch'] + 1))
+        with self.assertRaises(PermissionError):
+            self.service.node('FOREIGN_SYNTHETIC_' + 'x' * 40,
+                {'action': 'mesh_screen_share_close', 'arguments': self.binding})
+        self.assertTrue(self.service.screen_share._slots['cloud'].body)
+        with self.f.store.transaction() as db:
+            original_task = dict(db.execute('SELECT * FROM tasks WHERE id=?', (self.f.task['id'],)).fetchone())
+            db.execute("UPDATE tasks SET status='completed' WHERE id=?", (self.f.task['id'],))
+            db.execute("UPDATE managed_allocations SET state='completed' WHERE operation_id='gui-operation'")
+            db.execute("UPDATE managed_dispatch SET state='completed' WHERE operation_id='gui-operation'")
+            db.execute('UPDATE capabilities SET revoked=1 WHERE id=?', (self.control.gui,))
+        closed = self.call('close')
+        self.assertFalse(closed['active']); self.assertFalse(closed['acknowledged']); self.assertEqual(0, closed['bytes'])
+        self.assertNotIn('base64', closed)
+        self.assertEqual(b'', self.service.screen_share._slots['cloud'].body)
+        self.f.now += 50  # cleanup after fixed expiry is still bounded/idempotent
+        self.assertEqual(closed, self.call('close'))
+        with self.f.store.transaction() as db:
+            task = db.execute('SELECT * FROM tasks WHERE id=?', (self.f.task['id'],)).fetchone()
+            self.assertEqual('completed', task['status'])
+            self.assertEqual(original_task['epoch'], task['epoch']); self.assertEqual(original_task['deadline'], task['deadline'])
+            self.assertEqual('completed', self.f.bridge._allocation(db, 'gui-operation')['state'])
+
+    def test_invalid_old_stream_does_not_block_new_task_and_late_old_close_preserves_replacement(self):
+        self.call('open'); self.call('frame', frame=self.frame())
+        self.f.bridge.unknown('node:cloud', 'gui-operation', self.control.gui, 3)
+        self.f.store.create_task('synthetic independent original request', task_id='next-original-task')
+        self.f.task = self.f.store.claim('laptop')
+        self.assertEqual('next-original-task', self.f.task['id'])
+        self.control.reserve(workload={'input': control_fixtures.blob(
+            b'{"format":"amita-phone-screen-share/1","command":"screen_share","duration_ms":60000,"max_fps":2}')},
+            operation='next-operation')
+        accepted = self.control.report('accept', operation_id='next-operation', epoch=1, receipt_id='next-original-receipt')
+        self.control.report('start', operation_id='next-operation', epoch=accepted['epoch'], receipt_id='next-original-receipt')
+        replacement = dict(self.binding, stream_id='replacement-stream', binding_digest='c' * 64,
+                           task_id=self.f.task['id'], task_epoch=self.f.task['epoch'], operation_id='next-operation')
+        self.assertTrue(self.call('open', binding=replacement)['active'])  # no retry to evict stale slot
+        self.call('frame', binding=replacement, frame=self.frame())
+        closed_old = self.call('close')
+        self.assertFalse(closed_old['active']); self.assertEqual(0, closed_old['bytes'])
+        self.assertEqual(replacement, self.service.screen_share._slots['cloud'].binding)
+        self.assertTrue(self.service.screen_share.read(self.f.actor, replacement)['frame'])
+        with self.f.store.transaction() as db:
+            self.assertEqual('unknown', self.f.bridge._allocation(db, 'gui-operation')['state'])
+            self.assertEqual('running', self.f.bridge._allocation(db, 'next-operation')['state'])
+
     def test_feature_is_default_disabled_and_legacy_one_shot_workloads_never_authorize_streams(self):
         adapter = copy.deepcopy(self.control.node['installed_control_adapter'])
         adapter.pop('screen_share_enabled')
