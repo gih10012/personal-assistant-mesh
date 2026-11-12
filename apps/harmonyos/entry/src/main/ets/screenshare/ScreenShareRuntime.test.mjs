@@ -1,0 +1,237 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+import { createHash } from 'node:crypto';
+import * as protocol from '../core/Protocol.ts';
+import { sameScreenShareScope } from './ScreenSharePolicy.ts';
+
+const digest = async bytes => createHash('sha256').update(bytes).digest('hex');
+const requireValue = protocol.requireValue;
+const workCode = stripTypeScriptTypes(readFileSync(new URL('../core/WorkProtocol.ts', import.meta.url), 'utf8')
+  .replace(/^import[\s\S]*?;\r?\n/gm, ''), { mode: 'strip' }).replace(/^export /gm, '');
+const work = new Function('MAX_BYTES', 'requireValue', 'validateJoinUrl', workCode +
+  '\nreturn { WorkEngine, freshWorkSnapshot, coldResumeWork, validateWorkBlob, validateWorkConfig, validateWorkDispatch };')(
+  protocol.MAX_BYTES, requireValue, protocol.validateJoinUrl);
+const blob = async value => {
+  const bytes = Buffer.from(JSON.stringify(value));
+  return { bytes: bytes.length, base64: bytes.toString('base64'), sha256: await digest(bytes) };
+};
+async function settle() { for (let turn = 0; turn < 100; turn++) await Promise.resolve(); }
+async function until(predicate) {
+  for (let turn = 0; turn < 10 && !predicate(); turn++) await settle();
+  assert.equal(Boolean(predicate()), true, 'actual runtime did not reach the expected boundary');
+}
+
+// Execute the actual shipped runtime and original WorkEngine. Only platform
+// preferences/Asset/HTTPS/media-owner boundaries are synthetic. No SDK, phone,
+// screen, real node, Source DB, network or background service is accessed.
+async function fixture() {
+  let now = 1000000, foreground = true, serial = 0, nextTimer = 0, managedStarts = 0, sourceCloses = 0;
+  let stopPromise = null, acceptRelease = null, holdAccept = false, closeRelease = null;
+  let closingAllowed = false;
+  const stores = new Map(), writes = [], requests = [], timers = new Map();
+  const config = { format: 'mesh-phone-client/1', node_id: 'phone', session_id: 'original-primary',
+    resource_url: 'https://original.example.test/phone/node', mesh_id: 'mesh', authority_id: 'authority' };
+  const input = await blob({ format: 'amita-phone-screen-share/1', command: 'screen_share', duration_ms: 60000, max_fps: 1 });
+  const original = { operation_id: 'original-operation', capability_id: 'phone:ui-control-v1', provider: 'node:phone',
+    state: 'pending', epoch: 1, receipt_id: null, task_id: 'original-task', task_epoch: 7, deadline: 1090,
+    selection: { capability_id: 'phone:ui-control-v1', epoch: 1, action: 'inspect', scope: { purpose: 'Synthetic read-only task' },
+      workload: { input } } };
+  let remote = structuredClone(original);
+  let media = { state: 'idle', captureActive: false, backgroundActive: false, acknowledgedFrames: 0,
+    lastFrameRevision: 0, lastCaptureTimestamp: -1, lastAckObservedAt: 0, error: '', nativeCode: 0,
+    cleanupUnknown: false, lastAcknowledgedSha256: '' };
+  let authorization = null, installedScope = null, gate = null;
+  const prefs = name => {
+    if (!stores.has(name)) stores.set(name, new Map());
+    return { getSync: (key, fallback) => stores.get(name).has(key) ? stores.get(name).get(key) : fallback,
+      putSync: (key, value) => { stores.get(name).set(key, value); writes.push({ name, key, value }); },
+      flush: async () => {} };
+  };
+  prefs('mesh_node_v1').putSync('snapshot', JSON.stringify({ node_id: 'phone' }));
+  prefs('mesh_work_v1').putSync('snapshot', JSON.stringify({ ...work.freshWorkSnapshot('phone'), config }));
+  class Encoder { encodeInto(text) { return new TextEncoder().encode(text); } }
+  class Decoder { decodeToString(bytes) { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } }
+  class Base64 { decodeSync(text) { return new Uint8Array(Buffer.from(text, 'base64')); }
+    encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } }
+  class Credentials { async load() { return { nodeId: 'phone', token: 'SYNTHETIC_ASSET_TOKEN_DO_NOT_PERSIST'.padEnd(48, '_'),
+    scope: ['phone:node'], expiresAt: 100000 }; } }
+  class Trusted { async load() { return null; } }
+  const timer = (callback, delay, repeat = false) => {
+    const id = ++nextTimer; timers.set(id, { callback, at: now + delay, delay, repeat }); return id;
+  };
+  const clear = id => timers.delete(id);
+  const owner = {
+    attach: () => {}, status: () => ({ ...media }), sourceCloseUnconfirmed: () => false,
+    foregroundChanged: () => {},
+    startManaged: async (primary, session, record, scope, auth, liveGate) => {
+      managedStarts++;
+      assert.deepEqual(primary, config); assert.equal(session, 'phone:screen-share-v1');
+      assert.equal(record.state, 'attempted'); assert.equal(record.authority_epoch, 3);
+      assert.equal(record.result_json, ''); assert.notEqual(record.invocation_nonce, '');
+      assert.equal(remote.state, 'running'); assert.equal(scope.taskEpoch, 7);
+      const saved = JSON.parse(stores.get('amita_screen_share_runtime_v1').get('work_snapshot'));
+      assert.equal(saved.records[0].state, 'attempted'); assert.equal(saved.records[0].invocation_nonce, record.invocation_nonce);
+      authorization = auth; installedScope = scope; gate = liveGate;
+      assert.equal(auth.valid(scope), true); assert.equal(gate.serviceLive(), true);
+      auth.onRevoked(() => { owner.stop(); });
+      media = { ...media, state: 'awaiting_capture_consent' };
+    },
+    stop: () => {
+      if (stopPromise) return stopPromise;
+      if (media.state === 'idle') return Promise.resolve();
+      media = { ...media, state: 'stopping', captureActive: false, backgroundActive: false,
+        error: 'screen_share_owner_stopped' };
+      stopPromise = (async () => {
+        if (!closingAllowed) await new Promise(resolve => { closeRelease = resolve; });
+        sourceCloses++;
+        media = { ...media, state: 'stopped' };
+      })();
+      return stopPromise;
+    }
+  };
+  const view = online => ({ format: 'mesh-interactive-node/1', mesh_id: 'mesh', execution_verified: false,
+    native_tools_restricted: false, session: { node_id: 'phone', session_id: 'phone:screen-share-v1',
+      lifecycle: 'screen-share', installed_adapter: { enabled: true, screen_share_enabled: true,
+        capability_id: 'phone:ui-control-v1', epoch: 1, execution_verification: 'declared_only' },
+      network: { state: online ? 'online' : 'offline', expires_at: online ? now / 1000 + 30 : now / 1000,
+        presence_ttl_seconds: 30 } } });
+  const http = { RequestMethod: { POST: 'POST' }, HttpProtocol: { HTTP1_1: 0 }, HttpDataType: { STRING: 1 },
+    createHttp: () => ({ destroy: () => {}, request: async (url, options) => {
+      assert.equal(url, config.resource_url); assert.equal(options.maxRedirects, 0);
+      assert.equal(options.header.Authorization.startsWith('Bearer SYNTHETIC_ASSET_TOKEN'), true);
+      const envelope = JSON.parse(options.extraData); requests.push({ ...envelope, at: now });
+      const args = envelope.arguments; let response;
+      if (envelope.action === 'mesh_connect' || envelope.action === 'mesh_node_update') response = view(args.online);
+      else if (envelope.action === 'mesh_work_pull') response = { format: 'mesh-interactive-node/1', mesh_id: 'mesh',
+        dispatch: remote.state === 'pending' ? [structuredClone(original)] : [] };
+      else {
+        assert.equal(envelope.action, 'mesh_work_report'); const provider = args.provider;
+        let result;
+        if (provider.action === 'inspect') result = { operation_id: original.operation_id, task_id: original.task_id,
+          task_epoch: 7, plan: { selections: [structuredClone(original.selection)] }, dispatch: [structuredClone(remote)] };
+        else if (provider.action === 'accept') {
+          if (holdAccept) await new Promise(resolve => { acceptRelease = resolve; });
+          assert.equal(remote.state, 'pending');
+          remote = { ...remote, state: 'accepted', epoch: remote.epoch + 1, receipt_id: provider.arguments.receipt_id };
+          result = structuredClone(remote);
+        } else if (provider.action === 'start') {
+          assert.equal(remote.state, 'accepted');
+          remote = { ...remote, state: 'running', epoch: remote.epoch + 1, execute_once: true }; result = structuredClone(remote);
+        } else if (provider.action === 'result') {
+          assert.equal(sourceCloses, 1, 'Source close must finish before the original result is sent');
+          const resultBlob = provider.arguments.result;
+          const summary = JSON.parse(Buffer.from(resultBlob.base64, 'base64').toString());
+          assert.equal(summary.format, 'amita-phone-screen-share-result/1'); assert.equal(summary.readonly, true);
+          assert.equal(summary.source_closed, true); assert.equal(summary.capture_quiescent, true);
+          assert.equal(summary.last_ack_sha256, 'a'.repeat(64)); assert.equal(summary.acknowledged_frames, 1);
+          assert.equal(JSON.stringify(summary).includes('base64'), false);
+          result = { result_reference: 'phone-result:' + resultBlob.sha256, sha256: resultBlob.sha256, bytes: resultBlob.bytes };
+        } else if (provider.action === 'settle') {
+          remote = { ...remote, state: 'completed', epoch: remote.epoch + 1,
+            settlement: { outcome: 'completed', evidence: provider.arguments.evidence } }; result = structuredClone(remote);
+        } else if (provider.action === 'unknown') {
+          remote = { ...remote, state: 'unknown', epoch: remote.epoch + 1 }; result = structuredClone(remote);
+        } else assert.fail('unexpected provider action');
+        response = { format: 'mesh-interactive-node/1', mesh_id: 'mesh', provider: result };
+      }
+      return { responseCode: 200, result: JSON.stringify(response) };
+    } }) };
+  const code = stripTypeScriptTypes(readFileSync(new URL('./ScreenShareRuntime.ets', import.meta.url), 'utf8')
+    .replace(/^import[\s\S]*?;\r?\n/gm, ''), { mode: 'strip' }).replace(/^export /gm, '');
+  const exported = Object.keys(work);
+  const load = () => new Function(...exported, 'requireValue', 'preferences', 'deviceInfo', 'http', 'util',
+    'NodeCredentialStore', 'TrustedRuntimeConfig', 'controlBlob', 'controlDigest', 'ScreenShareOwner',
+    'sameScreenShareScope', 'AppStorage', 'Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+    code + '\nreturn ScreenShareRuntime;')(...exported.map(name => work[name]), requireValue,
+    { removePreferencesFromCacheSync: () => {}, getPreferencesSync: (_context, options) => prefs(options.name) },
+    { sdkApiVersion: 26 }, http, { TextEncoder: Encoder, TextDecoder: Decoder, Base64Helper: Base64,
+      generateRandomUUID: () => 'synthetic-' + (++serial) }, Credentials, Trusted, blob, digest, owner,
+    sameScreenShareScope, { get: key => key === 'meshForeground' ? foreground : undefined }, { now: () => now },
+    (callback, delay) => timer(callback, delay), clear, (callback, delay) => timer(callback, delay, true), clear);
+  const context = {}; let Runtime = load(), runtime = await Runtime.create(context);
+  const advance = async milliseconds => {
+    now += milliseconds;
+    for (const [id, item] of [...timers]) {
+      if (item.at <= now) {
+        if (item.repeat) item.at = now + item.delay; else timers.delete(id);
+        item.callback();
+      }
+    }
+    await settle();
+  };
+  return { stores, writes, requests, original, owner, advance, now: () => now,
+    runtime: () => runtime, records: () => runtime.engine.snapshot.records,
+    setForeground: value => { foreground = value; runtime.foregroundChanged(); },
+    start: async () => { await runtime.receive(); await until(() => runtime.pending() !== null); return runtime.pending(); },
+    markActualFrameAndTicket: () => { media = { ...media, state: 'sharing', captureActive: true, backgroundActive: true,
+      acknowledgedFrames: 1, lastFrameRevision: 1, lastCaptureTimestamp: 1234.5, lastAckObservedAt: now,
+      lastAcknowledgedSha256: 'a'.repeat(64) }; },
+    markCaptureWithoutTicket: () => { media = { ...media, state: 'capture_started_waiting_frame_ack', captureActive: true }; },
+    allowClose: () => { closingAllowed = true; closeRelease?.(); },
+    starts: () => managedStarts, closes: () => sourceCloses,
+    holdAccept: () => { holdAccept = true; }, acceptWaiting: () => acceptRelease !== null,
+    releaseAccept: () => { holdAccept = false; acceptRelease?.(); },
+    reload: async () => { timers.clear(); Runtime = load(); runtime = await Runtime.create(context); return runtime; }
+  };
+}
+
+test('durable exact owner approval admits the original WorkEngine; first frame never settles; final close precedes result', async () => {
+  const f = await fixture(), pending = await f.start();
+  assert.equal(f.records()[0].state, 'prepared'); assert.equal(f.starts(), 0);
+  const durableApproval = JSON.parse(f.stores.get('amita_screen_share_runtime_v1').get('approvals'))[0];
+  assert.equal(durableApproval.state, 'pending'); assert.equal(durableApproval.inputHash, pending.inputHash);
+  assert.equal(f.requests.some(item => item.arguments.provider?.action === 'accept'), false);
+  await assert.rejects(f.runtime().decide({ ...pending, nonce: 'wrong-local-nonce' }, true), /decision_mismatch/);
+  await f.runtime().decide(pending, true); await until(() => f.starts() === 1);
+  assert.equal(f.records()[0].state, 'attempted');
+  f.markActualFrameAndTicket(); await f.advance(250);
+  assert.equal(f.records()[0].state, 'attempted'); assert.equal(f.records()[0].result_json, '');
+  const stopping = f.runtime().stop(); await settle();
+  assert.equal(f.records()[0].result_json, ''); assert.equal(f.closes(), 0);
+  f.allowClose(); await stopping; await f.advance(250); await until(() => f.records()[0].state === 'settled');
+  assert.equal(f.closes(), 1); assert.equal(f.records()[0].operation_id, 'original-operation');
+  assert.equal(f.records()[0].task_epoch, 7);
+  assert.equal(JSON.stringify(f.requests).includes(pending.nonce), false);
+  assert.equal(JSON.stringify(f.requests).includes(pending.approvalId), false);
+});
+
+test('10-second presence pulse remains independent while execute awaits, only with real foreground/media eligibility; no task renewal', async () => {
+  const f = await fixture(), pending = await f.start();
+  await f.runtime().decide(pending, true); await until(() => f.starts() === 1);
+  f.markActualFrameAndTicket(); f.setForeground(false); await settle();
+  const before = f.requests.filter(item => item.action === 'mesh_node_update' && item.arguments.online).length;
+  await f.advance(10000); await f.advance(10000);
+  assert.equal(f.records()[0].state, 'attempted');
+  assert.equal(f.requests.filter(item => item.action === 'mesh_node_update' && item.arguments.online).length > before, true);
+  assert.equal(f.original.deadline, 1090);
+  assert.equal(f.requests.some(item => /renew|lease/i.test(item.action)), false);
+  f.allowClose(); const stopping = f.runtime().stop(); await stopping; await f.advance(250);
+  await until(() => f.records()[0].state === 'result_pending');
+  assert.equal(f.records()[0].result_json.length > 0, true);
+  const stoppedAt = f.now(); await f.advance(10000);
+  assert.equal(f.requests.some(item => item.at > stoppedAt && item.arguments.online === true), false);
+  f.setForeground(true); await until(() => f.records()[0].state === 'settled');
+  assert.equal(f.starts(), 1, 'foreground metadata reunion must not restart capture');
+});
+
+test('foreground loss during admission revokes a spent local approval before any capture or start dispatch', async () => {
+  const f = await fixture(), pending = await f.start(); f.holdAccept();
+  await f.runtime().decide(pending, true); await until(() => f.acceptWaiting());
+  f.setForeground(false); f.releaseAccept(); await until(() => f.records()[0].state === 'unknown');
+  assert.equal(f.starts(), 0);
+  assert.equal(f.requests.some(item => item.arguments.provider?.action === 'start'), false);
+  assert.equal(JSON.parse(f.stores.get('amita_screen_share_runtime_v1').get('approvals'))[0].state, 'revoked');
+});
+
+test('cold attempted stream becomes unknown and the original record is never replayed', async () => {
+  const f = await fixture(), pending = await f.start();
+  await f.runtime().decide(pending, true); await until(() => f.starts() === 1);
+  const receipt = f.records()[0].receipt_id, invocation = f.records()[0].invocation_nonce;
+  await f.reload(); assert.equal(f.records()[0].state, 'unknown'); assert.equal(f.runtime().pending(), null);
+  await f.runtime().receive(); await settle();
+  assert.equal(f.starts(), 1); assert.equal(f.records()[0].receipt_id, receipt);
+  assert.equal(f.records()[0].invocation_nonce, invocation); assert.equal(f.records()[0].result_json, '');
+  assert.equal(f.requests.filter(item => item.arguments.provider?.action === 'start').length, 1);
+});
