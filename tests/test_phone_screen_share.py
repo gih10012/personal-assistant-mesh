@@ -229,6 +229,13 @@ class PhoneScreenShareTests(unittest.TestCase):
             self.assertEqual('running', self.f.bridge._allocation(db, 'next-operation')['state'])
 
     def test_feature_is_default_disabled_and_legacy_one_shot_workloads_never_authorize_streams(self):
+        declared = self.control.call('mesh_node_update', control_id='declared-screen-share-view',
+                                     capabilities=[self.control.gui], online=True)['session']
+        self.assertEqual('screen-share', declared['lifecycle'])
+        self.assertEqual({'enabled': True, 'screen_share_enabled': True,
+                          'capability_id': self.control.gui, 'epoch': 1,
+                          'execution_verification': 'declared_only'}, declared['installed_adapter'])
+        self.assertFalse(declared['execution_verified'])
         adapter = copy.deepcopy(self.control.node['installed_control_adapter'])
         adapter.pop('screen_share_enabled')
         absent = spec(adapter)

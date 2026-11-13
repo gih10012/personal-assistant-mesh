@@ -8,7 +8,7 @@ import test from 'node:test';
 registerHooks({ resolve(specifier, context, next) {
   return next(specifier === './Protocol' ? './Protocol.ts' : specifier, context);
 } });
-const { WorkEngine, coldResumeWork, freshWorkSnapshot, validateWorkConfig } =
+const { WorkEngine, coldResumeWork, freshWorkSnapshot, validateWorkConfig, validateWorkDispatch } =
   await import('../entry/src/main/ets/core/WorkProtocol.ts');
 const clone = value => structuredClone(value);
 const blob = value => ({ bytes: Buffer.byteLength(value),
@@ -118,6 +118,21 @@ test('dispatch binds the real authority provider principal before any journal or
   }
   assert.equal(f.invocations, 0);
   assert.equal(f.engine.snapshot.records.length, 0);
+});
+
+test('installed GUI capability epochs may advance while invalid and legacy adapter epochs remain fenced', () => {
+  const f = fixture(), capability = f.config.node_id + ':ui-control-v1';
+  const dispatch = { ...clone(f.pending), capability_id: capability,
+    selection: { capability_id: capability, epoch: 2, action: 'inspect',
+      scope: { task: f.pending.task_id }, workload: { input: blob(JSON.stringify({
+        format: 'amita-phone-screen-share/1', command: 'screen_share', duration_ms: 30000, max_fps: 1 })) } } };
+  assert.doesNotThrow(() => validateWorkDispatch(dispatch, f.config.node_id));
+  for (const invalid of [0, -1, 1.5, NaN, Infinity]) {
+    assert.throws(() => validateWorkDispatch({ ...dispatch,
+      selection: { ...dispatch.selection, epoch: invalid } }, f.config.node_id));
+  }
+  const bytes = clone(f.pending); bytes.selection.epoch = 2;
+  assert.throws(() => validateWorkDispatch(bytes, f.config.node_id), /adapter_contract_mismatch/);
 });
 
 test('a new local approval follows durable preparation and refreshes its grant before source admission', async () => {

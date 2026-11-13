@@ -338,6 +338,8 @@ export class ScreenShareRuntime implements WorkHost {
       if (!online && this.engine.snapshot.pending_control !== null && this.engine.snapshot.pending_control.online) {
         // Control presence is not a business effect. Abandon its stale ONLINE
         // intent instead of replaying it after the OS window has disappeared.
+        const oldControl = this.engine.snapshot.pending_control;
+        await this.persist('withdrawn_presence:' + oldControl.control_id, JSON.stringify(oldControl));
         this.engine.snapshot.pending_control = null; await this.save(this.engine.snapshot);
       }
       if (!this.connected && !online && !this.presenceAttempted) { return; }
@@ -462,6 +464,7 @@ export class ScreenShareRuntime implements WorkHost {
 
   async decide(value: ScreenSharePending, approve: boolean): Promise<void> {
     const approval = this.pendingApproval;
+    if (approval === null) { throw new Error('screen_share_pending_local_decision_mismatch'); }
     requireValue(!this.deciding && this.resolveApproval !== null && approval !== null && approval.state === 'pending' && this.foreground() &&
       this.sourceLive() && this.prepared(approval) && approval.expiresAt > Date.now() &&
       value.approvalId === approval.approvalId && value.nonce === approval.nonce && value.revision === approval.revision &&
@@ -630,7 +633,7 @@ export class ScreenShareRuntime implements WorkHost {
       const controlAction = action === 'mesh_connect' || action === 'mesh_node_update';
       const presence = args as ControlPresenceArguments;
       requireValue(!controlAction || presence.online !== true || this.eligible(), 'screen_share_ineligible_presence_not_renewed');
-      const config = this.engine.snapshot.config as WorkConfig; validateWorkConfig(config, this.nodeId);
+      const config = (this.engine as WorkEngine).snapshot.config as WorkConfig; validateWorkConfig(config, this.nodeId);
       const credential: NodeCredential | null = await this.credentials.load();
       requireValue(credential !== null && credential.nodeId === this.nodeId && credential.scope !== undefined &&
         credential.scope.includes('phone:node') && (credential.expiresAt === undefined || credential.expiresAt > this.now()),

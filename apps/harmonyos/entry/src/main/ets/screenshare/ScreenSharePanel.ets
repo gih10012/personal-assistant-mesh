@@ -67,7 +67,7 @@ export struct ScreenSharePanel {
     const pending = this.foreground ? runtime.pending() : null;
     this.pendingRequest = pending; this.pendingVisible = pending !== null;
     if (pending !== null) {
-      this.task = pending.taskId + ' · 任期 ' + String(pending.taskEpoch);
+      this.task = '协助任务 ' + pending.taskId.slice(0, 8);
       this.purpose = pending.purpose;
       this.duration = '请求共享 ' + String(Math.ceil(pending.durationMs / 1000)) + ' 秒，最多 ' + String(pending.maxFps) + ' 帧/秒';
       this.deadline = '本次决定剩余约 ' + String(Math.max(0, Math.ceil((pending.expiresAt - Date.now()) / 1000))) +

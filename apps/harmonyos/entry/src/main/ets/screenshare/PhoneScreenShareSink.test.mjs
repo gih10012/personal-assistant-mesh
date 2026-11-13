@@ -78,6 +78,7 @@ function fixture() {
 
 test('real verified frame ACK uses pinned Asset HTTPS route and keeps local approval/invocation data off wire', async () => {
   const f = fixture(); assert.equal(f.requests.length, 0); await f.sink.open();
+  assert.equal(f.sink.status().lastAcknowledgedSha256, '');
   assert.equal(f.sink.isLive(f.localScope), true);
   const original = frame(1), expected = Buffer.from(original.bytes);
   const pending = f.sink.sendFrame(f.localScope, original); original.bytes.fill(0);
@@ -89,6 +90,7 @@ test('real verified frame ACK uses pinned Asset HTTPS route and keeps local appr
   assert.equal(posted.options.maxRedirects, 0); assert.equal(posted.options.usingProtocol, 0);
   assert.equal(posted.options.usingCache, false); assert.equal(posted.options.maxLimit, 65536);
   assert.deepEqual(Buffer.from(posted.envelope.arguments.frame.base64, 'base64'), expected);
+  assert.equal(f.sink.status().lastAcknowledgedSha256, posted.envelope.arguments.frame.sha256);
   for (const request of f.requests) {
     assert.equal(request.options.extraData.includes('LOCAL_'), false);
     assert.equal(request.options.extraData.includes('approvalId'), false);

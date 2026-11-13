@@ -14,6 +14,7 @@ import { LocalRepairPolicy, noLocalRepairs } from '../selfmaintenance/LocalRepai
 import { UpdateDB } from '../update/UpdateDB';
 import { NativeUpgrade } from '../upgrade/NativeUpgrade';
 import { SelfHdcPanel } from '../selfhdc/SelfHdcPanel';
+import { ScreenSharePanel } from '../screenshare/ScreenSharePanel';
 
 // Local owner controls, separate from the real Accessibility service lifecycle.
 @Component
@@ -228,6 +229,8 @@ export struct PhoneFeatures {
   }
   build() {
     Column({ space: 12 }) {
+      ScreenSharePanel({ foreground: this.foreground })
+      Divider()
       SelfHdcPanel({ foreground: this.foreground })
       Divider()
       Text('系统辅助服务与审批').fontSize(18).fontWeight(FontWeight.Bold)

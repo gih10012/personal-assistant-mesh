@@ -12,6 +12,11 @@ let context: common.UIAbilityContext | null = null;
 let managedSink: PhoneScreenShareSink | null = null;
 let sourceClosing: Promise<void> | null = null;
 let sourceCloseUnknown: boolean = false;
+let lastAcknowledgedSha256: string = '';
+
+export interface ScreenShareOwnerStatus extends ScreenShareSessionStatus {
+  lastAcknowledgedSha256: string;
+}
 
 function closeManagedSource(sink: PhoneScreenShareSink): Promise<void> {
   if (sourceClosing !== null) { return sourceClosing; }
@@ -43,7 +48,14 @@ export class ScreenShareOwner {
   }
 
   static foregroundChanged(): void { session.foregroundChanged(); }
-  static status(): ScreenShareSessionStatus { return session.status(); }
+  static status(): ScreenShareOwnerStatus {
+    const value: ScreenShareSessionStatus = session.status();
+    return { state: value.state, captureActive: value.captureActive, backgroundActive: value.backgroundActive,
+      acknowledgedFrames: value.acknowledgedFrames, lastFrameRevision: value.lastFrameRevision,
+      lastCaptureTimestamp: value.lastCaptureTimestamp, lastAckObservedAt: value.lastAckObservedAt,
+      error: value.error, nativeCode: value.nativeCode, cleanupUnknown: value.cleanupUnknown,
+      lastAcknowledgedSha256: value.acknowledgedFrames > 0 ? lastAcknowledgedSha256 : '' };
+  }
   static sourceCloseUnconfirmed(): boolean { return sourceCloseUnknown; }
 
   // The original streaming executor supplies its durable WorkRecord. This
@@ -54,11 +66,15 @@ export class ScreenShareOwner {
       AppStorage.get<boolean>('meshForeground') !== true || !authorization.isForeground() ||
       !authorization.valid(scope)) { throw new Error('screen_share_original_owner_gesture_required'); }
     const sink: PhoneScreenShareSink = new PhoneScreenShareSink(primary, controlSessionId, record, scope, gate);
-    managedSink = sink; sourceCloseUnknown = false;
+    managedSink = sink; sourceCloseUnknown = false; lastAcknowledgedSha256 = '';
     const bound: ScreenShareFrameSink = {
       isLive: (value: ScreenShareScope): boolean => sink.isLive(value),
       onDisconnect: (listener: () => void): (() => void) => sink.onDisconnect(listener),
-      sendFrame: (value: ScreenShareScope, frame: ScreenShareFrame): Promise<ScreenShareFrameAck> => sink.sendFrame(value, frame),
+      sendFrame: async (value: ScreenShareScope, frame: ScreenShareFrame): Promise<ScreenShareFrameAck> => {
+        const ack: ScreenShareFrameAck = await sink.sendFrame(value, frame);
+        if (managedSink === sink) { lastAcknowledgedSha256 = sink.status().lastAcknowledgedSha256; }
+        return ack;
+      },
       detach: (value: ScreenShareScope): void => {
         sink.detach(value);
         closeManagedSource(sink).catch((): void => {});

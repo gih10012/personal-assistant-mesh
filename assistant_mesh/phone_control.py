@@ -108,7 +108,7 @@ class PhoneControl:
 
     def view(self, node, row):
         online = row['online'] and row['expires'] > self.store.clock()
-        return {'node_id': node['node_id'], 'session_id': node['session_id'],
+        view = {'node_id': node['node_id'], 'session_id': node['session_id'],
                 'lifecycle': 'accessibility-service', 'generation': row['generation'],
                 'network': {'state': 'online' if online else 'offline', 'expires_at': row['expires'],
                             'presence_ttl_seconds': self.service.sessions.ttl},
@@ -117,6 +117,14 @@ class PhoneControl:
                 'managed_capabilities': row['capabilities'] if online else [],
                 'capabilities': row['capabilities'], 'execution_verified': False,
                 'capability_verification': 'declared', 'native_tools_restricted': False}
+        adapter = node['installed_control_adapter']
+        if adapter.get('screen_share_enabled') is True:
+            view['lifecycle'] = 'screen-share'
+            view['installed_adapter'] = {
+                'enabled': adapter['enabled'], 'screen_share_enabled': True,
+                'capability_id': adapter['capability_id'], 'epoch': adapter['epoch'],
+                'execution_verification': 'declared_only'}
+        return view
 
     def control(self, node, action, payload):
         value = arguments(action, payload)

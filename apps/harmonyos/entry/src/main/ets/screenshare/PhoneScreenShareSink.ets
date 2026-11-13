@@ -33,6 +33,7 @@ export interface PhoneScreenShareGate {
 }
 export interface PhoneScreenShareSinkStatus {
   state: string; error: string; lastFrameRevision: number; expiresAt: number;
+  lastAcknowledgedSha256: string;
 }
 
 function requireSink(value: boolean, code: string): void { if (!value) { throw new Error(code); } }
@@ -354,6 +355,7 @@ export class PhoneScreenShareSink implements ScreenShareFrameSink {
 
   status(): PhoneScreenShareSinkStatus {
     return { state: this.state, error: this.error, lastFrameRevision: this.lastRevision,
+      lastAcknowledgedSha256: this.lastHash,
       expiresAt: this.binding === null ? 0 : this.binding.expires_at * 1000 };
   }
 }

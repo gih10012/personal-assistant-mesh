@@ -134,7 +134,7 @@ export function validateWorkDispatch(value: ProviderDispatch, nodeId: string, pe
   const suffix: string = control ? ':ui-control-v1' :
     selected.action === 'challenge.bytes.repeat' ? ':bytes-v1' : ':selected-file-v1';
   requireValue((selected.action === 'challenge.bytes.repeat' || selected.action === 'file.read.selected' || control) &&
-    value.capability_id === nodeId + suffix && selected.epoch === 1, 'mesh_work_adapter_contract_mismatch');
+    value.capability_id === nodeId + suffix && (control || selected.epoch === 1), 'mesh_work_adapter_contract_mismatch');
   requireValue(selected.scope !== null && selected.scope !== undefined && selected.workload !== null &&
     typeof selected.workload === 'object', 'mesh_work_scope_required');
   if (control) {
