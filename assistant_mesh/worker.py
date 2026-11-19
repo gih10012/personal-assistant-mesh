@@ -603,6 +603,7 @@ class Worker:
                           'cause': 'none', 'quota_status': 'not_checked'}
             diagnostics.append(diagnostic)
             stage = 'initialization'
+            preferred_model = None
             try:
                 config = dict(config)
                 if name == 'codex':
@@ -614,8 +615,12 @@ class Worker:
                         if config.get('native_daemon_role') not in (role, 'auto'):
                             raise CodexError('codex_managed_role_profile_required')
                         config['native_daemon_role'] = role
-                    if selected is not None:
-                        config.update(model=selected['model'], reasoning_effort=selected['reasoning_effort'])
+                    # OpenAI preference applies only to its authorized
+                    # subscription route. Preserve explicit free/local providers.
+                    if (selected is not None and config.get('model_provider', 'openai') == 'openai'
+                            and config.get('cost_policy', 'existing_subscription') == 'existing_subscription'):
+                        preferred_model = selected
+                        config.update(model=preferred_model['model'], reasoning_effort=preferred_model['reasoning_effort'])
                     context = self.current.get('context', {})
                     local_child = bool(self.current.get('parent_id'))
                     origin = context.get('origin')
@@ -658,12 +663,12 @@ class Worker:
                     diagnostic['quota_status'] = 'unknown'
                 else:
                     diagnostic['quota_status'] = 'not_applicable'
-                if selected is not None:
+                if preferred_model is not None:
                     from .task_model import admit_selection
                     stage = 'model_catalog'
-                    admit_selection(agent, selected, account)
-                    diagnostic.update(model=selected['model'], reasoning_effort=selected['reasoning_effort'],
-                                      task_class=selected['task_class'])
+                    admit_selection(agent, preferred_model, account)
+                    diagnostic.update(model=preferred_model['model'], reasoning_effort=preferred_model['reasoning_effort'],
+                                      task_class=preferred_model['task_class'])
                 diagnostic.update(state='selected', cause='none')
                 publish_diagnostics()
                 self.harness = name
