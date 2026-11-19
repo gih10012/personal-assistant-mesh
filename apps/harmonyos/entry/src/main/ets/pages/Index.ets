@@ -5,6 +5,9 @@ import { MaintenanceService } from '../update/MaintenanceService';
 import { OwnerSetup } from '../core/SetupProtocol';
 import { UpdateTrust, validateTrust } from '../update/Manifest';
 import { PhoneFeatures } from './PhoneFeatures';
+import { ChatHome } from './ChatHome';
+import { PhoneChatClient } from '../chat/PhoneChatClient';
+import { CHAT_MAX_FILES, ChatApproval, ChatAttachment, ChatView, initialChatView } from '../chat/ChatState';
 
 @Entry
 @Component
@@ -30,11 +33,20 @@ struct Index {
   @State importing: boolean = false;
   @State importedRelayReady: boolean = false;
   @State memberConfigured: boolean = false;
-  @State showAdvanced: boolean = false;
+  @State settingsLevel: number = 0;
+  @State chatView: ChatView = initialChatView();
+  @State chatDraft: string = '';
+  @State chatAttachments: ChatAttachment[] = [];
+  @State chatNotice: string = '';
+  @State chatReady: boolean = false;
+  @State chatPicking: boolean = false;
+  @State chatSaving: boolean = false;
+  @State chatDeciding: boolean = false;
   private importedRelayToken: string = '';
   private native: NativeServices | null = null;
   private work: WorkClient | null = null;
   private maintenance: MaintenanceService | null = null;
+  private chat: PhoneChatClient | null = null;
 
   aboutToAppear(): void { this.initialize(); }
   private async initialize(): Promise<void> {
@@ -48,6 +60,14 @@ struct Index {
       this.work = new WorkClient(context, this.native, (value: string): void => { this.showWorkStatus(value); });
       await this.work.initialize();
       this.work.setForeground(this.foreground);
+      try {
+        const work: WorkClient = this.work;
+        this.chat = new PhoneChatClient(context, this.nodeId, () => work.chatConfiguration(), (view: ChatView): void => {
+          this.chatView = view;
+        });
+        this.chatReady = true;
+        this.chat.setForeground(this.foreground);
+      } catch (_) { this.chatNotice = '聊天记录暂不可读'; }
       this.maintenance = new MaintenanceService(context);
       const maintenanceStatus = await this.maintenance.status();
       this.maintenanceEnabled = maintenanceStatus.enabled;
@@ -80,11 +100,18 @@ struct Index {
   aboutToDisappear(): void {
     this.clearImportedRelayToken();
     this.clearSetupText();
+    if (this.chat !== null) {
+      this.chat.setForeground(false);
+      for (const attachment of this.chatAttachments) {
+        try { this.chat.discard(attachment); } catch (_) {}
+      }
+    }
     if (this.work !== null) { this.work.close(); }
   }
   onVisibilityChanged(): void {
     if (this.native !== null) { this.native.setForeground(this.foreground); }
     if (this.work !== null) { this.work.setForeground(this.foreground); }
+    if (this.chat !== null) { this.chat.setForeground(this.foreground); }
     if (!this.foreground) {
       this.share = false; this.clearImportedRelayToken(); this.clearSetupText();
       this.status = '后台/熄屏暂停 Mesh 新调用；原请求与未知状态保留';
@@ -130,6 +157,7 @@ struct Index {
         }
         phase = '绑定已登记成员';
         await (this.work as WorkClient).bindBootstrap(value.work_bootstrap_json);
+        if (this.chat !== null) { this.chat.refresh(); }
         if (value.update_trust_json.length > 0) {
           phase = '保存维护信任配置';
           await (this.maintenance as MaintenanceService).configureTrusted(value.update_trust_json, this.nodeId);
@@ -178,6 +206,7 @@ struct Index {
   async bindWork(): Promise<void> {
     try {
       await (this.work as WorkClient).bindBootstrap(this.workBootstrap);
+      if (this.chat !== null) { this.chat.refresh(); }
       this.status = '持续出站连接已配置；原节点凭据存入Asset，前台按本人授权领取原分配';
     } catch (error) { this.status = '持续连接配置未确认；原身份、任务、unknown和结果均保留'; }
     finally { this.workBootstrap = ''; }
@@ -238,25 +267,99 @@ struct Index {
   dynamicState(): void {
     if (this.native !== null) { this.output = JSON.stringify(this.native.dynamicState()); }
   }
-  build() {
+  private sendChat(): void {
+    if (this.chat === null || this.chatPicking) { return; }
+    try {
+      this.chat.enqueue(this.chatDraft, this.chatAttachments);
+      this.chatDraft = '';
+      this.chatAttachments = [];
+      this.chatNotice = '';
+    } catch (_) { this.chatNotice = '消息尚未保存，请检查内容长度或本机空间'; }
+  }
+
+  private async pickChatAttachments(): Promise<void> {
+    if (this.chat === null || this.chatPicking) { return; }
+    this.chatPicking = true;
+    try {
+      const selected: ChatAttachment[] = await this.chat.pick(CHAT_MAX_FILES - this.chatAttachments.length);
+      this.chatAttachments = this.chatAttachments.concat(selected);
+      this.chatNotice = '';
+    } catch (_) { this.chatNotice = '无法读取所选附件，每个附件最多 32 MB'; }
+    finally { this.chatPicking = false; }
+  }
+
+  private discardChatAttachment(attachment: ChatAttachment): void {
+    if (this.chat === null) { return; }
+    try {
+      this.chat.discard(attachment);
+      this.chatAttachments = this.chatAttachments.filter((item: ChatAttachment): boolean =>
+        item.attachment_id !== attachment.attachment_id);
+    } catch (_) { this.chatNotice = '无法移除附件'; }
+  }
+
+  private async saveChatAttachment(attachment: ChatAttachment): Promise<void> {
+    if (this.chat === null || this.chatSaving) { return; }
+    this.chatSaving = true;
+    try {
+      const saved: boolean = await this.chat.exportAttachment(attachment);
+      this.chatNotice = saved ? '附件已保存' : '';
+    } catch (_) { this.chatNotice = '附件暂不可保存'; }
+    finally { this.chatSaving = false; }
+  }
+
+  private async decideChat(approval: ChatApproval, decision: string): Promise<void> {
+    if (this.chat === null || this.chatDeciding) { return; }
+    this.chatDeciding = true;
+    try {
+      await this.chat.decide(approval, decision);
+      this.chatNotice = decision === 'accept' ? '允许已记录' : '拒绝已记录';
+    } catch (_) { this.chatNotice = '决定尚未确认，请核对当前请求'; }
+    finally { this.chatDeciding = false; }
+  }
+
+  onBackPress(): boolean {
+    if (this.settingsLevel === 0) { return false; }
+    this.settingsLevel--;
+    return true;
+  }
+
+  @Builder
+  private settings() {
     Scroll() {
       Column({ space: 12 }) {
-        Text('AMITA · 鸿蒙原生节点').fontSize(25).fontWeight(FontWeight.Bold)
+        Row({ space: 12 }) {
+          Button('返回').height(40).fontColor('#185C4A').backgroundColor('#E5EEE7')
+            .onClick((): void => { this.settingsLevel--; })
+          Text(this.settingsLevel === 1 ? '设置' : this.settingsLevel === 2 ? '高级设置' : '接入诊断')
+            .fontSize(25).fontWeight(FontWeight.Bold).fontColor('#172923').layoutWeight(1)
+        }.width('100%')
+        if (this.settingsLevel === 1) {
+          Text(this.status).fontSize(14)
+          Text(this.workStatus).fontSize(13)
+          Button('导入设备配置').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.importSetup(); })
+          Button('高级设置').onClick((): void => { this.settingsLevel = 2; })
+        }
+        if (this.settingsLevel === 2) {
+          Text(this.workStatus).fontSize(13)
+          Row({ space: 12 }) {
+            Toggle({ type: ToggleType.Switch, isOn: this.share }).enabled(this.memberConfigured && !this.importing)
+              .onChange((value: boolean): void => { if (value !== this.share) { this.setSharing(value); } })
+            Text('在前台分享基础能力').fontSize(13)
+          }
+          PhoneFeatures({ memberReady: this.memberConfigured })
+          Button('接入诊断').onClick((): void => { this.settingsLevel = 3; })
+        }
+        if (this.settingsLevel === 3) {
         Text(this.nodeId).fontSize(12).copyOption(CopyOptions.LocalDevice)
         Text(this.status).fontSize(14)
-        Text(this.workStatus).fontSize(13)
-        PhoneFeatures({ memberReady: this.memberConfigured })
-        Row({ space: 12 }) {
-          Toggle({ type: ToggleType.Switch, isOn: this.share }).enabled(this.memberConfigured && !this.importing)
-            .onChange((value: boolean): void => { if (value !== this.share) { this.setSharing(value); } })
-          Text('本页打开时分享基础能力').fontSize(13)
+        Text('聊天模式 ' + this.chatView.mode + ' · 探测 ' + this.chatView.attempts +
+          ' · 同步位置 ' + this.chatView.cursor + ' · 待发送 ' + this.chatView.queued).fontSize(13)
+        if (this.chatView.problem !== '') { Text('最近同步未完成（' + this.chatView.problem + '）').fontSize(13) }
+        if (this.chatView.queueDetails !== '') {
+          Text(this.chatView.queueDetails).fontSize(12).copyOption(CopyOptions.LocalDevice)
         }
-        Text(this.workTasks).fontSize(12)
-        Button('导入设备配置').enabled(this.ready && this.foreground && !this.importing).onClick(() => { this.importSetup(); })
-        Text('读取应用私有暂存配置；没有暂存时使用系统选择器。导入不启用共享；实际连接与任务状态分别显示。').fontSize(12)
-        Button(this.showAdvanced ? '收起接入诊断' : '接入与诊断设置').onClick((): void => { this.showAdvanced = !this.showAdvanced; })
-        if (this.showAdvanced) {
-        Text('以下为接入与原回执诊断，不代表相应系统能力已经开通。').fontSize(12)
+        Button('重新连接聊天').enabled(this.chatReady && this.foreground)
+          .onClick((): void => { if (this.chat !== null) { this.chat.refresh(); } })
         TextArea({ text: this.enrollment, placeholder: '导入原 mesh-enrollment/1（使用上方节点 ID、interactive 模式）' })
           .height(140).onChange((value: string) => {
             if (value !== this.enrollment) { this.enrollment = value; this.setSharing(false); }
@@ -333,6 +436,26 @@ struct Index {
         TextArea({ text: this.output, placeholder: '私有完整结果；不要贴公共仓库/日志' }).height(220).enabled(false)
         }
       }.padding(20).width('100%')
-    }.height('100%').width('100%')
+    }.height('100%').width('100%').backgroundColor('#F4F7F3')
+  }
+
+
+  build() {
+    if (this.settingsLevel === 0) {
+      ChatHome({ view: this.chatView, foreground: this.foreground, ready: this.chatReady,
+        notice: this.chatNotice, picking: this.chatPicking, saving: this.chatSaving, deciding: this.chatDeciding,
+        attachments: this.chatAttachments, draft: this.chatDraft,
+        onDraft: (value: string): void => { this.chatDraft = value; },
+        onSettings: (): void => { this.settingsLevel = 1; },
+        onRetry: (): void => { if (this.chat !== null) { this.chat.refresh(); } },
+        onSend: (): void => { this.sendChat(); },
+        onPick: (): void => { this.pickChatAttachments(); },
+        onDiscard: (value: ChatAttachment): void => { this.discardChatAttachment(value); },
+        onExport: (value: ChatAttachment): void => { this.saveChatAttachment(value); },
+        onDecide: (value: ChatApproval, action: string): void => { this.decideChat(value, action); }
+      })
+    } else {
+      this.settings()
+    }
   }
 }

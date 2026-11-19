@@ -87,6 +87,9 @@ export class WorkClient implements WorkHost {
     requireValue(this.foreground && this.state.presence_expires_at > this.now(), 'mesh_work_presence_required');
     return this.native.executeWorkDispatch(dispatch);
   }
+  chatConfiguration(): WorkConfig | null {
+    return this.engine === null ? null : this.engine.snapshot.config;
+  }
   async exchange(action: string, args: Object): Promise<PhoneResponse> {
     const config: WorkConfig | null = (this.engine as WorkEngine).snapshot.config;
     requireValue(config !== null && deviceInfo.sdkApiVersion >= 23, 'mesh_work_secure_transport_required');
