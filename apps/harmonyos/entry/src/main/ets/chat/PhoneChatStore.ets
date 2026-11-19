@@ -86,9 +86,9 @@ export class PhoneChatStore {
         } finally { fileIo.closeSync(source); }
       }
       return added;
-    } catch (error) {
+    } catch (_) {
       for (const attachment of added) { this.remove(attachment.attachment_id); }
-      throw error;
+      throw new Error('chat_attachment_import_failed');
     }
   }
 

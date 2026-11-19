@@ -12,6 +12,19 @@ const PROBE_COUNT: number = 3;
 const PROBE_BUDGET_MS: number = 10000;
 const SHARED_RECHECK_MS: number = 10000;
 
+interface ChatRequest { session_id: string; }
+interface AttachmentRequest extends ChatRequest { attachment_id: string; offset: number; }
+interface DecisionRequest extends ChatRequest { interaction_id: string; decision: string; }
+interface EventsRequest extends ChatRequest { after: number; limit: number; }
+interface MessageRequest extends ChatRequest {
+  event_id: string;
+  created_at_ms: number;
+  text: string;
+  attachment_ids: string[];
+  branch_id?: string;
+}
+interface UploadRequest extends AttachmentRequest { name: string; mime: string; total: number; base64: string; }
+
 interface ChatAvailability { mode: string; available: boolean; }
 interface ChatMessageReceipt { event_id: string; task_id: string; mode: string; }
 interface ChatDecisionReceipt { interaction_id: string; decision: string; }
@@ -105,8 +118,8 @@ export class PhoneChatClient {
       const bytes: Uint8Array = new Uint8Array(attachment.bytes);
       let offset: number = 0;
       while (offset < bytes.length) {
-        const raw: string = await this.exchange('mesh_chat_attachment',
-          { session_id: this.sessionId(), attachment_id: attachment.attachment_id, offset: offset }, 8000, expected);
+        const payload: AttachmentRequest = { session_id: this.sessionId(), attachment_id: attachment.attachment_id, offset: offset };
+        const raw: string = await this.exchange('mesh_chat_attachment', payload, 8000, expected);
         const chunk: ChatDownloadChunk = JSON.parse(raw) as ChatDownloadChunk;
         const block: Uint8Array = this.base64.decodeSync(chunk.base64);
         if (chunk.attachment_id !== attachment.attachment_id || chunk.total !== bytes.length ||
@@ -126,8 +139,8 @@ export class PhoneChatClient {
         !this.journal.approvals.some((current: ChatApproval): boolean =>
           current.interaction_id === approval.interaction_id && current.task_id === approval.task_id &&
           current.prompt === approval.prompt)) { throw new Error('chat_original_approval_required'); }
-    const raw: string = await this.exchange('mesh_chat_approve',
-      { session_id: this.sessionId(), interaction_id: approval.interaction_id, decision: decision }, 8000, this.generation);
+    const payload: DecisionRequest = { session_id: this.sessionId(), interaction_id: approval.interaction_id, decision: decision };
+    const raw: string = await this.exchange('mesh_chat_approve', payload, 8000, this.generation);
     const receipt: ChatDecisionReceipt = JSON.parse(raw) as ChatDecisionReceipt;
     if (receipt.interaction_id !== approval.interaction_id || receipt.decision !== decision) {
       throw new Error('chat_decision_unconfirmed');
@@ -192,7 +205,8 @@ export class PhoneChatClient {
       this.attempts++;
       this.publish();
       try {
-        const raw: string = await this.exchange('mesh_chat_status', { session_id: this.sessionId() }, timeout, expected);
+        const payload: ChatRequest = { session_id: this.sessionId() };
+        const raw: string = await this.exchange('mesh_chat_status', payload, timeout, expected);
         const status: ChatAvailability = JSON.parse(raw) as ChatAvailability;
         this.reachable = true;
         if (status.available === true && status.mode === 'shared') {
@@ -215,8 +229,8 @@ export class PhoneChatClient {
   }
 
   private async syncEvents(expected: number): Promise<void> {
-    const raw: string = await this.exchange('mesh_chat_events',
-      { session_id: this.sessionId(), after: this.journal.cursor, limit: 32 }, 4000, expected);
+    const payload: EventsRequest = { session_id: this.sessionId(), after: this.journal.cursor, limit: 32 };
+    const raw: string = await this.exchange('mesh_chat_events', payload, 4000, expected);
     const page: ChatEvents = JSON.parse(raw) as ChatEvents;
     const next: ChatJournal = this.copyJournal();
     mergeChatEvents(next, page);
@@ -237,11 +251,9 @@ export class PhoneChatClient {
       event = original;
     }
     const attachmentIds: string[] = event.attachments.map((attachment: ChatAttachment): string => attachment.attachment_id);
-    const payload: Object = event.branch_id === '' || event.branch_id === undefined ?
-      { session_id: this.sessionId(), event_id: event.event_id, created_at_ms: event.created_at_ms,
-        text: event.text, attachment_ids: attachmentIds } :
-      { session_id: this.sessionId(), event_id: event.event_id, created_at_ms: event.created_at_ms,
-        text: event.text, attachment_ids: attachmentIds, branch_id: event.branch_id };
+    const payload: MessageRequest = { session_id: this.sessionId(), event_id: event.event_id,
+      created_at_ms: event.created_at_ms, text: event.text, attachment_ids: attachmentIds };
+    if (event.branch_id) { payload.branch_id = event.branch_id; }
     const raw: string = await this.exchange('mesh_chat_send', payload, 8000, expected);
     const receipt: ChatMessageReceipt = JSON.parse(raw) as ChatMessageReceipt;
     if (receipt.event_id !== event.event_id || typeof receipt.task_id !== 'string' || receipt.task_id.length === 0) {
@@ -260,10 +272,10 @@ export class PhoneChatClient {
     while (offset < attachment.bytes) {
       const size: number = Math.min(CHAT_CHUNK_BYTES, attachment.bytes - offset);
       const bytes: Uint8Array = this.store.readAttachment(attachment, offset, size);
-      const raw: string = await this.exchange('mesh_chat_upload',
-        { session_id: this.sessionId(), attachment_id: attachment.attachment_id, name: attachment.name,
-          mime: attachment.mime, offset: offset, total: attachment.bytes, base64: this.base64.encodeToStringSync(bytes) },
-        8000, expected);
+      const payload: UploadRequest = { session_id: this.sessionId(), attachment_id: attachment.attachment_id,
+        name: attachment.name, mime: attachment.mime, offset: offset, total: attachment.bytes,
+        base64: this.base64.encodeToStringSync(bytes) };
+      const raw: string = await this.exchange('mesh_chat_upload', payload, 8000, expected);
       const receipt: ChatUploadReceipt = JSON.parse(raw) as ChatUploadReceipt;
       if (receipt.attachment_id !== attachment.attachment_id || !Number.isSafeInteger(receipt.next_offset) ||
           receipt.next_offset < offset + size || receipt.next_offset > attachment.bytes ||
@@ -282,7 +294,7 @@ export class PhoneChatClient {
     if (expected !== this.generation || !this.foreground) { throw new Error('chat_foreground_required'); }
   }
 
-  private async exchange(action: string, argumentsValue: Object, timeout: number, expected: number): Promise<string> {
+  private async exchange(action: string, argumentsValue: ChatRequest, timeout: number, expected: number): Promise<string> {
     this.assertForeground(expected);
     const config: WorkConfig | null = this.config();
     if (config === null || config.session_id !== this.sessionId() || deviceInfo.sdkApiVersion < 23) {
