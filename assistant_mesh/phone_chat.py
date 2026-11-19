@@ -236,7 +236,9 @@ class PhoneChat:
         db.execute('INSERT INTO phone_chat_inputs VALUES(?,?,?,?,?)',
                    (identity,node['node_id'],branch,fingerprint,int(history)))
         if history:
-            kind, direction = ('message','inbound') if role == 'user' else ('reply','outbound')
+            # Historical imports must not replace the live reply/approval cursor.
+            metadata['original_role'] = role
+            kind, direction = 'history', 'internal'
             db.execute('''INSERT INTO entrance_events(event_id,conversation_id,direction,kind,source_ref,
                 fingerprint,metadata,text,attachments,received_at,reply_to,decision)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',(identity,self.policy['conversation_id'],direction,kind,identity,
@@ -379,7 +381,10 @@ class PhoneChat:
                         name=a.get('name') or a.get('file_name') or a.get('kind') or 'attachment'
                         mime=a.get('mime') or mimetypes.guess_type(name)[0] or {'image':'image/*','video':'video/*','voice':'audio/*'}.get(a.get('kind'),'application/octet-stream')
                         attachments.append({'attachment_id':a['attachment_id'],'name':name,'mime':mime,'bytes':a.get('bytes',a.get('size'))})
-                event = {'event_id':e['event_id'],'kind':e['kind'],'role':{'inbound':'user','outbound':'assistant','internal':'system'}[e['direction']],
+                role = {'inbound': 'user', 'outbound': 'assistant', 'internal': 'system'}[e['direction']]
+                if e['kind'] == 'history' and meta.get('history_only'):
+                    role = meta['original_role']
+                event = {'event_id':e['event_id'],'kind':e['kind'],'role':role,
                          'text':e['text'],'created_at_ms':millis,'task_id':e['task_id'],'reply_to':e['reply_to'],'attachments':attachments}
             else:
                 delta = row['kind']=='delta'
