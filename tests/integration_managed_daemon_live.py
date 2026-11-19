@@ -18,6 +18,10 @@ class ManagedDaemonLiveTests(unittest.TestCase):
     def test_disconnect_and_reconnect_keeps_the_server(self):
         with tempfile.TemporaryDirectory(prefix='amita-rpc-') as directory:
             root = Path(directory)
+            sockets = root / 'sockets'
+            state = root / 'persistent'
+            sockets.mkdir(mode=0o700)
+            state.mkdir(mode=0o700)
             profile = root / 'fixture'
             profile.mkdir(mode=0o700)
             auth = profile / 'auth.json'
@@ -27,7 +31,7 @@ class ManagedDaemonLiveTests(unittest.TestCase):
             config = {'codex': {'executable': shutil.which("codex"),
                      'auth_home': str(profile), 'strict_auth_home': True,
                      'native_transport': 'managed-unix', 'native_daemon_role':'entrance',
-                     'native_daemon_root': str(root)}}
+                     'native_daemon_root': str(sockets), 'native_daemon_state_root': str(state)}}
             path = root/'worker.json'
             path.write_text(json.dumps(config))
             path.chmod(0o600)
@@ -49,9 +53,11 @@ class ManagedDaemonLiveTests(unittest.TestCase):
                     self.assertTrue(stat.S_ISSOCK(socket_file.stat().st_mode))
                     with Codex(config['codex']) as first:
                         token = first.managed_instance
+                        first.managed.claim('fixture-thread')
                     self.assertIsNone(server.poll())
                     with Codex(config['codex']) as again:
                         self.assertEqual(token, again.managed_instance)
+                        again.managed.claim('fixture-thread')
                     self.assertIsNone(server.poll())
                 finally:
                     server.terminate()
@@ -60,3 +66,9 @@ class ManagedDaemonLiveTests(unittest.TestCase):
                     except subprocess.TimeoutExpired:
                         server.kill()
                         server.wait(timeout=5)
+            shutil.rmtree(sockets)
+            sockets.mkdir(mode=0o700)
+            other_role = dict(config['codex'], native_daemon_role='leader')
+            other = ManagedBinding(other_role, home, command)
+            with self.assertRaisesRegex(ValueError, 'original_binding_mismatch'):
+                other.claim('fixture-thread')

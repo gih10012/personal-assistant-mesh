@@ -53,14 +53,17 @@ class ManagedBinding:
     def __init__(self, config, home, command):
         role = config.get('native_daemon_role')
         root = config.get('native_daemon_root')
+        state_root = config.get('native_daemon_state_root', root)
         if (not isinstance(role, str) or not re.fullmatch('[a-z][a-z0-9_-]{0,63}', role)
                 or not isinstance(root, str) or not os.path.isabs(root)
+                or not isinstance(state_root, str) or not os.path.isabs(state_root)
                 or config.get('strict_auth_home') is not True
                 or config.get('model_provider', 'openai') != 'openai'
                 or config.get('cost_policy', 'existing_subscription') != 'existing_subscription'
                 or config.get('native_goal_drain') or config.get('native_goal_yield')):
             raise ValueError('codex_managed_role_profile_required')
         private_directory(root)
+        private_directory(state_root)
         home = os.path.realpath(home)
         auth = private_json(Path(home) / 'auth.json')
         principal = (auth.get('tokens') or {}).get('account_id')
@@ -71,7 +74,7 @@ class ManagedBinding:
         self.role = role
         self.binding = digest([role, home, principal])
         self.directory = os.path.join(root, self.binding[:32])
-        self.root = Path(root)
+        self.state_root = Path(state_root)
         self.path = Path(self.directory)
         self.owner_path = self.path / 'owner.json'
         self.lock_fd = self.thread = None
@@ -94,7 +97,7 @@ class ManagedBinding:
         private_directory(self.directory)
         # One writer to an original Codex home even if another role is
         # accidentally configured with the same profile.
-        fd = locked_file(self.root / ('profile-' + digest(self.profile)))
+        fd = locked_file(self.state_root / ('profile-' + digest(self.profile)))
         os.set_inheritable(fd, True)
         try:
             pid = os.getpid()
@@ -132,7 +135,7 @@ class ManagedBinding:
             raise ValueError('codex_managed_original_thread_mismatch')
         # Shared across role directories. The first admission binds a legacy
         # thread, subsequent workers require its original owner and exclusive lease.
-        fd = locked_file(self.root / ('thread-' + digest(thread)))
+        fd = locked_file(self.state_root / ('thread-' + digest(thread)))
         try:
             owner = os.read(fd, 128)
             if not owner:
@@ -189,7 +192,7 @@ def main():
                 if not args.thread:
                     parser.error('--thread is required')
                 # Do not acquire or create any ownership record during inspection.
-                if (agent.managed.root / ('thread-' + digest(args.thread))).read_bytes() != agent.managed.binding.encode():
+                if (agent.managed.state_root / ('thread-' + digest(args.thread))).read_bytes() != agent.managed.binding.encode():
                     raise ValueError('codex_managed_original_binding_mismatch')
                 thread = agent.rpc('thread/read', dict(threadId=args.thread, includeTurns=False))['thread']
                 if thread.get('id') != args.thread:
