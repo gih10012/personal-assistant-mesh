@@ -57,6 +57,8 @@ class PhoneChat:
                     fingerprint TEXT NOT NULL,history_only INTEGER NOT NULL)''',
                 '''CREATE TABLE IF NOT EXISTS phone_chat_context_delivery(
                     event_id TEXT NOT NULL,task_id TEXT NOT NULL,PRIMARY KEY(event_id,task_id))''',
+                '''CREATE TABLE IF NOT EXISTS claw_chat_branches(
+                    event_id TEXT PRIMARY KEY,scope TEXT NOT NULL)''',
                 '''CREATE TABLE IF NOT EXISTS phone_chat_media(
                     attachment_id TEXT PRIMARY KEY,node_id TEXT NOT NULL,name TEXT NOT NULL,
                     mime TEXT NOT NULL,total INTEGER NOT NULL,received INTEGER NOT NULL)''',
@@ -98,8 +100,11 @@ class PhoneChat:
         previous_record = store._entrance_record
 
         def record(db, event_id, kind, source_ref, text, metadata, *args, **kwargs):
+            existing = db.execute('SELECT 1 FROM entrance_events WHERE event_id=?', (event_id,)).fetchone()
             task_id = previous_record(db, event_id, kind, source_ref, text, metadata, *args, **kwargs)
-            if kind == 'message' and not metadata.get('branch_id'):
+            if existing is None and kind == 'message' and not metadata.get('branch_id'):
+                if metadata.get('channel') != 'phone' and self._select_claw_branch(db, event_id, task_id):
+                    return task_id
                 self._include_branch_history(db, task_id)
             return task_id
 
@@ -108,9 +113,14 @@ class PhoneChat:
         def entrance_task(db, task_id, node, epoch, require_entrance=True):
             # The membership row and task are committed together. No client can
             # select a native scope, a different task, epoch or worker here.
-            if require_entrance and db.execute("""SELECT 1 FROM phone_chat_inputs p JOIN entrance_events e
-                    ON e.event_id=p.event_id WHERE e.task_id=? AND p.history_only=0""", (task_id,)).fetchone():
-                require_entrance = False
+            if require_entrance:
+                bound = db.execute("""SELECT 1 FROM entrance_events e JOIN tasks t ON t.id=e.task_id
+                    WHERE e.task_id=? AND (EXISTS (
+                        SELECT 1 FROM phone_chat_inputs p WHERE p.event_id=e.event_id AND p.history_only=0)
+                      OR EXISTS (
+                        SELECT 1 FROM claw_chat_branches b WHERE b.event_id=e.event_id AND b.scope=t.scope))
+                    """, (task_id,)).fetchone()
+                require_entrance = bound is None
             return previous_task(db, task_id, node, epoch, require_entrance)
 
         def send_status(db, request_id):
@@ -170,9 +180,10 @@ class PhoneChat:
         if 'phone_branch_history' in context:
             return
         rows = db.execute("""SELECT e.* FROM entrance_events e
-            WHERE e.conversation_id=? AND EXISTS (
+            WHERE e.conversation_id=? AND (EXISTS (
               SELECT 1 FROM phone_chat_inputs p WHERE p.branch<>'' AND
               (p.event_id=e.event_id OR p.event_id=e.reply_to))
+              OR EXISTS (SELECT 1 FROM claw_chat_branches b WHERE b.event_id=e.event_id OR b.event_id=e.reply_to))
             AND NOT EXISTS (SELECT 1 FROM phone_chat_context_delivery d JOIN tasks t ON t.id=d.task_id
               WHERE d.event_id=e.event_id AND t.status='completed')
             ORDER BY e.rowid LIMIT 32""", (self.policy['conversation_id'],))
@@ -185,25 +196,46 @@ class PhoneChat:
                 'text':event['text'][:1200], 'full_text_in_history':len(event['text'])>1200})
         if history:
             context['phone_branch_history'] = [event['event_id'] for event in history]
-            reference = '\n手机独立会话历史（仅供理解当前消息，原操作保持原状态）：\n' + canonical(history)
+            reference = '\n独立入口会话历史（仅供理解当前消息，原操作保持原状态）：\n' + canonical(history)
             db.execute('UPDATE tasks SET input=input||?,context=? WHERE id=?',
                        (reference, canonical(context), task_id))
             db.executemany('INSERT INTO phone_chat_context_delivery VALUES(?,?)',
                            [(event['event_id'],task_id) for event in history])
 
+    @staticmethod
+    def _unresolved_session(db, scope):
+        rows = db.execute("""SELECT id,epoch,checkpoint FROM tasks t WHERE scope=? AND
+            status IN ('needs_review','failed','waiting_backend','waiting_auth') AND
+            NOT EXISTS (SELECT 1 FROM entrance_closed_failures f WHERE f.task_id=t.id AND f.epoch=t.epoch)
+            ORDER BY created,id""", (scope,))
+        for row in rows:
+            if json.loads(row['checkpoint']).get('side_effect_started') is True:
+                return [row['id'], row['epoch']]
+        return None
+
+    def _select_claw_branch(self, db, event_id, task_id):
+        # A persisted unresolved effect is definitive. Preserve every old
+        # task and put only the newly admitted message in the derived scope.
+        scope = self.policy['scope']
+        blocked = self._unresolved_session(db, scope)
+        if blocked is None:
+            return False
+        while blocked is not None:
+            scope = 'entrance:claw-branch:' + digest([scope, blocked])
+            blocked = self._unresolved_session(db, scope)
+        task = db.execute('SELECT context FROM tasks WHERE id=?', (task_id,)).fetchone()
+        context = json.loads(task['context'])
+        context['session_scope'] = scope
+        db.execute('UPDATE tasks SET context=?,scope=? WHERE id=?',
+                   (canonical(context), scope, task_id))
+        db.execute('INSERT INTO claw_chat_branches VALUES(?,?)', (event_id, scope))
+        return True
+
     def _mode(self, db):
         workers = db.execute('SELECT capabilities FROM nodes WHERE seen>?', (self.store.clock()-60,))
         if not any(self.policy['capability'] in json.loads(row[0]) for row in workers):
             return 'independent'
-        # An active turn is healthy and new turns queue in the original scope.
-        # An unresolved native start without a closed-turn receipt is different.
-        blocked = db.execute("""SELECT checkpoint FROM tasks t WHERE scope=? AND
-            status IN ('needs_review','failed','waiting_backend','waiting_auth') AND
-            NOT EXISTS (SELECT 1 FROM entrance_closed_failures f WHERE f.task_id=t.id AND f.epoch=t.epoch)""",
-            (self.policy['scope'],))
-        if any(json.loads(row[0]).get('side_effect_started') for row in blocked):
-            return 'independent'
-        return 'shared'
+        return 'independent' if self._unresolved_session(db, self.policy['scope']) else 'shared'
 
     def request(self, node, action, value):
         if not isinstance(value, dict) or value.get('session_id') != node['session_id']:

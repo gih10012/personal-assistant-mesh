@@ -1,4 +1,5 @@
 """Phone and Claw use the same existing entrance ledger across disconnects."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,3 +64,28 @@ class PhoneConversationTests(unittest.TestCase):
         self.store.update_task(shared['id'], 'entry', shared['epoch'], {}, 'blue', 'completed')
         self.call('send', event_id='later', created_at_ms=1700000000200, text='okay')
         self.assertNotIn('my label is blue', self.store.claim('entry')['input'])
+
+
+    def test_fresh_claw_message_can_reply_despite_an_unresolved_shared_turn(self):
+        original = dict(event_id='prior', created_at_ms=1700000000000, text='previous work')
+        self.call('send', **original)
+        blocked = self.store.claim('entry')
+        self.store.update_task(blocked['id'], 'entry', blocked['epoch'],
+                               {'side_effect_started': True}, 'unknown', 'needs_review')
+        message = {'message_id':'new-claw', 'create_time_ms':1700000001000,
+                   'from_user_id':'owner', 'to_user_id':'bot', 'message_type':1,
+                   'context_token':'fixture-only',
+                   'item_list':[{'type':1,'text_item':{'text':'new request'}}]}
+        self.store.ingest([message], 'new-batch', 'owner', 'bot')
+        task = self.store.claim('entry')
+        self.assertTrue(task['scope'].startswith('entrance:claw-branch:'))
+        self.assertIn('new request', task['input'])
+        self.assertEqual([self.scope['capability']], json.loads(task['required']))
+        event = task['context']['entrance']['event_id']
+        self.store.agent_action(task['id'], 'entry', task['epoch'], 'reply-claw', 'entrance_reply',
+                                {'text':'accepted', 'observed_latest_message_id':event})
+        with self.store.transaction() as db:
+            old = db.execute('SELECT status,checkpoint FROM tasks WHERE id=?', (blocked['id'],)).fetchone()
+            self.assertEqual('needs_review', old['status'])
+            self.assertTrue(json.loads(old['checkpoint'])['side_effect_started'])
+            self.assertEqual(1, db.execute("SELECT COUNT(*) FROM outbox WHERE body='accepted'").fetchone()[0])
