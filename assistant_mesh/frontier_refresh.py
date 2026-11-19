@@ -496,6 +496,7 @@ class FrontierRefresh:
                                          (source['id'], request_id))
                     previous_sha = next((item.get('sha256') for item in
                         (json.loads(row['value']) for row in history) if item.get('status') == 'observed'), None)
+                    history.close()  # A partially consumed cursor retains a SQLite read lock.
                 sampled = self.clock()
                 record.update(transport, status='observed', observed_at=sampled,
                               expires_at=sampled + self.config['interval_seconds'], bytes=len(data), sha256=sha,
