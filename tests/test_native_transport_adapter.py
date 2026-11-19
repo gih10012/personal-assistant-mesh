@@ -82,6 +82,16 @@ class NativeTransportAdapterTests(unittest.TestCase):
                     Codex({'native_transport': 'unix'})
             self.assertFalse(os.path.exists(target))
 
+    def test_managed_expired_login_is_reported_as_unauthenticated(self):
+        agent = self.runtime()
+        agent.managed = mock.Mock(principal='original')
+        agent.rpc = mock.Mock(return_value={'account': None, 'requiresOpenaiAuth': True})
+        self.assertFalse(agent.account()['authenticated'])
+        agent.rpc.return_value = {'account': {'type': 'chatgpt'},
+                                  'workspaceRouting': {'chatgptAccountId': 'different'}}
+        with self.assertRaisesRegex(CodexError, 'subscription_account_required'):
+            agent.account()
+
     def test_managed_worker_detach_leaves_the_independent_server_running(self):
         agent = self.runtime()
         agent.transport_name = 'managed-unix'

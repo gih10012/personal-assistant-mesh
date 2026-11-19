@@ -186,6 +186,8 @@ def main():
     else:
         with Codex(native) as agent:
             account = agent.account()
+            if not account.get('authenticated'):
+                raise ValueError('codex_auth_required')
             result = dict(instance=agent.managed_instance, role=agent.managed.role,
                           account_verified=account.get('type') == 'chatgpt')
             if args.action == 'inspect':

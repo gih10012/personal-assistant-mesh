@@ -504,7 +504,7 @@ class Codex:
                     'live_auth_verified': False}
         value = self.rpc('account/read', {'refreshToken': False})
         account = value.get('account') or {}
-        if getattr(self, 'managed', None):
+        if getattr(self, 'managed', None) and account:
             principal = (value.get('workspaceRouting') or {}).get('chatgptAccountId')
             if account.get('type') != 'chatgpt' or (principal is not None and principal != self.managed.principal):
                 raise CodexError('codex_managed_subscription_account_required')
