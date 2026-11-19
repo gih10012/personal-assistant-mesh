@@ -49,3 +49,17 @@ class PhoneConversationTests(unittest.TestCase):
         history = [e for e in self.call('events', after=0)['events'] if e['kind'] == 'history']
         self.assertEqual([('historical', 'user', 1699999999999)],
                          [(e['event_id'], e['role'], e['created_at_ms']) for e in history])
+
+    def test_shared_turn_receives_branch_history_without_reissuing_work(self):
+        original = dict(event_id='offline-note', created_at_ms=1700000000000, text='my label is blue')
+        self.call('send', branch_id='branch-1', **original)
+        branch = self.store.claim('entry')
+        self.assertNotEqual(self.scope['scope'], branch['scope'])
+        self.store.update_task(branch['id'], 'entry', branch['epoch'], {}, 'done', 'completed')
+        self.call('send', event_id='after-return', created_at_ms=1700000000100, text='which label?')
+        shared = self.store.claim('entry')
+        self.assertEqual(self.scope['scope'], shared['scope'])
+        self.assertIn('my label is blue', shared['input'])
+        self.store.update_task(shared['id'], 'entry', shared['epoch'], {}, 'blue', 'completed')
+        self.call('send', event_id='later', created_at_ms=1700000000200, text='okay')
+        self.assertNotIn('my label is blue', self.store.claim('entry')['input'])

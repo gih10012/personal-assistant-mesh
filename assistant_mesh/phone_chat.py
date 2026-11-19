@@ -55,6 +55,8 @@ class PhoneChat:
                 '''CREATE TABLE IF NOT EXISTS phone_chat_inputs(
                     event_id TEXT PRIMARY KEY,node_id TEXT NOT NULL,branch TEXT NOT NULL,
                     fingerprint TEXT NOT NULL,history_only INTEGER NOT NULL)''',
+                '''CREATE TABLE IF NOT EXISTS phone_chat_context_delivery(
+                    event_id TEXT NOT NULL,task_id TEXT NOT NULL,PRIMARY KEY(event_id,task_id))''',
                 '''CREATE TABLE IF NOT EXISTS phone_chat_media(
                     attachment_id TEXT PRIMARY KEY,node_id TEXT NOT NULL,name TEXT NOT NULL,
                     mime TEXT NOT NULL,total INTEGER NOT NULL,received INTEGER NOT NULL)''',
@@ -92,6 +94,16 @@ class PhoneChat:
         store = self.store
         previous_task, previous_action = store._entrance_task, store._entrance_action_in_db
         previous_status = store._entrance_send_status
+
+        previous_record = store._entrance_record
+
+        def record(db, event_id, kind, source_ref, text, metadata, *args, **kwargs):
+            task_id = previous_record(db, event_id, kind, source_ref, text, metadata, *args, **kwargs)
+            if kind == 'message' and not metadata.get('branch_id'):
+                self._include_branch_history(db, task_id)
+            return task_id
+
+        store._entrance_record = record
 
         def entrance_task(db, task_id, node, epoch, require_entrance=True):
             # The membership row and task are committed together. No client can
@@ -148,6 +160,36 @@ class PhoneChat:
                         'understanding_verified': False}
 
             media.materialize = materialize
+
+    def _include_branch_history(self, db, task_id):
+        """Supply branch messages as reference material to a shared entrance turn."""
+        task = db.execute('SELECT context,status FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if task is None or task['status'] != 'pending':
+            return
+        context = json.loads(task['context'])
+        if 'phone_branch_history' in context:
+            return
+        rows = db.execute("""SELECT e.* FROM entrance_events e
+            WHERE e.conversation_id=? AND EXISTS (
+              SELECT 1 FROM phone_chat_inputs p WHERE p.branch<>'' AND
+              (p.event_id=e.event_id OR p.event_id=e.reply_to))
+            AND NOT EXISTS (SELECT 1 FROM phone_chat_context_delivery d JOIN tasks t ON t.id=d.task_id
+              WHERE d.event_id=e.event_id AND t.status='completed')
+            ORDER BY e.rowid LIMIT 32""", (self.policy['conversation_id'],))
+        history = []
+        for event in rows:
+            metadata = json.loads(event['metadata'])
+            history.append({'event_id':event['event_id'], 'reply_to':event['reply_to'],
+                'role':metadata.get('original_role') or ('assistant' if event['direction']=='outbound' else 'user'),
+                'time':metadata.get('original_time') or metadata.get('created_at_ms'),
+                'text':event['text'][:1200], 'full_text_in_history':len(event['text'])>1200})
+        if history:
+            context['phone_branch_history'] = [event['event_id'] for event in history]
+            reference = '\n手机独立会话历史（仅供理解当前消息，原操作保持原状态）：\n' + canonical(history)
+            db.execute('UPDATE tasks SET input=input||?,context=? WHERE id=?',
+                       (reference, canonical(context), task_id))
+            db.executemany('INSERT INTO phone_chat_context_delivery VALUES(?,?)',
+                           [(event['event_id'],task_id) for event in history])
 
     def _mode(self, db):
         workers = db.execute('SELECT capabilities FROM nodes WHERE seen>?', (self.store.clock()-60,))

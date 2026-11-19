@@ -117,6 +117,9 @@ class PhoneAuthority:
             self.control.install(node)
         self.screen_share = PhoneScreenShare(self)
         self.chat = None
+        if any('phone:chat' in node['scope'] for node in self.installed['nodes']):
+            from .phone_chat import PhoneChat
+            self.chat = PhoneChat(self.store)
         previous_request = self.sessions.request
         def session_request(*args, **kwargs):
             with self.lock:
