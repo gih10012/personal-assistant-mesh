@@ -124,6 +124,7 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
     config = validate_config(document, allow_loopback_for_tests=allow_loopback_for_tests)
     policy = config['policy']
     try:
+        from authlib.integrations.base_client.errors import OAuthError
         from contextvars import ContextVar
         from importlib.metadata import version
         _require(version('fastmcp-slim') == FASTMCP_PIN, 'chat_oauth_component_pin_missing')
@@ -234,6 +235,10 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
             scope_token = self.requested_mesh_scopes.set(granted)
             try:
                 return await super().exchange_refresh_token(client, refresh_token, granted)
+            except OAuthError as error:
+                if error.error not in ('bad_refresh_token', 'invalid_grant'):
+                    raise
+                raise TokenError('invalid_grant', 'Reconnect the original account') from None
             finally:
                 self.requested_mesh_scopes.reset(scope_token)
 

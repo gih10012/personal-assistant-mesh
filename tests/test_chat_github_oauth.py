@@ -144,6 +144,7 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         self.identity_id = 12345
         self.identity_scope = ''
         self.idp_refresh = True
+        self.refresh_expired = False
         self.oauth_client_id = CLIENT
         self.redirect_uri = CALLBACK
         self.store = Store(self.directory / 'fresh.sqlite')
@@ -194,6 +195,9 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
             self.assertNotIn('repo', form.get('scope', [''])[0])
             self.assertNotIn('offline_access', form.get('scope', [''])[0])
             self.assertIn(form['grant_type'][0], ('authorization_code', 'refresh_token'))
+            if self.refresh_expired and form['grant_type'] == ['refresh_token']:
+                return httpx2.Response(200, json={'error': 'bad_refresh_token',
+                    'error_description': 'private upstream error'})
             value = {'access_token': UPSTREAM_TOKEN, 'token_type': 'Bearer', 'scope': ''}
             if self.idp_refresh:
                 value.update(expires_in=3600, refresh_token=UPSTREAM_REFRESH, refresh_expires_in=7200)
@@ -319,6 +323,16 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         raw = b'\n'.join(path.read_bytes() for path in Path(self.config['state']['directory']).rglob('*') if path.is_file())
         self.assertNotIn(UPSTREAM_TOKEN.encode(), raw)
         self.assertNotIn(UPSTREAM_REFRESH.encode(), raw)
+
+    @component_lifespan
+    async def test_expired_upstream_refresh_requests_reconnection(self):
+        tokens = await self.tokens('tasks:read')
+        self.refresh_expired = True
+        response = await self.http.post('/token', data={'grant_type': 'refresh_token', 'client_id': CLIENT,
+            'refresh_token': tokens['refresh_token'], 'scope': 'tasks:read', 'resource': ORIGIN + '/mcp'})
+        self.assertEqual(400, response.status_code)
+        self.assertEqual('invalid_grant', response.json()['error'])
+        self.assertNotIn('private upstream error', response.text)
 
     @component_lifespan
     async def test_refresh_uses_component_and_cannot_add_mesh_scopes_or_expose_upstream_tokens(self):
