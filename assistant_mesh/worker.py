@@ -579,12 +579,18 @@ class Worker:
             except (OSError, ValueError):
                 pass
 
+        from .task_model import preference, worker_role
+        entrance = hasattr(self, 'entrance_policy')
+        # Governed workers have already ranked all cost/capability-qualified
+        # candidates. Preserve the exact binding chosen by that path.
+        governed = getattr(self, '_governance_enabled', False)
+        selected = None if governed else preference(self.config, self.current, entrance)
         accounts = self.config.get('codex_accounts')
         if accounts is not None and (not isinstance(accounts, list) or not accounts or not all(isinstance(a, dict) for a in accounts)):
             raise ValueError('invalid_codex_account_pool')
         candidates = [(self.backend, dict(self.config['codex'], **dict(account, strict_auth_home=True)), 'codex')
                       for account in accounts] if accounts else [(self.backend, self.config['codex'], 'codex')]
-        if self.config.get('pi'):
+        if self.config.get('pi') and selected is None and self.config['codex'].get('native_transport') != 'managed-unix':
             from .pi import Pi
             config = dict(self.config['pi'])
             config['mesh_grant'] = {k: self.config[k] for k in ('control_url', 'token_file')}
@@ -600,6 +606,16 @@ class Worker:
             try:
                 config = dict(config)
                 if name == 'codex':
+                    if config.get('native_transport') == 'managed-unix':
+                        from .model_recovery import startable
+                        if not startable(self.current):
+                            raise CodexError('codex_managed_original_operation_unsettled')
+                        role = worker_role(self.current, entrance)
+                        if config.get('native_daemon_role') not in (role, 'auto'):
+                            raise CodexError('codex_managed_role_profile_required')
+                        config['native_daemon_role'] = role
+                    if selected is not None:
+                        config.update(model=selected['model'], reasoning_effort=selected['reasoning_effort'])
                     context = self.current.get('context', {})
                     local_child = bool(self.current.get('parent_id'))
                     origin = context.get('origin')
@@ -620,7 +636,8 @@ class Worker:
                 agent = implementation(config, tools=TOOLS, on_tool=self.on_tool, on_activity=self.on_activity,
                                        on_interaction=self.on_interaction)
                 stage = 'account_rpc'
-                if not agent.account()['authenticated']:
+                account = agent.account()
+                if not account['authenticated']:
                     diagnostic.update(state='authentication_required', cause='authentication')
                     raise CodexError(name + '_auth_required')
                 if name == 'codex' and callable(getattr(agent, 'rate_limits', None)):
@@ -641,6 +658,12 @@ class Worker:
                     diagnostic['quota_status'] = 'unknown'
                 else:
                     diagnostic['quota_status'] = 'not_applicable'
+                if selected is not None:
+                    from .task_model import admit_selection
+                    stage = 'model_catalog'
+                    admit_selection(agent, selected, account)
+                    diagnostic.update(model=selected['model'], reasoning_effort=selected['reasoning_effort'],
+                                      task_class=selected['task_class'])
                 diagnostic.update(state='selected', cause='none')
                 publish_diagnostics()
                 self.harness = name
@@ -1030,6 +1053,9 @@ class Worker:
                             resume.pop('native_rollout_path', None)
                         else:
                             resume['pi_session_file'] = imported
+                if (getattr(agent, 'managed', None) and not resume.get('thread_id')
+                        and (task['checkpoint'].get('thread_id') or (session or {}).get('state', {}).get('thread_id'))):
+                    raise CodexError('codex_managed_original_thread_required')
                 phase = 'coordination'
                 reference = {k: task.get(k) for k in ('context', 'memories', 'children')}
                 reference['resource_access'] = self.resource_reference()
@@ -1099,7 +1125,8 @@ class Worker:
                         lifecycle = agent.native_lifecycle
                         goal = lifecycle.get('goal')
                         if (lifecycle.get('settled') is not True
-                                or lifecycle.get('runtime_closed') is not True
+                                or not (lifecycle.get('runtime_closed') is True
+                                        or (getattr(agent, 'managed', None) and lifecycle.get('thread_unloaded') is True))
                                 or lifecycle.get('thread_id') != state.get('thread_id')
                                 or (goal is not None and (not isinstance(goal, dict)
                                     or goal.get('threadId') != state.get('thread_id')

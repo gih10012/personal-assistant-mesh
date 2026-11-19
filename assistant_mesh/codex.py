@@ -92,6 +92,63 @@ def working_instructions(existing):
     return existing + ('\n\n' if existing else '') + WORKING_CONTRACT
 
 
+def native_launch(config):
+    memories = config.get('native_memories', True)
+    if not isinstance(memories, bool):
+        raise ValueError('invalid_native_memories_flag')
+    native_plan = config.get('native_plan_tool', True)
+    if not isinstance(native_plan, bool):
+        raise ValueError('invalid_native_plan_tool_flag')
+    env = os.environ.copy()
+    provider = custom_provider(config, env)
+    if provider:
+        root = private_profile_home(config.get('auth_home'))
+        if provider['requires_openai_auth']:
+            # An explicit gateway never discovers a different account
+            # when its selected profile lacks authentication.
+            root = discover_codex_auth(root, strict=True)
+    else:
+        root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
+    if provider:
+        env.update(provider['environment'])
+        if not provider['requires_openai_auth']:
+            # Never borrow an unrelated key from the host process.
+            selected_names = set(provider['settings'].get('env_http_headers', {}).values())
+            selected_names.add(provider['settings'].get('env_key'))
+            for name in ('OPENAI_API_KEY', 'CODEX_API_KEY'):
+                if name not in selected_names:
+                    env.pop(name, None)
+    if config.get('network_env_file'):
+        values = private_json(config['network_env_file'])
+        allowed = {'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+                   'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'}
+        if not set(values) <= allowed or not all(isinstance(v, str) for v in values.values()):
+            raise ValueError('invalid_network_environment')
+        env.update(values)
+    # The configured executable wrapper consumes this task-specific override.
+    # Do not change this Codex session's CODEX_HOME or global shell environment.
+    env['CODEX_HOME_OVERRIDE'] = root
+    # Native binaries (cloud) do not read our wrapper-specific override.
+    # This is the actual Codex home for THIS child only, not a reassignment
+    # of this session's environment or a scratch use of a system variable.
+    env['CODEX_HOME'] = root
+    command = [config.get('executable', 'codex')]
+    command += (provider_overrides(provider) if provider
+                else ['-c', 'model_provider="openai"'])
+    enabled = 'true' if memories else 'false'
+    # Explicit false must override the profile's existing config too. The
+    # override applies only to this child; production defaults stay true.
+    command += ['-c', 'features.memories=' + enabled,
+                '-c', 'memories.generate_memories=' + enabled,
+                '-c', 'memories.use_memories=' + enabled]
+    # Codex 0.159.2/0.162 register update_plan only when this native config
+    # is enabled. Expose the genuine native checklist, not an application
+    # generated event. Owner opt-out overrides only this child too; no
+    # global profile edit, new goal, permission ceiling or model choice.
+    command += ['-c', 'tools.update_plan.enabled=' + ('true' if native_plan else 'false')]
+    return provider, root, env, command
+
+
 class Codex:
     def __init__(self, config, tools=None, on_tool=None, on_activity=None, on_interaction=None):
         self.config = config
@@ -100,12 +157,6 @@ class Codex:
         self.native_observations = {}
         self.native_lifecycle = {'controller_enabled': True, 'goal_managed': False, 'settled': False}
         self.on_interaction = on_interaction
-        memories = config.get('native_memories', True)
-        if not isinstance(memories, bool):
-            raise ValueError('invalid_native_memories_flag')
-        native_plan = config.get('native_plan_tool', True)
-        if not isinstance(native_plan, bool):
-            raise ValueError('invalid_native_plan_tool_flag')
         if not isinstance(config.get('native_goal_drain', False), bool):
             raise CodexError('invalid_native_goal_drain_flag')
         if not isinstance(config.get('native_goal_yield', False), bool):
@@ -120,10 +171,12 @@ class Codex:
         self._native_host_receipts = {}
         self._native_drain_idle = self._native_drain_eof = False
         self.transport_name = config.get('native_transport', 'stdio')
-        if self.transport_name not in ('stdio', 'unix'):
+        if self.transport_name not in ('stdio', 'unix', 'managed-unix'):
             raise CodexError('invalid_native_transport')
-        if self.transport_name == 'unix' and (not hasattr(socket, 'AF_UNIX') or not hasattr(os, 'geteuid')):
+        if self.transport_name != 'stdio' and (not hasattr(socket, 'AF_UNIX') or not hasattr(os, 'geteuid')):
             raise CodexError('codex_native_transport_unsupported')
+        self.managed = None
+        self.process = None
         self._native_socket = None
         self._socket_directory = None
         self._socket_directory_identity = None
@@ -131,55 +184,14 @@ class Codex:
         self._socket_binding = None
         self._socket_target = None
         self._native_cleanup_forced = self._reader_forced_close = self._term_sent = False
-        env = os.environ.copy()
-        self.provider = custom_provider(config, env)
-        if self.provider:
-            root = private_profile_home(config.get('auth_home'))
-            if self.provider['requires_openai_auth']:
-                # An explicit gateway never discovers a different account
-                # when its selected profile lacks authentication.
-                root = discover_codex_auth(root, strict=True)
-        else:
-            root = discover_codex_auth(config.get('auth_home'), config.get('strict_auth_home', False))
-        if self.provider:
-            env.update(self.provider['environment'])
-            if not self.provider['requires_openai_auth']:
-                # Never borrow an unrelated key from the host process.
-                selected_names = set(self.provider['settings'].get('env_http_headers', {}).values())
-                selected_names.add(self.provider['settings'].get('env_key'))
-                for name in ('OPENAI_API_KEY', 'CODEX_API_KEY'):
-                    if name not in selected_names:
-                        env.pop(name, None)
-        if config.get('network_env_file'):
-            values = private_json(config['network_env_file'])
-            allowed = {'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-                       'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'}
-            if not set(values) <= allowed or not all(isinstance(v, str) for v in values.values()):
-                raise ValueError('invalid_network_environment')
-            env.update(values)
-        # The configured executable wrapper consumes this task-specific override.
-        # Do not change this Codex session's CODEX_HOME or global shell environment.
-        env['CODEX_HOME_OVERRIDE'] = root
-        # Native binaries (cloud) do not read our wrapper-specific override.
-        # This is the actual Codex home for THIS child only, not a reassignment
-        # of this session's environment or a scratch use of a system variable.
-        env['CODEX_HOME'] = root
-        command = [config.get('executable', 'codex')]
-        command += (provider_overrides(self.provider) if self.provider
-                    else ['-c', 'model_provider="openai"'])
-        enabled = 'true' if memories else 'false'
-        # Explicit false must override the profile's existing config too. The
-        # override applies only to this child; production defaults stay true.
-        command += ['-c', 'features.memories=' + enabled,
-                    '-c', 'memories.generate_memories=' + enabled,
-                    '-c', 'memories.use_memories=' + enabled]
-        # Codex 0.159.2/0.162 register update_plan only when this native config
-        # is enabled. Expose the genuine native checklist, not an application
-        # generated event. Owner opt-out overrides only this child too; no
-        # global profile edit, new goal, permission ceiling or model choice.
-        command += ['-c', 'tools.update_plan.enabled=' + ('true' if native_plan else 'false')]
-        if self.transport_name == 'unix':
-            self._socket_directory = tempfile.mkdtemp(prefix='pa-mesh-codex-')
+        self.provider, root, env, command = native_launch(config)
+        if self.transport_name != 'stdio':
+            if self.transport_name == 'managed-unix':
+                from .managed_daemon import ManagedBinding
+                self.managed = ManagedBinding(config, root, command)
+                self._socket_directory = self.managed.directory
+            else:
+                self._socket_directory = tempfile.mkdtemp(prefix='pa-mesh-codex-')
             directory_entry = os.lstat(self._socket_directory)
             self._socket_directory_identity = (directory_entry.st_dev, directory_entry.st_ino,
                                                directory_entry.st_uid, directory_entry.st_mode)
@@ -193,12 +205,15 @@ class Codex:
         self.rpc_depth = 0
         self._rpc_pending, self._rpc_responses = set(), {}
         try:
-            pipe = subprocess.PIPE if self.transport_name == 'stdio' else subprocess.DEVNULL
-            self.process = subprocess.Popen(command, stdin=pipe, stdout=pipe,
-                                            stderr=subprocess.DEVNULL, env=env, universal_newlines=True,
-                                            start_new_session=True, bufsize=1)
-            if self.transport_name == 'unix':
-                self._connect_native_socket()
+            if self.managed is not None:
+                self._attach_native_socket()
+            else:
+                pipe = subprocess.PIPE if self.transport_name == 'stdio' else subprocess.DEVNULL
+                self.process = subprocess.Popen(command, stdin=pipe, stdout=pipe,
+                                                stderr=subprocess.DEVNULL, env=env, universal_newlines=True,
+                                                start_new_session=True, bufsize=1)
+                if self.transport_name == 'unix':
+                    self._connect_native_socket()
             self.reader = threading.Thread(target=self._read, daemon=True)
             self.reader.start()
             self.rpc('initialize', {'clientInfo': {'name': 'personal_assistant_mesh', 'version': '0.2.0'},
@@ -207,6 +222,15 @@ class Codex:
         except BaseException:
             self.close()
             raise
+
+    def _attach_native_socket(self):
+        owner = self.managed.owner()
+        target, binding = self._native_socket_binding()
+        self._native_socket = UnixWebSocket(target, expected_peer_pid=owner['pid'],
+                                           expected_peer_uid=os.geteuid())
+        if self.managed.owner() != owner or self._native_socket_binding() != (target, binding):
+            raise CodexError('codex_managed_binding_changed')
+        self.managed_instance = owner['instance']
 
     def _connect_native_socket(self):
         self._socket_owner_verified = False
@@ -296,7 +320,7 @@ class Codex:
 
     def _read(self):
         try:
-            if getattr(self, 'transport_name', 'stdio') == 'unix':
+            if getattr(self, 'transport_name', 'stdio') != 'stdio':
                 while True:
                     try:
                         self.events.put(self._native_socket.recv_json(timeout=.25))
@@ -319,7 +343,7 @@ class Codex:
     def send(self, value):
         if getattr(self, 'native_drain_active', False) is True and 'method' in value:
             raise CodexError('codex_native_drain_rpc_blocked')
-        if getattr(self, 'transport_name', 'stdio') == 'unix':
+        if getattr(self, 'transport_name', 'stdio') != 'stdio':
             try:
                 self._native_socket.send_json(value)
             except (NativeSocketError, socket.timeout, OSError):
@@ -337,6 +361,12 @@ class Codex:
             raise CodexError('codex_disconnected')
         if value.get('transport_error'):
             raise CodexError('codex_native_transport_read_failed')
+        # Shared app-server requests may target a different subscribed client.
+        # Only the connection leasing this thread may run a host callback.
+        if getattr(self, 'managed', None) and 'id' in value and 'method' in value:
+            thread = (value.get('params') or {}).get('threadId')
+            if not thread or thread != getattr(self, 'thread_id', None):
+                return {}
         self._record_native_drain_event(value)
         if 'id' in value and 'method' in value:
             if getattr(self, '_hold_host_requests', False):
@@ -474,6 +504,10 @@ class Codex:
                     'live_auth_verified': False}
         value = self.rpc('account/read', {'refreshToken': False})
         account = value.get('account') or {}
+        if getattr(self, 'managed', None):
+            principal = (value.get('workspaceRouting') or {}).get('chatgptAccountId')
+            if account.get('type') != 'chatgpt' or (principal is not None and principal != self.managed.principal):
+                raise CodexError('codex_managed_subscription_account_required')
         return {'authenticated': bool(account), 'type': account.get('type'), 'plan': account.get('planType')}
 
     def models(self):
@@ -537,6 +571,15 @@ class Codex:
             validate_provider_cost(self.config, provider['id'], self.config['model'])
         bound_provider = checkpoint.get('codex_provider_identity')
         actual_provider = provider['identity'] if provider else 'openai'
+        if getattr(self, 'managed', None):
+            self.managed.admit(checkpoint)
+            self.thread_id = checkpoint.get('thread_id')
+            if self.thread_id:
+                self.managed.claim(self.thread_id)
+                observed = self.rpc('thread/read', {'threadId': self.thread_id, 'includeTurns': False})['thread']
+                if (observed.get('id') != self.thread_id or
+                        (observed.get('status') or {}).get('type') not in ('idle', 'notLoaded')):
+                    raise CodexError('codex_managed_original_thread_busy')
         authorization = getattr(self, '_native_route_authorization', None)
         selection = (authorization.admit(checkpoint, actual_provider,
             self.config.get('model'), self.config.get('reasoning_effort'))
@@ -572,6 +615,8 @@ class Codex:
                                  'turn_ids': [], 'completed_turn_ids': [],
                                  'expected_goal_objective': (requested_goal or {}).get('objective'),
                                  'goal': None, 'thread_status': None}
+        if getattr(self, 'managed', None):
+            self.native_lifecycle['managed_daemon'] = self.managed.receipt(self.managed_instance)
         if selection is not None and selection['transition'] is not None:
             # Source remains the original binding. Persist the explicit intent
             # before resume, which itself may wake the SAME active native Goal.
@@ -598,6 +643,8 @@ class Codex:
             if not catalog:
                 raise CodexError('codex_model_unavailable')
             parameters['model'] = catalog[0]['id']
+        if selection is None and getattr(self, 'routing_selection', None):
+            selection = dict(self.routing_selection, transition=None)
         if selection is not None:
             parameters = prepare_thread(parameters, selection)
         method = 'thread/resume' if checkpoint.get('thread_id') else 'thread/start'
@@ -620,6 +667,8 @@ class Codex:
         self.thread_id = value['thread']['id']
         if checkpoint.get('thread_id') and self.thread_id != checkpoint['thread_id']:
             raise CodexError('codex_native_resume_identity_mismatch')
+        if getattr(self, 'managed', None):
+            self.managed.claim(self.thread_id)
         if selection is not None:
             self.native_lifecycle['model_route_selection'] = verify_thread_selection(value, selection)
             transition = self.native_lifecycle.get('model_route_transition')
@@ -1324,18 +1373,35 @@ class Codex:
                 or (lifecycle.get('native_input') or {}).get('status') in ('intent', 'unknown')):
             raise CodexError('codex_native_resume_input_unconfirmed')
         lifecycle['settled'] = False
+        if getattr(self, 'managed', None):
+            result = self.rpc('thread/unsubscribe', {'threadId': self.thread_id})
+            if result.get('status') != 'unsubscribed':
+                raise CodexError('codex_managed_thread_seal_unknown')
+            # Unsubscribe can queue shutdown. Require native unload of THIS
+            # thread; client EOF or a different thread's status is insufficient.
+            deadline = time.monotonic() + 5
+            while True:
+                thread = self.rpc('thread/read', {'threadId': self.thread_id, 'includeTurns': False})['thread']
+                if thread.get('id') == self.thread_id and thread.get('status') == {'type': 'notLoaded'}:
+                    break
+                if time.monotonic() >= deadline:
+                    raise CodexError('codex_managed_thread_seal_unknown')
+                time.sleep(.05)
+            if self.goal() != lifecycle.get('goal'):
+                raise CodexError('codex_managed_thread_seal_unknown')
+            lifecycle['thread_unloaded'] = True
         self.close()
         reader = getattr(self, 'reader', None)
         if reader is not None:
             reader.join(timeout=5)
             if reader.is_alive():
                 raise CodexError('codex_native_reader_unsettled')
-        if self.process.poll() is None:
+        if not getattr(self, 'managed', None) and self.process.poll() is None:
             raise CodexError('codex_native_runtime_not_reaped')
         if getattr(self, 'transport_name', 'stdio') == 'unix' and (
                 self.process.poll() != 0 or self._native_cleanup_forced or self._reader_forced_close):
             raise CodexError('codex_native_runtime_exit_unknown')
-        lifecycle['runtime_closed'] = True
+        lifecycle['runtime_closed'] = not bool(getattr(self, 'managed', None))
         pending = list(self.deferred)
         self.deferred[:] = []
         while True:
@@ -1369,7 +1435,8 @@ class Codex:
                 lifecycle['goal'] = None
             elif method == 'thread/status/changed':
                 status = params.get('status')
-                if not isinstance(status, dict) or status.get('type') != 'idle':
+                if not isinstance(status, dict) or status.get('type') not in (
+                        ('idle', 'notLoaded') if lifecycle.get('thread_unloaded') else ('idle',)):
                     raise CodexError('codex_native_late_status')
         lifecycle['settled'] = True
         return copy.deepcopy(lifecycle)
@@ -1382,6 +1449,15 @@ class Codex:
                 pass
 
     def close(self):
+        if getattr(self, 'transport_name', 'stdio') == 'managed-unix':
+            if self._native_socket is not None:
+                self._native_socket.close()
+            reader = getattr(self, 'reader', None)
+            if reader:
+                reader.join(timeout=2)
+            if self.managed:
+                self.managed.release()
+            return
         if getattr(self, 'transport_name', 'stdio') == 'unix':
             process = getattr(self, 'process', None)
             if process is not None and process.poll() is None:

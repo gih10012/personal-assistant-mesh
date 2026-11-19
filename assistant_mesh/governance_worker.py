@@ -144,13 +144,21 @@ def make_worker(worker_class, codex_class, governance, scopes=(), profile_loader
             # EntranceWorker decorators still own closed-failure/full-history.
             super(GovernedWorker, self).__init__(config, backend=QuotaObservedCodex, **options)
 
+        def _role_profile(self, task):
+            from .task_model import preference
+            if self.config['codex'].get('task_model_routing') is True and not (task.get('context') or {}).get('governance', {}).get('route_id'):
+                from .model_recovery import startable
+                if startable(task):
+                    return preference(self.config, task, hasattr(self, 'entrance_policy'))
+            return profile_loader(None) if profile_loader is not None else None
+
         def model_recovery_state(self, task=None):
             """Supervisor-facing local read; never starts account/model RPCs."""
             task = self.current if task is None else task
             if task is None or task.get('scope') not in scopes:
                 return dict(status='not_governed', next_recheck_at=None,
                             network_ready_independent=True, automatic_task_replay=False)
-            role = profile_loader(None) if profile_loader is not None else None
+            role = self._role_profile(task)
             return governance.recovery_plan(task, self.config, role)
 
         def _publish_model_decision(self, value):
@@ -167,7 +175,7 @@ def make_worker(worker_class, codex_class, governance, scopes=(), profile_loader
             if not self._governance_enabled:
                 self._governance_binding = self._governance_attempt = None
                 return super(GovernedWorker, self).open_backend()
-            role = profile_loader(None) if profile_loader is not None else None
+            role = self._role_profile(task)
             plan = governance.recovery_plan(task, self.config, role, _bindings=True)
             bindings = plan.pop('_bindings', [])
             if plan['status'] != 'ready':
