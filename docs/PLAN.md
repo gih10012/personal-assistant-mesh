@@ -1,5 +1,7 @@
 # AMITA 当前实施计划
 
+2026-11-19 approved delivery: native ArkUI assistant home, real attachments, progress and approvals. Put device settings on level two and diagnostics on level three. Share the owner assistant context across custom entrances including Claw. After three connection/status attempts within ten seconds use a separate branch, then merge unsynchronized messages by original ID on re-entry. Preserve source times and uncertain external effects. External Chat keeps independent context with shared authorized memory/tasks/skills. Queue offline messages for later delivery. Roll VPS Leader and Claw from 0.159.2 to 0.170.0 with durable background transport. Ship AA task-based routing and record effective model/effort. Concentrate same-signature phone upgrade, real task round trip and screen-sharing acceptance in one owner window. Continue HA afterward. v0.3 was installed; v0.4 signed and receiver deployed, phone verification pending.
+
 11月11日真机结果：0.3 已合法覆盖安装并保持原成员身份与前台联网；本人在
 系统信任界面授权后，手机内回环 HDC 已真实完成握手及 Shell 身份读取。
 截图、输入、拔线独立执行及后台常驻尚未验收。手机维护角色亦已在原电脑

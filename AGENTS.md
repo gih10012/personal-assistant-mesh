@@ -1,5 +1,7 @@
 # AMITA working contract
 
+Current owner decision, 2026-11-19. Follow docs/PLAN.md for the phone entrance release. Explicitly select BOTH model and reasoning effort by task difficulty when creating development subagents. Use GPT-6.2 Sol/high for bounded implementation, GPT-6.1 Sol/max for deep repository investigation and GPT-6.2 Astra/xhigh for difficult distributed ownership and recovery. These preferences supersede the October fixed development-team profile. If Root needs the owner to change Root's own model or effort, contact the owner through ClawBot.
+
 Current owner-approved contract: 2026-11-11 phone-control research correction,
 on top of the 2026-11-08 phone autonomy additions and
 the 2026-10-27 phone-first implementation. Read
