@@ -1,5 +1,8 @@
 # AMITA 当前实施计划
 
+2026-11-20 进度：手机 0.5.0（1000004）通过实际商业 SDK 构建并用原证书签名。原会话账本上的共享入口与历史合并已部署。待真机完成覆盖安装、入网身份保留、共享上下文、排队重连、屏幕共享和合法无线更新验收。VPS Leader 已滚动切换到 Codex 0.170.0，Claw 新启动使用同版本。后台传输与按任务分档已合入源码，仍需用原生进程验收后逐角色切换。Chat 发现失败追到 GitHub 授权过期，服务端已返回规范的重新授权错误，待原账号重连验证。此进度不替代原 43 项计划。
+
+
 2026-11-19 approved delivery: native ArkUI assistant home, real attachments, progress and approvals. Put device settings on level two and diagnostics on level three. Share the owner assistant context across custom entrances including Claw. After three connection/status attempts within ten seconds use a separate branch, then merge unsynchronized messages by original ID on re-entry. Preserve source times and uncertain external effects. External Chat keeps independent context with shared authorized memory/tasks/skills. Queue offline messages for later delivery. Roll VPS Leader and Claw from 0.159.2 to 0.170.0 with durable background transport. Ship AA task-based routing and record effective model/effort. Concentrate same-signature phone upgrade, real task round trip and screen-sharing acceptance in one owner window. Continue HA afterward. v0.3 was installed; v0.4 signed and receiver deployed, phone verification pending.
 
 11月11日真机结果：0.3 已合法覆盖安装并保持原成员身份与前台联网；本人在

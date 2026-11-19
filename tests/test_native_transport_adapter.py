@@ -82,6 +82,17 @@ class NativeTransportAdapterTests(unittest.TestCase):
                     Codex({'native_transport': 'unix'})
             self.assertFalse(os.path.exists(target))
 
+    def test_managed_worker_detach_leaves_the_independent_server_running(self):
+        agent = self.runtime()
+        agent.transport_name = 'managed-unix'
+        agent.managed = mock.Mock()
+        with mock.patch('assistant_mesh.codex.os.kill') as kill:
+            agent.close()
+        agent._native_socket.close.assert_called_once()
+        agent.managed.release.assert_called_once()
+        agent.process.terminate.assert_not_called()
+        kill.assert_not_called()
+
     def test_reader_timeout_preserves_subsequent_message_and_emits_eof(self):
         agent = self.runtime()
         value = {'method': 'turn/started', 'params': {'fixture': True}}
