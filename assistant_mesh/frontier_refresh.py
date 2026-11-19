@@ -27,7 +27,7 @@ from .provider_runtime import _fingerprint, _owner_bytes, _unique_object
 
 
 DAY = 86400
-MAX_SOURCE_BYTES = 4 * 1024 * 1024
+MAX_SOURCE_BYTES = 8 * 1024 * 1024
 CATEGORIES = frozenset(('models', 'harness', 'skills', 'protocol'))
 SAFETY = dict(model_calls=0, new_spend_authorized=False, native_features_restricted=False,
               live_dispatch_authorized=False, operation_replayed=False,
