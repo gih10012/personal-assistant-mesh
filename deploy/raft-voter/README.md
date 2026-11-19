@@ -129,7 +129,10 @@ commit to its existing term, data copies, original operations and effect fences.
 `cloudflare-worker.mjs` imports the static compiled WASM module; only its DO
 constructor calls generated `initSync`. It uses SQLite `transactionSync` and
 `storage.sync()`, one serialized driver, and system alarms rather than an interval
-or a resident-WebSocket trick. Outgoing packets flush outside the mutation queue;
+or a resident-WebSocket trick. The public Worker authenticates signed peer packets
+and checks the operator bearer before forwarding to the DO. Bodies are read
+once with a fixed size limit, and invalid traffic never initializes the voter.
+Worker ingress quota is still consumed by rejected external requests. Outgoing packets flush outside the mutation queue;
 only one bounded packet per peer is sent per invocation. Alarm retries cannot
 accelerate persisted tick time. Reconstructed RawNode legitimately returns as a
 follower; in-memory candidacy/leadership is not claimed to survive DO eviction.

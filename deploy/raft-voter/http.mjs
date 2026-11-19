@@ -1,4 +1,5 @@
 import { exact, need } from './codec.mjs';
+import { verify } from './protocol.mjs';
 
 export async function boundedJSON(request) {
   need(request.method === 'POST' && request.headers.get('content-type')?.split(';')[0] === 'application/json', 'json_post_required');
@@ -19,6 +20,26 @@ function authorized(header, expected) {
   const wanted = `Bearer ${expected}`; let difference = header.length ^ wanted.length;
   for (let i = 0; i < wanted.length; i++) difference |= (header.charCodeAt(i) || 0) ^ wanted.charCodeAt(i);
   return difference === 0;
+}
+
+// Verify at the public ingress, before charging the separate DO quota for
+// a request. Forward the parsed bounded body without teeing the input stream.
+export async function authenticatedForward(config, request) {
+  const path = new URL(request.url).pathname;
+  const authorization = request.headers.get('authorization');
+  need(path === '/raft/peer' ||
+    (path === '/raft/manage' && authorized(authorization, config.operator_key)),
+    'voter_ingress_not_authorized');
+  const value = await boundedJSON(request);
+  if (path === '/raft/peer') {
+    await verify(config, value);
+  } else {
+    need(value?.group === config.group && value?.scope === config.scope &&
+      value?.member === config.member, 'management_group_binding');
+  }
+  const headers = { 'content-type': 'application/json' };
+  if (path === '/raft/manage') headers.authorization = authorization;
+  return new Request(request.url, { method: 'POST', headers, body: JSON.stringify(value) });
 }
 export async function handle(driver, request) {
   const path = new URL(request.url).pathname, value = await boundedJSON(request);

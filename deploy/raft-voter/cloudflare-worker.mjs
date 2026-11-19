@@ -4,7 +4,7 @@ import compiled from './artifact/wasm/amita_raft_portability_bg.wasm';
 import { initSync, Voter } from './artifact/wasm/amita_raft_portability.js';
 import { need } from './codec.mjs';
 import { VoterDriver, flusher } from './driver.mjs';
-import { boundedJSON, handle, transport } from './http.mjs';
+import { authenticatedForward, handle, transport } from './http.mjs';
 import { validateConfig } from './protocol.mjs';
 
 function configuration(env) {
@@ -76,15 +76,15 @@ export class RaftVoter {
 export default {
   async fetch(request, env) {
     try {
-      const config = configuration(env), path = new URL(request.url).pathname;
-      need(path === '/raft/peer' || path === '/raft/manage', 'route');
-      const value = await boundedJSON(request.clone());
-      need(value.group === config.group && value.scope === config.scope &&
-        (path === '/raft/peer' ? value.to : value.member) === config.member, 'configured_group_only');
+      const config = configuration(env);
+      const forwarded = await authenticatedForward(config, request);
       // Exactly one configured original voter; request data cannot select a new
       // class, arbitrary group/member, free namespace or management credential.
       const id = env.RAFT_VOTER.idFromName(`${config.group}/${config.scope}/${config.member}`);
-      return env.RAFT_VOTER.get(id).fetch(request);
-    } catch (error) { return Response.json({ ok: false, error: String(error) }, { status: 409 }); }
+      return env.RAFT_VOTER.get(id).fetch(forwarded);
+    } catch (_) {
+      return Response.json({ ok: false, error: 'voter_ingress_rejected' },
+        { status: 403, headers: { 'cache-control': 'no-store' } });
+    }
   }
 };

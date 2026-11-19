@@ -9,12 +9,14 @@ import { fileURLToPath } from 'node:url';
 import { FileStore, sqliteStore } from './storage-node.mjs';
 import { loadNodeVoter, pins } from './loader-node.mjs';
 import { VoterDriver, flusher } from './driver.mjs';
+import { authenticatedForward, boundedJSON } from './http.mjs';
 
 process.umask(0o077);
 const artifact = process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), 'artifact');
 const Voter = await loadNodeVoter(artifact), directory = mkdtempSync(join(tmpdir(), 'amita-three-voter-'));
 let now = 1800000000000, connected = new Set([1, 2, 3]);
 const drivers = new Map(), flushers = new Map();
+let ingressExercised = false;
 // Explicit synthetic test fixtures, never runtime defaults or production keys.
 const pairKey = (from, to) => [Math.min(from, to), Math.max(from, to)].join('').padEnd(64, 'a');
 const config = id => ({ group: 'synthetic-host-smoke', scope: 'digest-only-smoke', member: id,
@@ -27,6 +29,23 @@ async function open(id) {
   await driver.start(); drivers.set(id, driver);
   flushers.set(id, flusher(driver, async row => {
     if (!connected.has(id) || !connected.has(row.to)) throw new Error('simulated partition');
+    if (!ingressExercised) {
+      const peerConfig = config(row.to);
+      const peerRequest = value => new Request('https://voter.invalid/raft/peer', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value)
+      });
+      await assert.rejects(authenticatedForward(peerConfig, peerRequest({ ...row, mac: 'AAAA' })),
+        /peer_authentication/);
+      const forwarded = await authenticatedForward(peerConfig, peerRequest(row));
+      assert.deepEqual(await boundedJSON(forwarded), row);
+      const management = new Request('https://voter.invalid/raft/manage', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ group: peerConfig.group, scope: peerConfig.scope, member: row.to, action: 'enable' })
+      });
+      await assert.rejects(authenticatedForward(peerConfig, management), /voter_ingress_not_authorized/);
+      assert.equal(management.bodyUsed, false);
+      ingressExercised = true;
+    }
     return drivers.get(row.to).receive(row);
   }));
 }
@@ -54,6 +73,7 @@ const proposal = (operation_id, digit) => ({ format: 'amita-quorum-digest/1', op
 try {
   for (const id of [1, 2, 3]) await open(id);
   const firstLeader = await elect([1, 2, 3]);
+  assert.equal(ingressExercised, true);
   await drivers.get(firstLeader).propose(proposal('original-majority-1', '1')); await pump();
   for (const driver of drivers.values()) assert.equal(driver.status().receipts['original-majority-1']?.digest, '1'.repeat(64));
 
