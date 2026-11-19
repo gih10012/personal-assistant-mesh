@@ -290,6 +290,18 @@ def run_entrance_worker(config, config_path=None):
     return EntranceWorker(config, config_path=config_path).run()
 
 
+def run_managed_entrance_worker(config, config_path=None):
+    """Explicit modern entry point with its own native transport contract."""
+    codex = config.get('codex', {})
+    if (codex.get('native_transport') != 'managed-unix'
+            or codex.get('native_daemon_role') != 'entrance'
+            or not codex.get('native_daemon_state_root')
+            or config.get('codex_accounts')
+            or config.get('pi')):
+        raise ValueError('entrance_managed_original_profile_required')
+    return EntranceWorker(config, config_path=config_path).run()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Opt-in continuous native Claw entrance; no installer')
     parser.add_argument('--config', required=True)
@@ -297,6 +309,7 @@ def main(argv=None):
     serve = sub.add_parser('serve')
     serve.add_argument('--socket', required=True)
     sub.add_parser('worker')
+    sub.add_parser('worker-managed')
     action = sub.add_parser('action')
     action.add_argument('--task-id', required=True)
     action.add_argument('--epoch', type=int, required=True)
@@ -313,6 +326,8 @@ def main(argv=None):
             serve_entrance(config, args.socket)
         elif args.command == 'worker':
             run_entrance_worker(config, config_path=args.config)
+        elif args.command == 'worker-managed':
+            run_managed_entrance_worker(config, config_path=args.config)
         else:
             output = Client(config).request('/v1/agent/action', {
                 'task_id': args.task_id, 'epoch': args.epoch, 'call_id': args.call_id,
