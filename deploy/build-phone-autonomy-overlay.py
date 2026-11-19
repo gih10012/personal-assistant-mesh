@@ -16,7 +16,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('phone_authority', 'phone_owner', 'phone_control', 'phone_maintenance',
-           'phone_screen_share', 'phone_screen_share_reader', 'phone_http')
+           'phone_screen_share', 'phone_screen_share_reader', 'phone_chat', 'phone_http')
 PARENT_MANIFEST = 'native-partial-overlay.json'
 PROTECTED = ('store', 'server', 'worker', 'entrance', 'native_history', 'sessions')
 

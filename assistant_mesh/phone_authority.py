@@ -116,6 +116,7 @@ class PhoneAuthority:
         for node in self.installed['nodes']:
             self.control.install(node)
         self.screen_share = PhoneScreenShare(self)
+        self.chat = None
         previous_request = self.sessions.request
         def session_request(*args, **kwargs):
             with self.lock:
@@ -141,7 +142,7 @@ class PhoneAuthority:
                   'capabilities', 'scope', 'enrollment'}
         for node in value['nodes']:
             if (not isinstance(node, dict) or not fields <= set(node)
-                    or set(node) - fields - {'visible_nodes', 'maintenance', 'control_session_id', 'installed_control_adapter'}
+                    or set(node) - fields - {'visible_nodes', 'maintenance', 'control_session_id', 'installed_control_adapter', 'chat_owner_ref'}
                     or type(node['enabled']) is not bool):
                 raise ValueError('invalid_phone_node_config')
             for key in ('node_id', 'subject', 'session_id'):
@@ -152,8 +153,12 @@ class PhoneAuthority:
                     or node['node_id'] in seen or node['subject'] in subjects or digest in tokens
                     or not isinstance(node['capabilities'], list) or 'leader' in node['capabilities']
                     or not isinstance(node['scope'], list)
-                    or set(node['scope']) - {'phone:node', 'phone:updates', 'phone:maintenance'}):
+                    or set(node['scope']) - {'phone:node', 'phone:updates', 'phone:maintenance', 'phone:chat'}):
                 raise ValueError('invalid_phone_node_config')
+            if 'phone:chat' in node['scope']:
+                expected = getattr(self.store, 'entrance_policy', {}).get('owner_ref')
+                if not expected or node.get('chat_owner_ref') != expected:
+                    raise ValueError('phone_chat_owner_binding_required')
             from .phone_maintenance import validate_policy
             validate_policy(node.get('maintenance'))
             validate_adapter(node)
@@ -357,6 +362,16 @@ class PhoneAuthority:
         node = self.principal(token, 'phone:node')
         if not isinstance(envelope, dict) or set(envelope) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_request')
+        if isinstance(envelope['action'], str) and envelope['action'].startswith('mesh_chat_'):
+            from .phone_chat import PhoneChat, ACTIONS
+            if envelope['action'] not in ACTIONS:
+                raise ValueError('phone_chat_action_invalid')
+            if 'phone:chat' not in node['scope'] or not node.get('chat_owner_ref') or (
+                    node['chat_owner_ref'] != getattr(self.store, 'entrance_policy', {}).get('owner_ref')):
+                raise PermissionError('phone_chat_owner_binding_required')
+            if self.chat is None:
+                self.chat = PhoneChat(self.store)
+            return self.chat.request(node, envelope['action'], envelope['arguments'])
         if envelope['action'] in SCREEN_SHARE_ACTIONS:
             value = envelope['arguments']
             if not isinstance(value, dict):
