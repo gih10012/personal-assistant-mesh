@@ -215,3 +215,17 @@ task, Allocation or control presence. First open/status without a real frame is
 not capture/background qualification. detach() immediately cancels local
 requests/timers; Root calls and awaits close() once to observe source cleanup.
 No automatic reopen/retry occurs after unknown outcome or process restart.
+
+The original worker can save the latest authorized frame to a local private
+JPEG for visual inspection:
+
+```sh
+python3 -m assistant_mesh.phone_frame_client --config /PRIVATE/worker.json \
+  --task-id ORIGINAL_TASK --task-epoch ORIGINAL_EPOCH \
+  --operation-id ORIGINAL_OPERATION --capability-id SELECTED_CAPABILITY \
+  --directory /PRIVATE/frame-preview
+```
+
+Use an existing owner-only 0700 directory outside the worktree. The command
+checks the original binding and JPEG hash, saves a 0600 preview, and reports
+the file path and frame metadata. Delete the local preview after inspection.

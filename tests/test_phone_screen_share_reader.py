@@ -1,7 +1,12 @@
 """Private original-worker lookup, real incumbent Store/Allocation, no HTTP."""
 import json
+import base64
+from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
+from assistant_mesh.phone_frame_client import read_frame
 from assistant_mesh.phone_screen_share_reader import ROUTE, install_dispatch
 from assistant_mesh.server import API
 from assistant_mesh.store import Conflict
@@ -25,6 +30,13 @@ class PhoneScreenShareReaderTests(unittest.TestCase):
             worker = {'role': 'worker', 'node': 'laptop'}
             result = api.dispatch('POST', ROUTE, lookup, worker)
             self.assertEqual(frame['base64'], result['frame']['base64'])
+            with tempfile.TemporaryDirectory() as directory:
+                client = mock.Mock()
+                client.request.side_effect = lambda path, payload: api.dispatch('POST', path, payload, worker)
+                local = read_frame(client, lookup, directory)
+                self.assertEqual(Path(local['path']).read_bytes(), base64.b64decode(frame['base64']))
+                self.assertEqual(Path(local['path']).stat().st_mode & 0o777, 0o600)
+                self.assertNotIn('base64', local)
             self.assertEqual(fixture.binding['stream_id'], result['stream_id'])
             self.assertEqual(fixture.binding['binding_digest'], result['binding_digest'])
             self.assertNotIn('nonce', json.dumps(result)); self.assertNotIn('approval', json.dumps(result))
