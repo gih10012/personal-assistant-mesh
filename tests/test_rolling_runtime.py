@@ -264,6 +264,33 @@ class RollingWorkerBoundaryTests(unittest.TestCase):
         self.assertTrue(gate.unknown)
         self.assertFalse(any(action == 'checkpoint' for action, _ in session.actions))
 
+    def test_lost_claim_reads_the_original_id_and_only_releases_proven_empty_poll(self):
+        from assistant_mesh.worker_claim_receipts import CLAIM, FORMAT, RECEIPT
+
+        class Authority:
+            def __init__(self, assigned):
+                self.assigned, self.calls = assigned, []
+
+            def request(self, route, body):
+                self.calls.append((route, body['claim_id']))
+                if route == CLAIM:
+                    raise OSError('lost original response')
+                return {'format': FORMAT, 'replayed': True, 'task': None,
+                        'receipt': {'claim_id': body['claim_id'],
+                                    'task_id': 'original' if self.assigned else None,
+                                    'task_epoch': 1 if self.assigned else None}}
+
+        for assigned in (False, True):
+            session, authority = _Session(), Authority(assigned)
+            gate = ClaimGate(authority, session, durable_claims=True)
+            with self.assertRaises(OSError):
+                gate.request('/v1/claim', {})
+            identity = authority.calls[0][1]
+            self.assertEqual([(CLAIM, identity), (RECEIPT, identity)], authority.calls)
+            self.assertEqual(assigned, gate.unknown)
+            self.assertIsNone(gate.task)
+            self.assertEqual(assigned, session.busy)
+
     def test_lost_safe_control_checkpoint_ack_only_retries_same_local_metadata(self):
         session, authority = _Session(), _Authority(self.task())
         gate = ClaimGate(authority, session)

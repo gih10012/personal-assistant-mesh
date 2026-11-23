@@ -9,10 +9,12 @@ import copy
 import os
 import secrets
 import threading
+import time
 import urllib.error
 
 from .retry import BoundedBackoff
 from .rolling_runtime import request
+from .worker_claim_receipts import CLAIM, FORMAT as CLAIM_FORMAT, RECEIPT, confirm
 
 
 TERMINAL = ('completed', 'failed', 'needs_review', 'waiting_children',
@@ -107,8 +109,9 @@ class ClaimGate:
     No transaction/lock spans a network or native call. An ACK-lost claim or
     final update stays unknown and is NEVER sent again by this adapter.
     """
-    def __init__(self, original, session):
+    def __init__(self, original, session, durable_claims=False):
         self.original, self.session = original, session
+        self.durable_claims = durable_claims
         self.task, self.final_update = None, None
         self.unknown = False
         self.pending_checkpoint = None
@@ -123,23 +126,48 @@ class ClaimGate:
         except (OSError, ValueError):
             pass
 
+    def _observe_failed_claim(self, claim):
+        """Read the same authority ID. A lost claim is never executed here."""
+        try:
+            observed = self.original.request(RECEIPT, {'claim_id': claim})
+            receipt = observed.get('receipt')
+            if (observed.get('format') != CLAIM_FORMAT or observed.get('replayed') is not True
+                    or not isinstance(receipt, dict) or receipt.get('claim_id') != claim):
+                return False
+            task_id, epoch = receipt.get('task_id'), receipt.get('task_epoch')
+            if task_id is None and epoch is None:
+                self.session.call('bind', {'claim': claim, 'task': None})
+                return True
+            if isinstance(task_id, str) and type(epoch) is int and epoch > 0:
+                self.session.call('bind', {'claim': claim, 'task': {'id': task_id, 'epoch': epoch}})
+        except (OSError, ValueError, AttributeError, urllib.error.URLError):
+            pass
+        return False
+
     def request(self, route, body=None):
         if route == '/v1/claim':
             if self.unknown or self.pending_checkpoint is not None:
                 return {'task': None}
             claim = secrets.token_hex(16)
+            if self.durable_claims:
+                claim = 'c1-{}-{}'.format(int(time.time()), claim)
             permission = self.session.call('admit', {'claim': claim})
             if not permission.get('admitted'):
                 return {'task': None}
             try:
-                result = self.original.request(route, body)
-                task = result['task']
+                if self.durable_claims:
+                    result = self.original.request(CLAIM, {'claim_id': claim})
+                    task = confirm(result, claim)
+                else:
+                    result = self.original.request(route, body)
+                    task = result['task']
                 # The private runtime journal needs identities, not prompts,
                 # native history, attachments or a second business checkpoint.
                 identity = {k: task[k] for k in ('id', 'epoch')} if task else None
                 self.session.call('bind', {'claim': claim, 'task': identity})
-            except (OSError, ValueError, KeyError, urllib.error.URLError):
-                self._unknown()
+            except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError):
+                if not self.durable_claims or not self._observe_failed_claim(claim):
+                    self._unknown()
                 raise
             self.task, self.final_update = copy.deepcopy(task), None
             return result
@@ -195,7 +223,8 @@ def run_worker(factory, session=None):
             if session.state == 'stopped' or session.stop.is_set():
                 return 0
         worker = factory()
-        gate = ClaimGate(worker.client, session)
+        gate = ClaimGate(worker.client, session,
+                         durable_claims=getattr(worker, 'config', {}).get('durable_worker_claims') is True)
         worker.client = gate
         while not worker.stop.is_set():
             if gate.pending_checkpoint is not None:

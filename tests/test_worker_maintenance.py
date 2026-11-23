@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 from assistant_mesh import worker_maintenance as maintenance
+from assistant_mesh import worker_claim_receipts as claims
 from tests.test_legacy_fenced_receiver import _source_base
 
 
@@ -77,6 +78,46 @@ class WorkerMaintenanceTests(unittest.TestCase):
 
     def task(self, label, required='a'):
         return self.store.create_task(label, [required], context={'session_scope': 'independent:' + label})
+
+    def test_claim_receipt_rolls_back_with_legacy_assignment_and_replay_cannot_claim(self):
+        self.now = 1795120000
+        self.store.heartbeat(self.a['node'], ['a'])
+        original, replacement = self.task('first'), self.task('next')
+        # Deliberately attach maintenance after the receipts adapter. Both
+        # paths must still use the actual current dispatch and writer lock.
+        claims.install_dispatch(self.api)
+        maintenance.attach(self.api)
+        identity = 'c1-{}-{}'.format(self.now, '1' * 32)
+        payload = {'claim_id': identity}
+        dispatch = self.api.dispatch
+
+        def fault(method, path, args, peer):
+            result = dispatch(method, path, args, peer)
+            if path == '/v1/claim':
+                raise ValueError('lost before receipt insert')
+            return result
+
+        self.api.dispatch = fault
+        with self.assertRaisesRegex(ValueError, 'lost before receipt'):
+            self.api.dispatch('POST', claims.CLAIM, payload, self.a)
+        self.api.dispatch = dispatch
+        self.assertIsNone(dispatch('POST', claims.RECEIPT, payload, self.a)['receipt'])
+        with self.store.transaction() as db:
+            self.assertEqual('pending', db.execute('SELECT status FROM tasks WHERE id=?', (original,)).fetchone()[0])
+
+        received = dispatch('POST', claims.CLAIM, payload, self.a)
+        self.assertEqual(original, claims.confirm(received, identity)['id'])
+        replayed = dispatch('POST', claims.CLAIM, payload, self.a)
+        self.assertIsNone(replayed['task'])
+        self.assertEqual(received['receipt'], replayed['receipt'])
+        self.assertIsNone(dispatch('POST', claims.RECEIPT, payload, self.b)['receipt'])
+        with self.assertRaises(PermissionError):
+            dispatch('POST', claims.RECEIPT, payload, self.operator)
+        self.post('acquire', operation='hold', control='hold-acquire', ttl=60)
+        lease_poll = {'claim_id': 'c1-{}-{}'.format(self.now, '2' * 32)}
+        self.assertIsNone(dispatch('POST', claims.CLAIM, lease_poll, self.a)['receipt']['task_id'])
+        with self.store.transaction() as db:
+            self.assertEqual('pending', db.execute('SELECT status FROM tasks WHERE id=?', (replacement,)).fetchone()[0])
 
     def test_concurrent_claim_acquire_waits_for_commit_and_only_blocks_target_new_claims(self):
         current = self.task('already-running')
