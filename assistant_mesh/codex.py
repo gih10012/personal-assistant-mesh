@@ -118,13 +118,8 @@ def native_launch(config):
             for name in ('OPENAI_API_KEY', 'CODEX_API_KEY'):
                 if name not in selected_names:
                     env.pop(name, None)
-    if config.get('network_env_file'):
-        values = private_json(config['network_env_file'])
-        allowed = {'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-                   'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'}
-        if not set(values) <= allowed or not all(isinstance(v, str) for v in values.values()):
-            raise ValueError('invalid_network_environment')
-        env.update(values)
+    from .ai_egress import model_network_env
+    env.update(model_network_env(config, env))
     # The configured executable wrapper consumes this task-specific override.
     # Do not change this Codex session's CODEX_HOME or global shell environment.
     env['CODEX_HOME_OVERRIDE'] = root

@@ -80,7 +80,9 @@ class ManagedBinding:
         self.lock_fd = self.thread = None
         # Inherited worker and systemd environments can differ. The daemon alone
         # owns its inherited environment. Compare explicit deployment settings.
-        network = private_json(config['network_env_file']) if config.get('network_env_file') else {}
+        from .ai_egress import model_network_env
+        network = model_network_env(config, {})
+
         self.launch_digest = digest([command, network])
 
     def owner(self):

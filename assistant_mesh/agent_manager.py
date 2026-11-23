@@ -164,7 +164,7 @@ class AgentManager:
     def _runtime(self, identity):
         runtime = dict(self.config['runtime'])
         runtime.update(self.config['external_agents'].get(identity, {}).get('runtime', {}))
-        if (set(runtime) - {'executable', 'auth_home', 'network_env_file'}
+        if (set(runtime) - {'executable', 'auth_home', 'network_env_file', 'egress_id'}
                 or not {'executable', 'auth_home'} <= set(runtime)):
             raise AgentError('agent_native_runtime_invalid')
         executable = Path(runtime['executable'])
@@ -405,7 +405,7 @@ class AgentManager:
 
 
 def _child_env(runtime):
-    from .config import discover_codex_auth, private_json
+    from .config import discover_codex_auth
     home = discover_codex_auth(runtime['auth_home'], strict=True)
     env = os.environ.copy()
     # Select only this child profile; do not copy auth or change the host shell.
@@ -413,13 +413,11 @@ def _child_env(runtime):
     env['CODEX_HOME_OVERRIDE'] = home
     env.pop('OPENAI_API_KEY', None)
     env.pop('CODEX_API_KEY', None)
-    if runtime.get('network_env_file'):
-        network = private_json(runtime['network_env_file'])
-        allowed = {'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-                   'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'}
-        if set(network) - allowed or not all(isinstance(x, str) for x in network.values()):
-            raise AgentError('agent_network_environment_invalid')
-        env.update(network)
+    from .ai_egress import model_network_env
+    try:
+        env.update(model_network_env(runtime, env))
+    except ValueError:
+        raise AgentError('agent_network_environment_invalid') from None
     return env
 
 

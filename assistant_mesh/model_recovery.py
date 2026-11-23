@@ -228,10 +228,8 @@ def _route_binding(native, route):
         if policy == 'existing_subscription' and not meta['requires_openai_auth']:
             raise ValueError('model_provider_cost_authorization_required')
         validate_provider_cost(native, meta['id'], route['model'])
-    network = {k: os.environ[k] for k in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
-        'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy') if k in os.environ}
-    if native.get('network_env_file'):
-        network.update(private_json(native['network_env_file']))
+    from .ai_egress import model_network_env
+    network = model_network_env(native, os.environ)
     identity = dict(route_id=route['id'], model=route['model'], effort=route['effort'],
         provider=meta['id'] if meta else 'openai',
         provider_identity=meta['identity'] if meta else 'openai',
