@@ -1,5 +1,14 @@
 # AMITA working contract
 
+2026-11-24 owner policy. Managed Mesh inference uses the authorized VPS egress
+through the node's private Mesh link, including workers running on the laptop
+and new environments. Configure the launcher's owner-owned network binding
+before starting an inference worker. If the link fails, wait for a qualified
+Mesh egress instead of silently inheriting regular Codex proxy variables.
+Ordinary Codex sessions and non-Mesh development tooling keep their own
+configuration. Keep account credentials in their original runtime.
+
+
 Current owner decision, 2026-11-19. Follow docs/PLAN.md for the phone entrance release. Explicitly select BOTH model and reasoning effort by task difficulty when creating development subagents. Use GPT-6.2 Sol/high for bounded implementation, GPT-6.1 Sol/max for deep repository investigation and GPT-6.2 Astra/xhigh for difficult distributed ownership and recovery. These preferences supersede the October fixed development-team profile. If Root needs the owner to change Root's own model or effort, contact the owner through ClawBot.
 
 Current owner-approved contract: 2026-11-11 phone-control research correction,

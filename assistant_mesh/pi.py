@@ -81,6 +81,8 @@ class Pi:
         self._run_state = 'idle'
         self.serial, self.events, self.deferred = 0, queue.Queue(), []
         env = os.environ.copy()
+        from .ai_egress import model_network_env
+        env.update(model_network_env(config, env))
         if config.get('agent_dir') is not None:
             agent_dir = _private_path(config['agent_dir'], directory=True)
             env['PI_CODING_AGENT_DIR'] = agent_dir

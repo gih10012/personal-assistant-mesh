@@ -593,6 +593,10 @@ class Worker:
         if self.config.get('pi') and selected is None and self.config['codex'].get('native_transport') != 'managed-unix':
             from .pi import Pi
             config = dict(self.config['pi'])
+            from .ai_egress import EGRESS_ID
+            if self.config['codex'].get('egress_id') == EGRESS_ID:
+                config.update(egress_id=EGRESS_ID,
+                              network_env_file=self.config['codex'].get('network_env_file'))
             config['mesh_grant'] = {k: self.config[k] for k in ('control_url', 'token_file')}
             config['mesh_grant'].update(task_id=self.current['id'], epoch=self.current['epoch'])
             candidates.append((Pi, config, 'pi'))
