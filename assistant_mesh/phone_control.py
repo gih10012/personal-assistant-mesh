@@ -198,3 +198,4 @@ class PhoneControl:
         if (len(raw) != blob['bytes'] or hashlib.sha256(raw).hexdigest() != blob['sha256']
                 or not isinstance(body, dict)):
             raise ValueError('phone_control_json_blob_required')
+        return body

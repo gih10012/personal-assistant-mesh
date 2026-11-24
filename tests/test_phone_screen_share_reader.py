@@ -7,7 +7,8 @@ import unittest
 from unittest import mock
 
 from assistant_mesh.phone_frame_client import read_frame
-from assistant_mesh.phone_screen_share_reader import ROUTE, install_dispatch
+from assistant_mesh.phone_screen_share_reader import METRIC, ROUTE, VERIFIER, install_dispatch
+from assistant_mesh.phone_share_request import scope_for, submit
 from assistant_mesh.server import API
 from assistant_mesh.store import Conflict
 from tests import test_phone_screen_share as fixtures
@@ -15,6 +16,38 @@ from tests import test_phone_authority as authority_fixtures
 
 
 class PhoneScreenShareReaderTests(unittest.TestCase):
+    def test_authenticated_phone_presence_admits_a_finite_read_only_request(self):
+        fixture = fixtures.PhoneScreenShareTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        service, original = fixture.service, fixture.f
+        api = API.__new__(API)
+        api.__dict__.update(service.api.__dict__)
+        api.network = None
+        api.phone_authority = service
+        service.api = api
+        install_dispatch(api, service)
+        task_id, epoch = original.task['id'], original.task['epoch']
+        scope = scope_for(task_id, epoch)
+        cap = fixture.control.gui
+        original.registry.request_grant(original.actor, cap, 'inspect', scope, request_id='owner-scope')
+        approval = original.registry.grant('operator', 'owner-scope')
+        client = mock.Mock()
+        client.request.side_effect = lambda route, body: api.dispatch(
+            'POST', route, body, {'role': 'worker', 'node': 'laptop'})
+        result = submit(client, task_id, epoch, 'real-phone-request', cap, 1, approval['id'])
+        self.assertEqual('reserved', result['state'])
+        self.assertFalse(result['execution_verified'])
+        with original.store.transaction() as db:
+            measurement = db.execute('SELECT actor,evidence FROM capability_metrics WHERE metric=?',
+                                     (METRIC,)).fetchone()
+            self.assertEqual(VERIFIER, measurement[0])
+            self.assertEqual(scope, json.loads(measurement[1])['scope'])
+            self.assertFalse(json.loads(measurement[1])['capture_verified'])
+        fixture.control.call('mesh_node_update', control_id='owner-withdrew', capabilities=[], online=False)
+        with self.assertRaises((Conflict, PermissionError)):
+            submit(client, task_id, epoch, 'after-withdrawal', cap, 1, approval['id'])
+
     def test_original_worker_lookup_rechecks_epoch_and_never_exposes_frames_in_graph_or_provider_routes(self):
         fixture = fixtures.PhoneScreenShareTests(); fixture.setUp()
         try:

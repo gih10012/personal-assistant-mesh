@@ -229,3 +229,25 @@ python3 -m assistant_mesh.phone_frame_client --config /PRIVATE/worker.json \
 Use an existing owner-only 0700 directory outside the worktree. The command
 checks the original binding and JPEG hash, saves a 0600 preview, and reports
 the file path and frame metadata. Delete the local preview after inspection.
+
+For an initial real request, use the existing worker's live task and the
+`assistant_mesh.phone_share_request` command. Request a grant for the task
+ID and epoch, approve that exact grant with the existing owner API, and
+bind the phone capability to its owner-defined screen capacity pool. The
+phone owner enables reception in AMITA Settings.
+
+The caller can then run:
+
+```sh
+python3 -m assistant_mesh.phone_share_request --config /PRIVATE/worker.json \
+  --task-id ORIGINAL_TASK --task-epoch ORIGINAL_EPOCH \
+  --capability-id SELECTED_CAPABILITY reserve --capability-epoch CAPABILITY_EPOCH \
+  --grant-id APPROVED_GRANT --operation-id ORIGINAL_OPERATION --duration-ms 30000
+```
+
+The Source verifies the latest authenticated control presence on the original
+phone and records transport reachability for that request. The reservation
+still requires the original live task, grant, capacity and local owner
+approval. Capture verification requires the first real acknowledged frame.
+Inspect an unconfirmed reservation using the same operation ID before taking
+another action.
