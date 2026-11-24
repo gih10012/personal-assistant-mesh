@@ -18,10 +18,12 @@ def run(config):
     if (not settings.get('enabled') or settings.get('ilink_user_id') != account.get('ilink_user_id')
             or settings.get('ilink_bot_id') != account.get('ilink_bot_id')):
         raise ValueError('native_refresh_not_bound_to_current_owner')
+    attempted = None
     while True:
         try:
             value = client.request('/v1/recovery/claim', {})['renewal']
-            if value:
+            if value and value['id'] != attempted:
+                attempted = value['id']
                 # Unknown native send result is NEVER replayed under a new ID.
                 native.send_text(value['marker'], value['request_id'], settings['native_chat'], timeout=120)
         except (OSError, ValueError):

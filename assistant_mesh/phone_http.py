@@ -107,6 +107,8 @@ def start(api, config_path, *, origin, port, relays=(), updates=None,
         install_screen_reader(api, service)
         from .worker_claim_receipts import install_dispatch as install_claims
         install_claims(api)
+        from .claw_delivery import install_on_original_channel
+        install_on_original_channel(api)
     except Exception:
         api.dispatch = previous
         del api.phone_authority

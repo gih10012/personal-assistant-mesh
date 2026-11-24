@@ -1041,7 +1041,8 @@ class Store:
     def next_send(self):
         with self.transaction() as db:
             context = self._meta(db, 'owner_context', {})
-            row = db.execute("SELECT * FROM outbox WHERE delivery_route='channel' AND (status='pending' OR (status='rejected' AND retry_count<1 AND COALESCE(context_version,'')!=?)) ORDER BY created LIMIT 1", (context.get('version', ''),)).fetchone()
+            from .claw_delivery import select_send
+            row = select_send(db, context, self.clock())
             if not row:
                 return None
             client_id = 'mesh-' + uuid.uuid4().hex if row['status'] == 'rejected' else row['client_id']
@@ -1144,18 +1145,8 @@ class Store:
             return value
 
     def claim_renewal(self, node):
-        """One native refresh per reply-context version, journaled BEFORE any effect."""
-        with self.transaction() as db:
-            row = db.execute("SELECT id FROM outbox WHERE status='rejected' AND retry_count<1 ORDER BY created LIMIT 1").fetchone()
-            if not row:
-                return None
-            version = self._meta(db, 'owner_context', {}).get('version', 'none')
-            identity = hashlib.sha256(version.encode()).hexdigest()
-            if db.execute('SELECT 1 FROM renewals WHERE id=?', (identity,)).fetchone():
-                return None
-            marker = 'ClawBot 自动刷新 mesh-' + identity[:24]
-            db.execute('INSERT INTO renewals VALUES(?,?,?,?,?)', (identity, node, marker, 'reserved', self.clock()))
-            return {'id': identity, 'marker': marker, 'request_id': 'mesh-renew-' + identity[:40]}
+        from .claw_delivery import claim_renewal
+        return claim_renewal(self, node)
 
     def retry_waiting(self):
         """Explicit operator retry after fixing a backend, no effectful replays."""

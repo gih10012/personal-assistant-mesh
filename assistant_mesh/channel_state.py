@@ -86,27 +86,8 @@ class ChannelState:
             return {'operation_id': operation}
 
     def channel_prepare_send(self, term):
-        with self.store.transaction() as db:
-            account, now = self.witness._current(db, term['holder'], term, admission=True)
-            context = self.store._meta(db, 'owner_context', {})
-            row = db.execute("SELECT * FROM outbox WHERE delivery_route='channel' AND "
-                "(status='pending' OR (status='rejected' AND retry_count<1 AND COALESCE(context_version,'')!=?)) "
-                'ORDER BY created LIMIT 1', (context.get('version', ''),)).fetchone()
-            if row is None:
-                return None
-            result = dict(row)
-            # An explicit server rejection under a newer owner context is the
-            # existing bounded retry policy, not an unknown outcome replay.
-            result['client_id'] = 'mesh-' + uuid.uuid4().hex if row['status'] == 'rejected' else row['client_id']
-            result['context_token'] = context.get('token')
-            result['context_version'] = context.get('version', '')
-            identity = {'authority': account['canonical_authority'], 'outbox_id': row['id'],
-                        'client_id': result['client_id']}
-            operation = self._prepare(db, term, 'send', identity, result, now)
-            db.execute("UPDATE outbox SET status='submitting',client_id=?,context_version=?,"
-                'retry_count=retry_count+? WHERE id=?', (result['client_id'], result['context_version'],
-                    1 if row['status'] == 'rejected' else 0, row['id']))
-            return {'operation_id': operation, 'row': result}
+        from .claw_delivery import prepare_send
+        return prepare_send(self, term)
 
     def _ticket(self, db, row, ticket, state):
         witness = self.witness._intent(db, row['holder'], ticket)
