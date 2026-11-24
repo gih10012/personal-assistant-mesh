@@ -5,7 +5,9 @@ import select
 import signal
 import socket
 import termios
+import threading
 import time
+from concurrent.futures import Future
 
 import dbus
 import dbus.mainloop.glib
@@ -15,6 +17,7 @@ from gi.repository import GLib
 from .paired_phone_input import (ABSOLUTE_POINTER_ID, ABSOLUTE_POINTER_MAP, KEYBOARD_ID, KEYBOARD_MAP,
                                  NEUTRAL, POINTER_ID, POINTER_MAP, SESSION_SECONDS, held_release,
                                  validate_att, validate_peer)
+from .phone_frame_client import FrameStaleError
 
 
 BLUEZ = 'org.bluez'
@@ -130,7 +133,7 @@ class Characteristic(Attribute):
             if value not in (b'\x00', b'\x01'):
                 fail('NotSupported')
             self.session.suspended = value == b'\x00'
-            if self.session.suspended and self.session.claimed:
+            if self.session.suspended and self.session.send_confirmed:
                 self.session.stop('paired_phone_hid_suspended')
         else:
             self.value = value
@@ -207,7 +210,7 @@ class Advertisement(Export):
 
 
 class Session:
-    def __init__(self, bus, binding, mode, reports, receipt, tty, advertise):
+    def __init__(self, bus, binding, mode, reports, receipt, tty, advertise, frame_verifier=None):
         self.bus, self.binding, self.mode = bus, binding, mode
         self.reports, self.receipt, self.tty, self.advertise = reports, receipt, tty, advertise
         self.adapter = '/org/bluez/' + binding['adapter']
@@ -217,7 +220,9 @@ class Session:
         self.deadline = now() + SESSION_SECONDS
         self.channels = {}
         self.authenticated = self.suspended = self.registered = self.advertising = False
-        self.prompted = self.claimed = False
+        self.prompted = self.send_confirmed = self.claimed = self.report_attempted = False
+        self.frame_verifier, self.frame_check, self.frame_deadline = frame_verifier, None, None
+        self.peer_checked = False
         self.sent = 0
         self.next_report_at = 0
         self.drained_at = None
@@ -323,6 +328,63 @@ class Session:
         self.stop('paired_phone_owner_cancelled')
         return GLib.SOURCE_REMOVE
 
+    def verify_in_background(self, check):
+        # Only the GLib thread can claim an operation or send a report. A late
+        # Source reply can only populate this Future with a deadline or reason.
+        try:
+            result = self.frame_verifier(now), None
+        except FrameStaleError:
+            result = None, 'paired_phone_frame_stale'
+        except Exception:
+            result = None, 'paired_phone_frame_unavailable'
+        check.set_result(result)
+
+    def peer_check_failed(self, _error):
+        self.stop('paired_phone_connection_required')
+
+    def guarded_peer_ready(self, properties):
+        try:
+            validate_peer(self.binding, properties, connected=True)
+        except PermissionError as error:
+            self.stop(str(error))
+            return
+        if self.advertise:
+            self.proxy(self.adapter, PROPERTIES).GetAll(
+                ADAPTER, reply_handler=self.guarded_adapter_ready, error_handler=self.peer_check_failed, timeout=1)
+        else:
+            self.peer_checked = True
+
+    def guarded_adapter_ready(self, properties):
+        if properties.get('Pairable') != False:
+            self.stop('paired_phone_adapter_became_pairable')
+        else:
+            self.peer_checked = True
+
+    def confirm_send(self):
+        if not self.send_confirmed:
+            if not select.select([self.tty], [], [], 0)[0]:
+                return False
+            if self.tty.read(128) != b'SEND\n':
+                self.stop('paired_phone_owner_cancelled')
+                return False
+            self.send_confirmed = True
+            if self.frame_verifier is None:
+                self.check_peer(connected=True)
+                if self.advertise and self.properties(self.adapter, ADAPTER).get('Pairable') != False:
+                    raise PermissionError('paired_phone_adapter_became_pairable')
+                return True
+            self.frame_check = Future()
+            threading.Thread(target=self.verify_in_background, args=(self.frame_check,), daemon=True).start()
+            return False
+        if self.frame_deadline is None and self.frame_check.done():
+            self.frame_deadline, reason = self.frame_check.result()
+            if reason is not None:
+                self.stop(reason)
+                return False
+            self.proxy(self.peer, PROPERTIES).GetAll(
+                DEVICE, reply_handler=self.guarded_peer_ready, error_handler=self.peer_check_failed, timeout=1)
+        return self.peer_checked
+
     def tick(self):
         try:
             return self.advance()
@@ -331,6 +393,8 @@ class Session:
             return GLib.SOURCE_REMOVE
 
     def advance(self):
+        if self.reason is not None:
+            return GLib.SOURCE_REMOVE
         current = now()
         if current >= self.deadline:
             self.stop('paired_phone_session_expired' if self.prompted else 'paired_phone_host_subscription_required')
@@ -343,6 +407,9 @@ class Session:
             self.authenticated = False
             self.stop('paired_phone_notify_socket_closed')
             return GLib.SOURCE_REMOVE
+        if self.frame_deadline is not None and not self.report_attempted and current >= self.frame_deadline:
+            self.stop('paired_phone_frame_stale')
+            return GLib.SOURCE_REMOVE
         if (not self.registered or self.advertise and not self.advertising or channel is None
                 or not self.authenticated or self.suspended):
             return GLib.SOURCE_CONTINUE
@@ -352,24 +419,28 @@ class Session:
             self.prompted = True
             return GLib.SOURCE_CONTINUE
         if not self.claimed:
-            if not select.select([self.tty], [], [], 0)[0]:
-                return GLib.SOURCE_CONTINUE
-            if self.tty.read(128) != b'SEND\n':
-                self.stop('paired_phone_owner_cancelled')
+            if not self.confirm_send():
+                return GLib.SOURCE_REMOVE if self.reason else GLib.SOURCE_CONTINUE
+            if self.frame_deadline is not None and now() >= self.frame_deadline:
+                self.stop('paired_phone_frame_stale')
                 return GLib.SOURCE_REMOVE
-            self.check_peer(connected=True)
-            if self.advertise and self.properties(self.adapter, ADAPTER).get('Pairable') != False:
-                raise PermissionError('paired_phone_adapter_became_pairable')
             report_seconds = sum(step.delay_ms for step in self.reports[1:]) / 1000
             if now() + report_seconds + REPORT_DRAIN_SECONDS >= self.deadline:
                 self.stop('paired_phone_session_time_insufficient')
                 return GLib.SOURCE_REMOVE
             self.receipt.write('.claim', 'dispatch_unknown')
             self.claimed = True
+            if self.frame_verifier is not None:
+                # Give queued cancel/disconnect handlers a turn after fsync.
+                # The next tick rechecks both deadlines and the peer channel.
+                return GLib.SOURCE_CONTINUE
         current = now()
         if self.sent < len(self.reports):
             if current >= self.deadline:
                 self.stop('paired_phone_session_expired')
+                return GLib.SOURCE_REMOVE
+            if self.frame_deadline is not None and not self.report_attempted and current >= self.frame_deadline:
+                self.stop('paired_phone_frame_stale')
                 return GLib.SOURCE_REMOVE
             if current < self.next_report_at:
                 return GLib.SOURCE_CONTINUE
@@ -377,6 +448,7 @@ class Session:
             release = held_release(self.mode, report)
             if self.pending_release is None:
                 self.pending_release = release
+            self.report_attempted = True
             if channel.send(report) != len(report):
                 raise OSError('paired_phone_short_report_write')
             sent_at = now()
@@ -431,13 +503,13 @@ class Session:
         self.bus.close()
 
 
-def run_session(binding, mode, reports, receipt, tty, advertise):
+def run_session(binding, mode, reports, receipt, tty, advertise, frame_verifier=None):
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = None
     session = None
     try:
         bus = dbus.SystemBus(private=True)
-        session = Session(bus, binding, mode, reports, receipt, tty, advertise)
+        session = Session(bus, binding, mode, reports, receipt, tty, advertise, frame_verifier)
         session.start()
     except dbus.exceptions.DBusException as error:
         reason = 'paired_phone_bluez_unavailable:' + error.get_dbus_name()
@@ -449,9 +521,13 @@ def run_session(binding, mode, reports, receipt, tty, advertise):
             session.close()
         elif bus is not None:
             bus.close()
+    if frame_verifier is not None and session.send_confirmed and not session.report_attempted:
+        return receipt.write('.result', 'not_sent', reason=session.reason, reports_queued=0)
     if session.claimed:
         state = session.reason if session.reason == 'reports_queued_to_bluez' else 'dispatch_unknown'
         details = {'reason': session.reason, 'reports_queued': session.sent}
+        if frame_verifier is not None:
+            details['frame_verified_before_send'] = True
         if session.release_queued is not None:
             details['release_queued_to_bluez'] = session.release_queued
         return receipt.write('.result', state, **details)

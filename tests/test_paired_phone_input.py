@@ -4,12 +4,15 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from assistant_mesh import paired_phone_input as hid
+from assistant_mesh.phone_frame_client import FrameStaleError
 
 
 class PairedPhoneInputTest(unittest.TestCase):
@@ -87,6 +90,35 @@ class PairedPhoneInputTest(unittest.TestCase):
             with self.subTest(x=x), self.assertRaises(ValueError):
                 hid.prepare(binding, dict(request, action=dict(tap, x=x)))
 
+    def test_frame_expectation_binds_absolute_action_to_original_phone_task_and_share(self):
+        binding = dict(self.binding, report_modes=['keyboard', 'pointer_absolute'])
+        expected = {'task_id': self.request['task_id'], 'task_epoch': self.request['task_epoch'],
+                    'operation_id': 'op:share', 'capability_id': binding['phone_node_id'] + ':ui-control-v1',
+                    'stream_id': 'stream:original', 'binding_digest': 'a' * 64,
+                    'revision': 1, 'sha256': 'b' * 64, 'width': 320, 'height': 640}
+        request = dict(self.request, action={'kind': 'tap', 'x': 0, 'y': 32767}, frame_expectation=expected)
+        mode, _, digest = hid.prepare(binding, request)
+        self.assertEqual(mode, 'pointer_absolute')
+        self.assertNotEqual(digest, hid.prepare(binding, dict(request, frame_expectation=dict(expected, revision=2)))[2])
+        for change in ({'task_id': 'other'}, {'task_epoch': 5}, {'operation_id': request['operation_id']},
+                       {'capability_id': 'other:ui-control-v1'}, {'height': True}, {'sha256': 'ABC'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                hid.prepare(binding, dict(request, frame_expectation=dict(expected, **change)))
+        with self.assertRaises(ValueError):
+            hid.prepare(binding, dict(request, action=self.request['action']))
+
+        binding_file, request_file = self.root / 'binding.json', self.root / 'request.json'
+        for path, content in ((binding_file, binding), (request_file, request)):
+            path.write_text(json.dumps(content), encoding='utf8')
+            path.chmod(0o600)
+        argv = ['--binding', str(binding_file), '--request', str(request_file)]
+        with patch('builtins.print') as output:
+            self.assertEqual(hid.main(argv + ['prepare']), 0)
+            self.assertTrue(json.loads(output.call_args.args[0])['frame_verification_required'])
+            self.assertEqual(hid.main(argv + ['run']), 2)
+            self.assertEqual(json.loads(output.call_args.args[0])['error'],
+                             'paired_phone_frame_expectation_and_config_required_together')
+
     def test_binding_and_att_match_exact_identity(self):
         binding_file = self.root / 'binding.json'
         binding_file.write_text(json.dumps(self.binding), encoding='utf8')
@@ -153,6 +185,91 @@ class BluezReportSocketTest(unittest.TestCase):
         except ImportError as error:
             self.skipTest(str(error))
         self.bluez = bluez
+
+    @contextmanager
+    def guarded_session(self, verifier):
+        bluez = self.bluez
+        binding = {'adapter': 'hci7', 'peer_address': '00:11:22:33:44:55'}
+        mode, reports = hid.encode_plan({'kind': 'tap', 'x': 4321, 'y': 18901})
+        tty = Mock()
+        tty.read.return_value = b'SEND\n'
+        with (patch.object(bluez, 'now', return_value=100.0) as clock,
+              patch.object(bluez.os, 'tcgetpgrp', return_value=bluez.os.getpgrp()),
+              patch.object(bluez.select, 'select', return_value=([], [], [])) as input_ready):
+            session = bluez.Session(Mock(), binding, mode, reports, Mock(), tty, False, verifier)
+            session.authenticated = session.registered = session.prompted = True
+            session.proxy = Mock()
+            channel, daemon = bluez.socket.socketpair(bluez.socket.AF_UNIX, bluez.socket.SOCK_SEQPACKET)
+            with channel, daemon:
+                daemon.setblocking(False)
+                session.channels[mode] = channel
+                yield session, daemon, clock, input_ready
+
+    def test_frame_check_runs_only_after_send_and_claim_precedes_first_report(self):
+        verifier = Mock(return_value=103.0)
+        with self.guarded_session(verifier) as (session, daemon, _, input_ready):
+            self.assertTrue(session.advance())
+            verifier.assert_not_called()
+            input_ready.return_value = ([session.tty], [], [])
+            self.assertTrue(session.advance())
+            session.frame_check.result(timeout=1)
+            self.assertTrue(session.advance())
+            session.receipt.write.assert_not_called()
+            with self.assertRaises(BlockingIOError):
+                daemon.recv(256)
+            check = session.proxy.return_value.GetAll.call_args.kwargs['reply_handler']
+            check({'Adapter': session.adapter, 'Address': session.binding['peer_address'],
+                   'Paired': True, 'Bonded': True, 'Connected': True})
+            self.assertTrue(session.advance())
+            session.receipt.write.assert_called_once_with('.claim', 'dispatch_unknown')
+            with self.assertRaises(BlockingIOError):
+                daemon.recv(256)
+            self.assertTrue(session.advance())
+            self.assertEqual(daemon.recv(256), session.reports[0].payload)
+
+    def test_pending_frame_lookup_preserves_cancel_expiry_and_disconnect(self):
+        for event in ('cancel', 'expire', 'disconnect'):
+            condition, unblock = threading.Event(), threading.Event()
+
+            def verify(_clock):
+                condition.set()
+                unblock.wait(2)
+                return 103.0
+
+            with self.subTest(event=event), self.guarded_session(verify) as (session, daemon, clock, input_ready):
+                input_ready.return_value = ([session.tty], [], [])
+                self.assertTrue(session.advance())
+                try:
+                    self.assertTrue(condition.wait(1))
+                    self.assertFalse(session.frame_check.done())
+                    if event == 'cancel':
+                        session.cancel()
+                    elif event == 'expire':
+                        clock.return_value = session.deadline
+                    else:
+                        daemon.close()
+                    self.assertFalse(session.advance())
+                    session.receipt.write.assert_not_called()
+                finally:
+                    unblock.set()
+                session.frame_check.result(timeout=1)
+                self.assertFalse(session.advance())
+                session.receipt.write.assert_not_called()
+                self.assertEqual(0, session.sent)
+
+    def test_stale_or_unavailable_frame_never_claims_or_queues_input(self):
+        for error, reason in ((FrameStaleError(), 'paired_phone_frame_stale'),
+                              (ValueError(), 'paired_phone_frame_unavailable')):
+            with self.subTest(reason=reason), self.guarded_session(Mock(side_effect=error)) as (
+                    session, daemon, _, input_ready):
+                input_ready.return_value = ([session.tty], [], [])
+                self.assertTrue(session.advance())
+                session.frame_check.result(timeout=1)
+                self.assertFalse(session.advance())
+                self.assertEqual(reason, session.reason)
+                session.receipt.write.assert_not_called()
+                with self.assertRaises(BlockingIOError):
+                    daemon.recv(256)
 
     def test_notification_fd_uses_exact_att_context_and_packet_boundaries(self):
         bluez = self.bluez

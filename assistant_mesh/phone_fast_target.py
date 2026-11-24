@@ -12,6 +12,7 @@ import unicodedata
 
 from .config import private_json
 from .ingress import _identifier
+from .paired_phone_input import ABSOLUTE_MAX
 from .phone_frame_client import read_frame
 from .worker import Client
 
@@ -78,8 +79,12 @@ def locate(client, lookup, query, language='chi_sim+eng'):
             raise ValueError('phone_target_ocr_unavailable')
         matches, count = candidates(result.stdout.decode('utf-8'), query, frame['width'], frame['height'])
     state = 'unique_candidate' if count == 1 else 'ambiguous' if count else 'not_found'
+    for match in matches:
+        match['paired_phone_coordinates'] = {
+            axis: round(match[axis] * ABSOLUTE_MAX / COORDINATE_MAX) for axis in ('x', 'y')}
     return {'format': 'amita-phone-target/1', 'frame_revision': frame['revision'],
             'frame_sha256': frame['sha256'], 'width': frame['width'], 'height': frame['height'],
+            'frame_expectation': frame['frame_expectation'],
             'state': state, 'candidates': matches, 'matches': count, 'source': 'local_ocr',
             'action_executed': False}
 

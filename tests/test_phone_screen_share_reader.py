@@ -6,13 +6,15 @@ import tempfile
 import unittest
 from unittest import mock
 
-from assistant_mesh.phone_frame_client import read_frame
+from assistant_mesh.phone_frame_client import FrameStaleError, fetch_frame, read_frame, verify_frame
+from assistant_mesh.phone_screen_share import MAX_FRAME_AGE_SECONDS
 from assistant_mesh.phone_screen_share_reader import METRIC, ROUTE, VERIFIER, install_dispatch
 from assistant_mesh.phone_share_request import scope_for, submit
 from assistant_mesh.server import API
 from assistant_mesh.store import Conflict
 from tests import test_phone_screen_share as fixtures
 from tests import test_phone_authority as authority_fixtures
+from tests.test_phone_control import blob
 
 
 class PhoneScreenShareReaderTests(unittest.TestCase):
@@ -70,6 +72,7 @@ class PhoneScreenShareReaderTests(unittest.TestCase):
                 self.assertEqual(Path(local['path']).read_bytes(), base64.b64decode(frame['base64']))
                 self.assertEqual(Path(local['path']).stat().st_mode & 0o777, 0o600)
                 self.assertNotIn('base64', local)
+                self.assertEqual(local['frame_expectation']['stream_id'], fixture.binding['stream_id'])
             self.assertEqual(fixture.binding['stream_id'], result['stream_id'])
             self.assertEqual(fixture.binding['binding_digest'], result['binding_digest'])
             self.assertNotIn('nonce', json.dumps(result)); self.assertNotIn('approval', json.dumps(result))
@@ -100,3 +103,47 @@ class PhoneScreenShareReaderTests(unittest.TestCase):
             self.assertNotIn('cloud', service.screen_share._slots)
         finally:
             fixture.tearDown()
+
+    def test_guard_matches_current_verified_bytes_and_geometry_with_source_receipt_age(self):
+        fixture = fixtures.PhoneScreenShareTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        fixture.call('open')
+        first = fixture.frame()
+        fixture.call('frame', frame=first)
+        lookup = {key: fixture.binding[key] for key in ('operation_id', 'capability_id', 'task_id', 'task_epoch')}
+        client = mock.Mock()
+        client.request.side_effect = lambda path, body: fixture.service.screen_share.lookup(fixture.f.actor, body)
+        _, _, expected, fresh_for = fetch_frame(client, lookup)
+        self.assertEqual(fresh_for, MAX_FRAME_AGE_SECONDS)
+        self.assertEqual(verify_frame(client, expected, lambda: 10.0), 10.0 + MAX_FRAME_AGE_SECONDS)
+        with self.assertRaises(FrameStaleError):
+            verify_frame(client, expected, iter((10.0, 10.0 + MAX_FRAME_AGE_SECONDS)).__next__)
+        for change in ({'stream_id': 'other-stream'}, {'binding_digest': 'a' * 64}, {'revision': 2}):
+            with self.subTest(change=change), self.assertRaises(FrameStaleError):
+                verify_frame(client, dict(expected, **change), lambda: 10.0)
+
+        fixture.f.now += MAX_FRAME_AGE_SECONDS
+        fixture.call('frame', frame=first)  # Exact retry cannot rejuvenate a frame.
+        with self.assertRaises(FrameStaleError):
+            verify_frame(client, expected, lambda: 10.0)
+        fixture.call('frame', frame=fixture.frame(2))
+        self.assertEqual(verify_frame(client, expected, lambda: 10.0), 10.0 + MAX_FRAME_AGE_SECONDS)
+
+        fixture.f.now += 1
+        fixture.call('frame', frame=dict(fixture.frame(3), width=320, height=640))
+        with self.assertRaises(FrameStaleError):
+            verify_frame(client, expected, lambda: 10.0)
+        fixture.f.now += 1
+        changed = blob(b'\xff\xd8\xffdifferent screen\xff\xd9')
+        fixture.call('frame', frame=dict(fixture.frame(4), **changed))
+        with self.assertRaises(FrameStaleError):
+            verify_frame(client, expected, lambda: 10.0)
+
+        old_reply = fixture.service.screen_share.lookup(fixture.f.actor, lookup)
+        old_reply.pop('source_fresh_for_seconds')
+        client.request.side_effect = None
+        client.request.return_value = old_reply
+        fetch_frame(client, lookup)  # Legacy sources can still be read and used for OCR.
+        with self.assertRaisesRegex(ValueError, 'phone_frame_source_freshness_unavailable'):
+            verify_frame(client, expected, lambda: 10.0)

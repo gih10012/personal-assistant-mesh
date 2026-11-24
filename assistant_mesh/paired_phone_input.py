@@ -12,11 +12,14 @@ import struct
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from .config import private_json
 from .ingress import _identifier
 from .phone_computer_use import canonical, private_output
+from .phone_frame_client import validate_expectation, verify_frame
+from .worker import Client
 
 
 BINDING = 'amita-paired-phone-input-binding/1'
@@ -230,13 +233,21 @@ def load_binding(path):
 
 def prepare(binding, request):
     fields = {'format', 'task_id', 'task_epoch', 'operation_id', 'phone_node_id', 'action'}
-    if (not isinstance(request, dict) or set(request) != fields or request['format'] != CONTRACT
+    if (not isinstance(request, dict) or set(request) not in (fields, fields | {'frame_expectation'})
+            or request['format'] != CONTRACT
             or request['phone_node_id'] != binding['phone_node_id']
             or type(request['task_epoch']) is not int or not 1 <= request['task_epoch'] <= 2**63 - 1):
         raise ValueError('invalid_paired_phone_scope')
     _identifier(request['task_id'], 'paired_phone_task_id', 180)
     _identifier(request['operation_id'], 'paired_phone_operation_id', 180)
     mode, reports = encode_plan(request['action'])
+    if 'frame_expectation' in request:
+        expected = request['frame_expectation']
+        validate_expectation(expected)
+        if (mode != 'pointer_absolute' or expected['operation_id'] == request['operation_id']
+                or expected['capability_id'] != binding['phone_node_id'] + ':ui-control-v1'
+                or any(expected[key] != request[key] for key in ('task_id', 'task_epoch'))):
+            raise ValueError('paired_phone_original_frame_scope_required')
     if mode not in binding['report_modes']:
         raise PermissionError('paired_phone_report_mode_disabled')
     target = {'adapter': binding['adapter'], 'peer_address': binding['peer_address']}
@@ -327,25 +338,37 @@ def main(argv=None):
     commands.add_parser('status', help='read the original local operation receipt')
     run = commands.add_parser('run', help='ask the local owner to approve one action')
     run.add_argument('--advertise', action='store_true', help='offer a finite non-discoverable HID service')
+    run.add_argument('--frame-config', help='Original screen-share worker configuration for a frame-bound action')
     args = parser.parse_args(argv)
     try:
         binding, request = load_binding(args.binding), private_json(args.request)
         mode, reports, digest = prepare(binding, request)
+        expected = request.get('frame_expectation')
         if args.command == 'prepare':
             result = {'format': CONTRACT, 'operation_id': request['operation_id'], 'request_sha256': digest,
                       'report_mode': mode, 'report_count': len(reports), 'state': 'prepared'}
+            if expected is not None:
+                result['frame_verification_required'] = True
         else:
             with state_lock(binding) as (state, descriptor):
                 receipt = Receipt(state, descriptor, request['operation_id'], digest)
                 result = receipt.read()
                 if args.command == 'run' and result['state'] == 'not_started':
+                    if (expected is None) != (args.frame_config is None):
+                        raise ValueError('paired_phone_frame_expectation_and_config_required_together')
+                    frame_verifier = None
+                    if expected is not None:
+                        try:
+                            frame_verifier = partial(verify_frame, Client(private_json(args.frame_config)), expected)
+                        except (OSError, ValueError, KeyError, TypeError):
+                            raise ValueError('paired_phone_frame_unavailable') from None
                     from .bluez_phone_hid import run_session
 
                     with open('/dev/tty', 'r+b', buffering=0) as tty:
                         if os.tcgetpgrp(tty.fileno()) != os.getpgrp():
                             raise PermissionError('paired_phone_foreground_terminal_required')
                         confirm_session(tty, binding, request, digest, args.advertise)
-                        result = run_session(binding, mode, reports, receipt, tty, args.advertise)
+                        result = run_session(binding, mode, reports, receipt, tty, args.advertise, frame_verifier)
         print(canonical(result))
         return int(args.command == 'run' and result['state'] != 'reports_queued_to_bluez')
     except (ImportError, OSError, ValueError) as error:

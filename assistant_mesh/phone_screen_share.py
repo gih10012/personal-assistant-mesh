@@ -20,6 +20,7 @@ BINDING_FIELDS = frozenset(('primary_session_id', 'session_id', 'stream_id', 'ta
 FRAME_FIELDS = frozenset(('revision', 'capture_timestamp', 'width', 'height', 'bytes', 'sha256', 'base64'))
 MAX_JSON = 65536
 MAX_FRAME = 42000
+MAX_FRAME_AGE_SECONDS = 3
 IDLE_TTL = 30
 MAX_SCOPE_TTL = 300
 LAUNCH_FORMAT = 'amita-phone-screen-share/2'
@@ -168,6 +169,19 @@ class PhoneScreenShare:
                     frame_revision=slot.frame.get('revision', 0), frame_sha256=slot.frame.get('sha256', ''),
                     bytes=slot.frame.get('bytes', 0))
 
+    def _reader_frame(self, slot):
+        now = self.service.store.clock()
+        age = now - slot.last_frame_at
+        # The phone records capture time in its own monotonic milliseconds.
+        # Only the Source clock can date receipt of the latest accepted frame.
+        fresh_for = max(0, min(MAX_FRAME_AGE_SECONDS - age, slot.idle_until - now,
+                               slot.binding['expires_at'] - now)) if age >= 0 else 0
+        result = dict(self._public(slot.binding), format='amita-phone-screen-share-frame/1',
+                      source_fresh_for_seconds=fresh_for,
+                      frame=dict(slot.frame, base64=base64.b64encode(slot.body).decode('ascii')))
+        _encoded(result)
+        return result
+
     def _close(self, db, node_id, binding):
         """Privacy cleanup only, not operation admission or a frame reader.
 
@@ -301,10 +315,7 @@ class PhoneScreenShare:
                 if slot is None or slot.binding != binding or not slot.active or not slot.frame:
                     raise Conflict('screen_share_frame_not_available')
                 # No provider/owner UI credentials, prior images, history or URLs.
-                result = dict(self._public(binding), format='amita-phone-screen-share-frame/1',
-                              frame=dict(slot.frame, base64=base64.b64encode(slot.body).decode('ascii')))
-                _encoded(result)
-                return result
+                return self._reader_frame(slot)
 
     def lookup(self, actor, arguments):
         """Original caller knows its task/operation, never producer stream IDs."""
@@ -339,7 +350,4 @@ class PhoneScreenShare:
                     raise
                 if not slot.active or not slot.frame:
                     raise Conflict('screen_share_frame_not_available')
-                result = dict(self._public(slot.binding), format='amita-phone-screen-share-frame/1',
-                              frame=dict(slot.frame, base64=base64.b64encode(slot.body).decode('ascii')))
-                _encoded(result)
-                return result
+                return self._reader_frame(slot)
