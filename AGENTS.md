@@ -1,5 +1,23 @@
 # AMITA working contract
 
+2026-11-24 owner policy for parallel agent work. Split independent work into
+separate agents and worktrees. Set both model and reasoning effort explicitly by
+task difficulty and actual access. Start bounded implementation and review with
+GPT-6.2 Sol/high. Prefer GPT-6.1 Sol/max for deep repository investigation and
+GPT-6.2 Astra/xhigh for distributed ownership or complex recovery. Reassess from
+AA and real outcomes. Keep one owner for shared production, account actions and
+device operations. If an agent loses quota, keep its checkpoint and resume that
+work on a qualified route. Tell the owner through ClawBot if Root needs a model
+or reasoning change.
+
+2026-11-24 Claw routing. Local wechat-personal bot notifications go directly to
+the original iLink transport through its authorized channel endpoint. The host
+can be the Mesh carrier while the operation remains one direct notification.
+AMITA agents may explicitly hand a conversation or notification to the dedicated
+Claw entrance agent. Direct transport failure recovery uses the original
+request receipt, never a new model prompt or a new notification ID.
+
+
 2026-11-24 owner policy. Managed Mesh inference uses the authorized VPS egress
 through the node's private Mesh link, including workers running on the laptop
 and new environments. Configure the launcher's owner-owned network binding
