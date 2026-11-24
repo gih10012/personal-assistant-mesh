@@ -58,7 +58,8 @@ export async function handle(driver, request) {
 }
 export function transport(config) {
   return async outgoing => {
-    const response = await fetch(config.peers[outgoing.to], { method: 'POST', headers: { 'content-type': 'application/json' },
+    const response = await fetch(config.peers[outgoing.to], { method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': 'AMITA-Raft/1.0' },
       body: JSON.stringify(outgoing), redirect: 'error', signal: AbortSignal.timeout(3000) });
     need(response.ok, 'peer_transport_rejected');
     // ACKs are small and signed, and never carry an arbitrary response body.
