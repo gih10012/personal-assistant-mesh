@@ -12,7 +12,9 @@ let context: common.UIAbilityContext | null = null;
 let managedSink: PhoneScreenShareSink | null = null;
 let sourceClosing: Promise<void> | null = null;
 let sourceCloseUnknown: boolean = false;
-let lastAcknowledgedSha256: string = '';
+interface AcknowledgedFrame { revision: number; sha256: string; }
+let latestFrame: AcknowledgedFrame | null = null;
+let previousFrame: AcknowledgedFrame | null = null;
 
 export interface ScreenShareOwnerStatus extends ScreenShareSessionStatus {
   lastAcknowledgedSha256: string;
@@ -48,13 +50,15 @@ export class ScreenShareOwner {
   }
 
   static foregroundChanged(): void { session.foregroundChanged(); }
+  static liveFrameRevision(scope: ScreenShareScope): number { return session.liveFrameRevision(scope); }
   static status(): ScreenShareOwnerStatus {
     const value: ScreenShareSessionStatus = session.status();
+    const ack = latestFrame?.revision === value.lastFrameRevision ? latestFrame : previousFrame;
     return { state: value.state, captureActive: value.captureActive, backgroundActive: value.backgroundActive,
       acknowledgedFrames: value.acknowledgedFrames, lastFrameRevision: value.lastFrameRevision,
       lastCaptureTimestamp: value.lastCaptureTimestamp, lastAckObservedAt: value.lastAckObservedAt,
       error: value.error, nativeCode: value.nativeCode, cleanupUnknown: value.cleanupUnknown,
-      lastAcknowledgedSha256: value.acknowledgedFrames > 0 ? lastAcknowledgedSha256 : '' };
+      lastAcknowledgedSha256: ack !== null && ack.revision === value.lastFrameRevision ? ack.sha256 : '' };
   }
   static sourceCloseUnconfirmed(): boolean { return sourceCloseUnknown; }
 
@@ -66,13 +70,16 @@ export class ScreenShareOwner {
       AppStorage.get<boolean>('meshForeground') !== true || !authorization.isForeground() ||
       !authorization.valid(scope)) { throw new Error('screen_share_original_owner_gesture_required'); }
     const sink: PhoneScreenShareSink = new PhoneScreenShareSink(primary, controlSessionId, record, scope, gate);
-    managedSink = sink; sourceCloseUnknown = false; lastAcknowledgedSha256 = '';
+    managedSink = sink; sourceCloseUnknown = false; latestFrame = null; previousFrame = null;
     const bound: ScreenShareFrameSink = {
       isLive: (value: ScreenShareScope): boolean => sink.isLive(value),
       onDisconnect: (listener: () => void): (() => void) => sink.onDisconnect(listener),
       sendFrame: async (value: ScreenShareScope, frame: ScreenShareFrame): Promise<ScreenShareFrameAck> => {
         const ack: ScreenShareFrameAck = await sink.sendFrame(value, frame);
-        if (managedSink === sink) { lastAcknowledgedSha256 = sink.status().lastAcknowledgedSha256; }
+        if (managedSink === sink) {
+          previousFrame = latestFrame;
+          latestFrame = { revision: ack.frameRevision, sha256: sink.status().lastAcknowledgedSha256 };
+        }
         return ack;
       },
       detach: (value: ScreenShareScope): void => {

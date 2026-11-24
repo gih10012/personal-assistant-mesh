@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { createHash } from 'node:crypto';
 import * as protocol from '../core/Protocol.ts';
-import { sameScreenShareScope } from './ScreenSharePolicy.ts';
+import { decodeScreenShareInput, sameScreenShareScope, sameScreenShareTarget, validScreenShareLaunchScope,
+  validScreenShareTarget } from './ScreenSharePolicy.ts';
 
 const digest = async bytes => createHash('sha256').update(bytes).digest('hex');
 const requireValue = protocol.requireValue;
@@ -26,17 +27,22 @@ async function until(predicate) {
 // Execute the actual shipped runtime and original WorkEngine. Only platform
 // preferences/Asset/HTTPS/media-owner boundaries are synthetic. No SDK, phone,
 // screen, real node, Source DB, network or background service is accessed.
-async function fixture() {
+async function fixture({ target, launchEnabled = target !== undefined } = {}) {
   let now = 1000000, foreground = true, serial = 0, nextTimer = 0, managedStarts = 0, sourceCloses = 0;
   let stopPromise = null, acceptRelease = null, holdAccept = false, closeRelease = null;
   let closingAllowed = false;
-  const stores = new Map(), writes = [], requests = [], timers = new Map();
+  const stores = new Map(), writes = [], requests = [], timers = new Map(), launches = [];
+  let launchResolve, launchReject, observedRevision = 0;
   const config = { format: 'mesh-phone-client/1', node_id: 'phone', session_id: 'original-primary',
     resource_url: 'https://original.example.test/phone/node', mesh_id: 'mesh', authority_id: 'authority' };
-  const input = await blob({ format: 'amita-phone-screen-share/1', command: 'screen_share', duration_ms: 60000, max_fps: 1 });
+  const input = await blob(target ? { format: 'amita-phone-screen-share/2', command: 'screen_share_open_app',
+    duration_ms: 60000, max_fps: 1, target } :
+    { format: 'amita-phone-screen-share/1', command: 'screen_share', duration_ms: 60000, max_fps: 1 });
   const original = { operation_id: 'original-operation', capability_id: 'phone:ui-control-v1', provider: 'node:phone',
     state: 'pending', epoch: 1, receipt_id: null, task_id: 'original-task', task_epoch: 7, deadline: 1090,
-    selection: { capability_id: 'phone:ui-control-v1', epoch: 1, action: 'inspect', scope: { purpose: 'Synthetic read-only task' },
+    selection: { capability_id: 'phone:ui-control-v1', epoch: 1, action: target ? 'action' : 'inspect',
+      scope: target ? { task_id: 'original-task', task_epoch: 7, purpose: 'screen_share_open_app', target: { ...target } } :
+        { purpose: 'Synthetic read-only task' },
       workload: { input } } };
   let remote = structuredClone(original);
   let media = { state: 'idle', captureActive: false, backgroundActive: false, acknowledgedFrames: 0,
@@ -64,6 +70,8 @@ async function fixture() {
   const clear = id => timers.delete(id);
   const owner = {
     attach: () => {}, status: () => ({ ...media }), sourceCloseUnconfirmed: () => false,
+    liveFrameRevision: scope => authorization?.valid(scope) && media.captureActive && media.backgroundActive &&
+      media.acknowledgedFrames > 0 ? observedRevision : 0,
     foregroundChanged: () => {},
     startManaged: async (primary, session, record, scope, auth, liveGate) => {
       managedStarts++;
@@ -94,7 +102,8 @@ async function fixture() {
   const view = online => ({ format: 'mesh-interactive-node/1', mesh_id: 'mesh', execution_verified: false,
     native_tools_restricted: false, session: { node_id: 'phone', session_id: 'phone:screen-share-v1',
       lifecycle: 'screen-share', installed_adapter: { enabled: true, screen_share_enabled: true,
-        capability_id: 'phone:ui-control-v1', epoch: 1, execution_verification: 'declared_only' },
+        capability_id: 'phone:ui-control-v1', epoch: 1, execution_verification: 'declared_only',
+        screen_share_launch_enabled: launchEnabled },
       network: { state: online ? 'online' : 'offline', expires_at: online ? now / 1000 + 30 : now / 1000,
         presence_ttl_seconds: 30 } } });
   const http = { RequestMethod: { POST: 'POST' }, HttpProtocol: { HTTP1_1: 0 }, HttpDataType: { STRING: 1 },
@@ -123,9 +132,15 @@ async function fixture() {
           assert.equal(sourceCloses, 1, 'Source close must finish before the original result is sent');
           const resultBlob = provider.arguments.result;
           const summary = JSON.parse(Buffer.from(resultBlob.base64, 'base64').toString());
-          assert.equal(summary.format, 'amita-phone-screen-share-result/1'); assert.equal(summary.readonly, true);
+          assert.equal(summary.format, target ? 'amita-phone-screen-share-result/2' : 'amita-phone-screen-share-result/1');
+          assert.equal(summary.readonly, !target);
           assert.equal(summary.source_closed, true); assert.equal(summary.capture_quiescent, true);
-          assert.equal(summary.last_ack_sha256, 'a'.repeat(64)); assert.equal(summary.acknowledged_frames, 1);
+          assert.equal(summary.last_ack_sha256, 'a'.repeat(64));
+          assert.equal(summary.acknowledged_frames, target ? 3 : 1);
+          if (target) {
+            assert.deepEqual(summary.target, target); assert.equal(summary.launch_system_acknowledged, true);
+            assert.equal(summary.launch_baseline_frame_revision, 2); assert.equal(summary.later_frame_revision, 3);
+          }
           assert.equal(JSON.stringify(summary).includes('base64'), false);
           result = { result_reference: 'phone-result:' + resultBlob.sha256, sha256: resultBlob.sha256, bytes: resultBlob.bytes };
         } else if (provider.action === 'settle') {
@@ -143,14 +158,24 @@ async function fixture() {
   const exported = Object.keys(work);
   const load = () => new Function(...exported, 'requireValue', 'preferences', 'deviceInfo', 'http', 'util',
     'NodeCredentialStore', 'TrustedRuntimeConfig', 'controlBlob', 'controlDigest', 'ScreenShareOwner',
-    'sameScreenShareScope', 'AppStorage', 'Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+    'decodeScreenShareInput', 'sameScreenShareScope', 'sameScreenShareTarget', 'validScreenShareLaunchScope',
+    'validScreenShareTarget', 'AppStorage', 'Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
     code + '\nreturn ScreenShareRuntime;')(...exported.map(name => work[name]), requireValue,
     { removePreferencesFromCacheSync: () => {}, getPreferencesSync: (_context, options) => prefs(options.name) },
     { sdkApiVersion: 26 }, http, { TextEncoder: Encoder, TextDecoder: Decoder, Base64Helper: Base64,
       generateRandomUUID: () => 'synthetic-' + (++serial) }, Credentials, Trusted, blob, digest, owner,
-    sameScreenShareScope, { get: key => key === 'meshForeground' ? foreground : undefined }, { now: () => now },
+    decodeScreenShareInput, sameScreenShareScope, sameScreenShareTarget, validScreenShareLaunchScope, validScreenShareTarget,
+    { get: key => key === 'meshForeground' ? foreground : undefined }, { now: () => now },
     (callback, delay) => timer(callback, delay), clear, (callback, delay) => timer(callback, delay, true), clear);
-  const context = {}; let Runtime = load(), runtime = await Runtime.create(context);
+  const context = { startAbility: want => {
+    assert.equal(foreground, true);
+    const runtimeStore = stores.get('amita_screen_share_runtime_v1');
+    assert.equal(JSON.parse(runtimeStore.get('work_snapshot')).records[0].state, 'attempted');
+    assert.equal(JSON.parse(runtimeStore.get('approvals'))[0].launchStatus, 'attempted');
+    launches.push(want);
+    return new Promise((resolve, reject) => { launchResolve = resolve; launchReject = reject; });
+  } };
+  let Runtime = load(), runtime = await Runtime.create(context);
   const advance = async milliseconds => {
     now += milliseconds;
     for (const [id, item] of [...timers]) {
@@ -161,13 +186,16 @@ async function fixture() {
     }
     await settle();
   };
-  return { stores, writes, requests, original, owner, advance, now: () => now,
+  return { stores, writes, requests, original, owner, advance, launches, now: () => now,
     runtime: () => runtime, records: () => runtime.engine.snapshot.records,
     setForeground: value => { foreground = value; runtime.foregroundChanged(); },
     start: async () => { await runtime.receive(); await until(() => runtime.pending() !== null); return runtime.pending(); },
-    markActualFrameAndTicket: () => { media = { ...media, state: 'sharing', captureActive: true, backgroundActive: true,
-      acknowledgedFrames: 1, lastFrameRevision: 1, lastCaptureTimestamp: 1234.5, lastAckObservedAt: now,
+    markActualFrameAndTicket: (revision = 1) => { observedRevision = revision;
+      media = { ...media, state: 'sharing', captureActive: true, backgroundActive: true,
+      acknowledgedFrames: revision, lastFrameRevision: revision, lastCaptureTimestamp: 1234.5, lastAckObservedAt: now,
       lastAcknowledgedSha256: 'a'.repeat(64) }; },
+    markInFlightFrame: revision => { observedRevision = revision; },
+    resolveLaunch: () => launchResolve(), rejectLaunch: () => launchReject(new Error('synthetic refusal')),
     markCaptureWithoutTicket: () => { media = { ...media, state: 'capture_started_waiting_frame_ack', captureActive: true }; },
     allowClose: () => { closingAllowed = true; closeRelease?.(); },
     starts: () => managedStarts, closes: () => sourceCloses,
@@ -234,4 +262,46 @@ test('cold attempted stream becomes unknown and the original record is never rep
   assert.equal(f.starts(), 1); assert.equal(f.records()[0].receipt_id, receipt);
   assert.equal(f.records()[0].invocation_nonce, invocation); assert.equal(f.records()[0].result_json, '');
   assert.equal(f.requests.filter(item => item.arguments.provider?.action === 'start').length, 1);
+});
+
+const appTarget = { bundle_name: 'com.tencent.wechat', ability_name: 'EntryAbility' };
+
+test('launch uses only the approved target after real frame and ticket, then independently requires a later frame ACK', async () => {
+  const f = await fixture({ target: appTarget }), pending = await f.start();
+  assert.deepEqual(pending.target, appTarget);
+  await assert.rejects(f.runtime().decide({ ...pending, target: { ...appTarget, ability_name: 'Different' } }, true),
+    /decision_mismatch/);
+  await f.runtime().decide(pending, true); await until(() => f.starts() === 1);
+  f.markCaptureWithoutTicket(); await f.advance(250); assert.deepEqual(f.launches, []);
+  f.markActualFrameAndTicket(); await f.advance(250);
+  assert.deepEqual(f.launches, [{ bundleName: appTarget.bundle_name, abilityName: appTarget.ability_name }]);
+  f.markInFlightFrame(2); f.setForeground(false); f.resolveLaunch(); await settle();
+  assert.equal(f.runtime().status().launchStatus, 'system_acknowledged');
+  f.markActualFrameAndTicket(2); await f.advance(250);
+  assert.equal(f.runtime().status().laterFrameAcknowledged, false, 'an already in-flight frame cannot supply later proof');
+  f.markActualFrameAndTicket(3); await f.advance(250);
+  assert.equal(f.runtime().status().laterFrameAcknowledged, true);
+  assert.equal(f.records()[0].result_json, '', 'even the later frame does not settle capture');
+  f.setForeground(true); f.allowClose(); await f.runtime().stop(); await f.advance(250);
+  await until(() => f.records()[0].state === 'settled');
+  assert.equal(f.launches.length, 1);
+});
+
+test('a disabled adapter and a declined on-device launch request never admit the launch', async () => {
+  const disabled = await fixture({ target: appTarget, launchEnabled: false });
+  await disabled.runtime().receive(); await settle();
+  assert.equal(disabled.runtime().pending(), null); assert.equal(disabled.records().length, 0);
+  const declined = await fixture({ target: appTarget }), pending = await declined.start();
+  await declined.runtime().decide(pending, false); await settle();
+  assert.equal(declined.starts(), 0); assert.equal(declined.launches.length, 0);
+  assert.equal(declined.requests.some(item => item.arguments.provider?.action === 'accept'), false);
+});
+
+test('restart never invokes an attempted app launch again', async () => {
+  const f = await fixture({ target: appTarget }), pending = await f.start();
+  await f.runtime().decide(pending, true); await until(() => f.starts() === 1);
+  f.markActualFrameAndTicket(); await f.advance(250); assert.equal(f.launches.length, 1);
+  await f.reload(); await f.runtime().receive(); await settle();
+  assert.equal(f.records()[0].state, 'unknown'); assert.equal(f.runtime().pending(), null);
+  assert.equal(f.starts(), 1); assert.equal(f.launches.length, 1);
 });

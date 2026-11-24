@@ -1,4 +1,4 @@
-import { common } from '@kit.AbilityKit';
+import { common, Want } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { http } from '@kit.NetworkKit';
@@ -12,14 +12,15 @@ import { TrustedRuntimeConfig } from '../update/TrustedRuntimeConfig';
 import { controlBlob, controlDigest } from '../control/PhoneControlJSON';
 import { ScreenShareOwner } from './ScreenShareOwner';
 import { ScreenShareAuthorization, ScreenShareSessionStatus } from './ScreenShareSession';
-import { ScreenShareScope, sameScreenShareScope } from './ScreenSharePolicy';
+import { ScreenShareInput, ScreenShareScope, ScreenShareTarget, decodeScreenShareInput, sameScreenShareScope,
+  sameScreenShareTarget, validScreenShareLaunchScope, validScreenShareTarget } from './ScreenSharePolicy';
 import { PhoneScreenShareGate } from './PhoneScreenShareSink';
 
 interface NodeIdentity { node_id: string; }
 interface RuntimeIdentity { format: string; node_id: string; control_session_id: string; }
-interface StreamInput { format: string; command: string; duration_ms: number; max_fps: number; }
 interface SourceAdapter {
   enabled: boolean; screen_share_enabled: boolean; capability_id: string;
+  screen_share_launch_enabled?: boolean;
   epoch: number; execution_verification: string;
 }
 interface SourceView extends SessionView { lifecycle: string; installed_adapter: SourceAdapter; }
@@ -37,11 +38,13 @@ interface LocalApproval {
   expiresAt: number; allocationDeadline: number; scopeExpiresAt: number;
   approvedAt: number; permissionContext: string; streamSessionId: string;
   receiptId: string; invocationNonce: string; authorityEpoch: number;
+  target?: ScreenShareTarget; launchStatus?: string; launchAckBaseline?: number;
 }
 export interface ScreenSharePending {
   approvalId: string; nonce: string; revision: number; operationId: string;
   taskId: string; taskEpoch: number; inputHash: string; expiresAt: number;
   allocationDeadline: number; durationMs: number; maxFps: number; purpose: string;
+  target?: ScreenShareTarget;
 }
 export class ScreenShareRuntimeStatus {
   state: string = 'unconfigured';
@@ -59,6 +62,8 @@ export class ScreenShareRuntimeStatus {
   acknowledgedFrames: number = 0;
   pending: boolean = false;
   executing: boolean = false;
+  launchStatus: string = '';
+  laterFrameAcknowledged: boolean = false;
   taskId: string = '';
   taskEpoch: number = 0;
   operationId: string = '';
@@ -73,6 +78,8 @@ interface StreamSummary {
   task_id: string; task_epoch: number; stop_reason: string;
   acknowledged_frames: number; last_frame_revision: number;
   last_ack_sha256: string; source_closed: boolean; capture_quiescent: boolean;
+  target?: ScreenShareTarget; launch_system_acknowledged?: boolean;
+  launch_baseline_frame_revision?: number; later_frame_revision?: number;
 }
 
 function freshPreferences(context: common.Context, name: string): preferences.Preferences {
@@ -88,8 +95,8 @@ function sameConfig(left: WorkConfig, right: WorkConfig): boolean {
     left.resource_url === right.resource_url && left.format === right.format;
 }
 
-// Retained by EntryAbility, never by a page. Read-only video sharing is an app
-// component with its own DECLARED presence; no accessibility/root/input claims.
+// Retained by EntryAbility, never by a page. Capture and the owner's optional
+// app launch use this component's separate declared presence.
 export class ScreenShareRuntime implements WorkHost {
   private static instance: ScreenShareRuntime | null = null;
   private static creating: Promise<ScreenShareRuntime> | null = null;
@@ -117,6 +124,7 @@ export class ScreenShareRuntime implements WorkHost {
   private connected: boolean = false;
   private presenceAttempted: boolean = false;
   private sourceInstalled: boolean = false;
+  private sourceLaunchEnabled: boolean = false;
   private capabilityEpoch: number = 0;
   private presenceExpires: number = 0;
   private credentialExpires: number = 0;
@@ -156,7 +164,8 @@ export class ScreenShareRuntime implements WorkHost {
         Number.isSafeInteger(approval.scopeExpiresAt) && Number.isSafeInteger(approval.approvedAt) &&
         typeof approval.permissionContext === 'string' && approval.permissionContext.length <= 512 &&
         typeof approval.receiptId === 'string' && typeof approval.invocationNonce === 'string' &&
-        approval.receiptId.length <= 256 && approval.invocationNonce.length <= 256,
+        approval.receiptId.length <= 256 && approval.invocationNonce.length <= 256 &&
+        (approval.target === undefined || validScreenShareTarget(approval.target)),
       'screen_share_private_approval_state_invalid');
       if (!['closed', 'denied', 'revoked', 'unknown'].includes(approval.state)) { approval.state = 'unknown'; }
     }
@@ -229,7 +238,7 @@ export class ScreenShareRuntime implements WorkHost {
     if (this.primary !== null && !sameConfig(this.primary, primary)) {
       requireValue(this.executingApproval === null && this.pendingApproval === null,
         'screen_share_route_changed_during_original_request');
-      this.connected = false; this.sourceInstalled = false; this.capabilityEpoch = 0;
+      this.connected = false; this.sourceInstalled = false; this.sourceLaunchEnabled = false; this.capabilityEpoch = 0;
     }
     this.originalMember = { format: original.format, resource_url: original.resource_url, node_id: original.node_id,
       session_id: original.session_id, mesh_id: original.mesh_id, authority_id: original.authority_id };
@@ -263,8 +272,9 @@ export class ScreenShareRuntime implements WorkHost {
     return row !== undefined && row.dispatch_json === JSON.stringify(dispatch) &&
       row.task_id === approval.taskId && row.task_epoch === approval.taskEpoch &&
       dispatch.epoch === approval.dispatchEpoch && dispatch.selection?.epoch === approval.capabilityEpoch &&
-      dispatch.selection?.workload.input?.sha256 === approval.inputHash &&
-      dispatch.selection?.action === 'inspect' && dispatch.provider === 'node:' + this.nodeId;
+      dispatch.selection?.workload.input?.sha256 === approval.inputHash && dispatch.provider === 'node:' + this.nodeId &&
+      (approval.target === undefined ? dispatch.selection?.action === 'inspect' : dispatch.selection?.action === 'action' &&
+        validScreenShareLaunchScope(dispatch.selection.scope, approval.target, approval.taskId, approval.taskEpoch));
   }
   private prepared(approval: LocalApproval): boolean {
     const row = this.row(approval.operationId, approval.capabilityId);
@@ -319,6 +329,9 @@ export class ScreenShareRuntime implements WorkHost {
       adapter.execution_verification === 'declared_only' && Number.isSafeInteger(adapter.epoch) && adapter.epoch > 0 &&
       view.network !== undefined && Number.isFinite(view.network.expires_at), 'screen_share_source_adapter_not_installed');
     if (this.capabilityEpoch > 0 && this.capabilityEpoch !== adapter.epoch) { this.revoke('screen_share_capability_epoch_changed'); }
+    this.sourceLaunchEnabled = adapter.screen_share_launch_enabled === true;
+    const approval = this.executingApproval ?? this.admissionApproval;
+    if (approval?.target !== undefined && !this.sourceLaunchEnabled) { this.revoke('screen_share_launch_adapter_disabled'); }
     this.sourceInstalled = true; this.capabilityEpoch = adapter.epoch;
     this.presenceExpires = view.network.expires_at;
     this.state = view.network.state === 'online' ? 'receiving' : 'offline';
@@ -355,7 +368,7 @@ export class ScreenShareRuntime implements WorkHost {
       }
     } catch (_) {
       this.error = 'screen_share_source_presence_unconfirmed'; this.state = 'unconfigured';
-      this.sourceInstalled = false; this.connected = false;
+      this.sourceInstalled = false; this.sourceLaunchEnabled = false; this.connected = false;
       this.revoke('screen_share_source_presence_unconfirmed');
     } finally { this.pulsing = false; }
   }
@@ -380,12 +393,18 @@ export class ScreenShareRuntime implements WorkHost {
         if (!this.foreground() || !this.sourceLive()) { break; }
         const existing = this.row(dispatch.operation_id, dispatch.capability_id);
         if (existing !== undefined) { continue; }
-        if (dispatch.selection?.action !== 'inspect') { continue; }
+        if (dispatch.selection?.action !== 'inspect') {
+          if (dispatch.selection?.action !== 'action' || !this.sourceLaunchEnabled) { continue; }
+          // Other UI action recipes belong to a different runtime.
+          try { await this.decode(dispatch); } catch (_) { continue; }
+        }
         try {
           const result = await this.engine.run(dispatch);
           const approval = this.approvalFor(dispatch);
           if (approval !== undefined && approval.state === 'denied') { this.error = 'screen_share_owner_denied'; }
-          else if (result.state === 'unknown') { this.error = 'screen_share_original_stream_outcome_unknown'; }
+          else if (result.state === 'unknown' && approval?.launchStatus !== 'system_rejected') {
+            this.error = 'screen_share_original_stream_outcome_unknown';
+          }
         }
         finally { this.admissionApproval = null; }
         break;
@@ -399,22 +418,21 @@ export class ScreenShareRuntime implements WorkHost {
     }
   }
 
-  private async decode(dispatch: ProviderDispatch): Promise<StreamInput> {
+  private async decode(dispatch: ProviderDispatch): Promise<ScreenShareInput> {
     validateWorkDispatch(dispatch, this.nodeId);
-    requireValue(dispatch.capability_id === this.nodeId + ':ui-control-v1' && dispatch.selection?.action === 'inspect' &&
-      dispatch.selection?.epoch === this.capabilityEpoch, 'screen_share_read_only_original_request_required');
-    const input = dispatch.selection?.workload.input as Blob; validateWorkBlob(input);
+    const selection = dispatch.selection;
+    if (selection === undefined) { throw new Error('screen_share_original_request_required'); }
+    requireValue(dispatch.capability_id === this.nodeId + ':ui-control-v1' && selection.epoch === this.capabilityEpoch &&
+      (selection.action === 'inspect' || (selection.action === 'action' && this.sourceLaunchEnabled)),
+    'screen_share_original_request_required');
+    const input = selection.workload.input as Blob; validateWorkBlob(input);
     const codec = new util.Base64Helper(); const bytes = codec.decodeSync(input.base64);
     requireValue(bytes.length > 0 && bytes.length <= 4096 && bytes.length === input.bytes &&
       codec.encodeToStringSync(bytes) === input.base64 && await controlDigest(bytes) === input.sha256,
     'screen_share_original_input_hash_required');
-    const body = JSON.parse(new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes)) as StreamInput;
-    requireValue(body !== null && typeof body === 'object' && !Array.isArray(body) &&
-      Object.keys(body).sort().join('|') === 'command|duration_ms|format|max_fps' &&
-      body.format === 'amita-phone-screen-share/1' && body.command === 'screen_share' &&
-      Number.isSafeInteger(body.duration_ms) && body.duration_ms >= 1000 && body.duration_ms <= 300000 &&
-      Number.isSafeInteger(body.max_fps) && body.max_fps >= 1 && body.max_fps <= 2,
-    'screen_share_dedicated_read_only_stream_required');
+    const body = decodeScreenShareInput(new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes), selection.action);
+    requireValue(body.target === undefined || (this.sourceLaunchEnabled && validScreenShareLaunchScope(selection.scope,
+      body.target, dispatch.task_id as string, dispatch.task_epoch as number)), 'screen_share_original_launch_scope_required');
     return body;
   }
 
@@ -423,6 +441,7 @@ export class ScreenShareRuntime implements WorkHost {
       'screen_share_owner_and_live_source_required');
     const body = await this.decode(dispatch);
     requireValue(this.foreground() && this.sourceLive() && this.approvals.length < 256 &&
+      (body.target === undefined || this.sourceLaunchEnabled) &&
       this.approvalFor(dispatch) === undefined, 'screen_share_original_approval_required');
     const purpose = dispatch.selection?.scope as PurposeScope;
     const approval: LocalApproval = { format: 'amita-local-screen-share-approval/1',
@@ -436,6 +455,10 @@ export class ScreenShareRuntime implements WorkHost {
       expiresAt: Math.floor(Math.min(Date.now() + 30000, (dispatch.deadline as number) * 1000 - 10000)),
       allocationDeadline: Math.floor((dispatch.deadline as number) * 1000), scopeExpiresAt: 0,
       approvedAt: 0, permissionContext: '', streamSessionId: '', receiptId: '', invocationNonce: '', authorityEpoch: 0 };
+    if (body.target !== undefined) {
+      approval.target = body.target;
+      approval.purpose = '共享屏幕，待画面及后台共享就绪后尝试打开以下应用';
+    }
     requireValue(approval.expiresAt > Date.now() && this.prepared(approval), 'screen_share_prepared_original_deadline_required');
     this.approvals.push(approval); this.pendingApproval = approval; this.admissionApproval = approval;
     await this.persistApprovals();
@@ -457,6 +480,7 @@ export class ScreenShareRuntime implements WorkHost {
   allowed(dispatch: ProviderDispatch, permissionContext?: string): boolean {
     const approval = this.approvalFor(dispatch);
     return approval !== undefined && ['approved', 'consumed'].includes(approval.state) && this.originalBound(approval, dispatch) &&
+      (approval.target === undefined || this.sourceLaunchEnabled) &&
       approval.permissionContext.length > 0 && (permissionContext === undefined || permissionContext === approval.permissionContext) &&
       approval.scopeExpiresAt > Date.now() && approval.capabilityEpoch === this.capabilityEpoch &&
       approval.allocationDeadline > Date.now() && this.sourceLive() && this.foreground();
@@ -469,7 +493,8 @@ export class ScreenShareRuntime implements WorkHost {
       this.sourceLive() && this.prepared(approval) && approval.expiresAt > Date.now() &&
       value.approvalId === approval.approvalId && value.nonce === approval.nonce && value.revision === approval.revision &&
       value.operationId === approval.operationId && value.taskId === approval.taskId && value.taskEpoch === approval.taskEpoch &&
-      value.inputHash === approval.inputHash && value.expiresAt === approval.expiresAt,
+      value.inputHash === approval.inputHash && value.expiresAt === approval.expiresAt &&
+      sameScreenShareTarget(value.target, approval.target),
     'screen_share_pending_local_decision_mismatch');
     this.deciding = true;
     try {
@@ -509,8 +534,40 @@ export class ScreenShareRuntime implements WorkHost {
       row.authority_epoch === approval.authorityEpoch && row.permission_context === approval.permissionContext &&
       approval.capabilityEpoch === this.capabilityEpoch && approval.scopeExpiresAt > Date.now() &&
       approval.allocationDeadline > Date.now() && this.sourceInstalled && this.connected &&
+      (approval.target === undefined || this.sourceLaunchEnabled) &&
       this.presenceExpires * 1000 > Date.now() && this.credentialExpires * 1000 > Date.now() &&
       this.enabled && !this.destroyed && this.memberCurrent();
+  }
+
+  private async launchApp(approval: LocalApproval, dispatch: ProviderDispatch, scope: ScreenShareScope): Promise<void> {
+    const target = approval.target as ScreenShareTarget;
+    requireValue(approval.launchStatus === undefined && validScreenShareTarget(target), 'screen_share_launch_already_attempted');
+    // WorkEngine already flushed the attempted WorkRecord. Keep the launch
+    // attempt and its system response on that record's bound local approval.
+    approval.launchStatus = 'attempted';
+    await this.persistApprovals();
+    requireValue(this.scopeValid(scope) && this.originalBound(approval, dispatch) && this.foreground() &&
+      ScreenShareOwner.liveFrameRevision(scope) > 0, 'screen_share_launch_readiness_lost');
+
+    const want: Want = { bundleName: target.bundle_name, abilityName: target.ability_name };
+    let timer: number = -1;
+    const deadline = new Promise<string>((resolve): void => {
+      timer = setTimeout((): void => { resolve('unknown'); }, Math.min(5000, scope.expiresAt - Date.now()));
+    });
+    let status: string;
+    try {
+      status = await Promise.race([this.context.startAbility(want).then((): string => 'system_acknowledged',
+        (): string => 'system_rejected'), deadline]);
+    } catch (_) { status = 'system_rejected'; }
+    finally { clearTimeout(timer); }
+    approval.launchStatus = status;
+    // Exclude any frame already accepted into delivery when the system ACK was
+    // observed. A later receiver ACK is independently required for completion.
+    const baseline = status === 'system_acknowledged' ? ScreenShareOwner.liveFrameRevision(scope) : 0;
+    if (status === 'system_acknowledged') { approval.launchAckBaseline = baseline; }
+    await this.persistApprovals();
+    if (status === 'system_rejected') { this.error = 'screen_share_launch_system_rejected'; }
+    requireValue(status === 'system_acknowledged' && baseline > 0, 'screen_share_launch_outcome_unconfirmed');
   }
 
   async execute(dispatch: ProviderDispatch): Promise<Blob> {
@@ -524,7 +581,6 @@ export class ScreenShareRuntime implements WorkHost {
     this.activeScope = { sessionId: approval.streamSessionId, taskId: row.task_id, taskEpoch: row.task_epoch,
       operationId: row.operation_id, approvalId: approval.approvalId, nonce: approval.nonce,
       revision: approval.revision, expiresAt: approval.scopeExpiresAt };
-    await this.persistApprovals();
     const scope = this.activeScope as ScreenShareScope;
     const authorization: ScreenShareAuthorization = {
       isForeground: (): boolean => this.foreground(),
@@ -534,7 +590,6 @@ export class ScreenShareRuntime implements WorkHost {
         this.revokedListeners.push(listener);
         return (): void => { this.revokedListeners = this.revokedListeners.filter((entry: () => void): boolean => entry !== listener); };
       },
-      // Read-only AVScreenCapture never owns or opens the independent selfHDC session.
       closeHdc: (_value: ScreenShareScope): void => {}
     };
     const gate: PhoneScreenShareGate = {
@@ -543,6 +598,7 @@ export class ScreenShareRuntime implements WorkHost {
     };
     this.state = 'starting_capture';
     try {
+      await this.persistApprovals();
       requireValue(this.foreground() && this.scopeValid(scope), 'screen_share_original_scope_lost');
       await ScreenShareOwner.startManaged(this.primary as WorkConfig, this.identity.control_session_id,
         row, scope, authorization, gate);
@@ -552,6 +608,10 @@ export class ScreenShareRuntime implements WorkHost {
         if (!this.scopeValid(scope) || (!this.foreground() && !(media.captureActive && media.backgroundActive))) {
           this.revoke('screen_share_original_scope_or_background_lost');
           await ScreenShareOwner.stop(); break;
+        }
+        if (approval.target !== undefined && approval.launchStatus === undefined) {
+          requireValue(this.foreground(), 'screen_share_launch_readiness_lost');
+          if (ScreenShareOwner.liveFrameRevision(scope) > 0) { await this.launchApp(approval, dispatch, scope); }
         }
         this.state = media.backgroundActive ? 'sharing' : 'awaiting_capture_or_frame_ack';
         await new Promise<void>((resolve): void => { setTimeout(resolve, 250); });
@@ -568,11 +628,20 @@ export class ScreenShareRuntime implements WorkHost {
         stop_reason: safeCode(final.error || 'screen_share_owner_stopped'),
         acknowledged_frames: final.acknowledgedFrames, last_frame_revision: final.lastFrameRevision,
         last_ack_sha256: final.lastAcknowledgedSha256, source_closed: true, capture_quiescent: true };
+      if (approval.target !== undefined) {
+        const baseline = approval.launchAckBaseline ?? 0;
+        requireValue(approval.launchStatus === 'system_acknowledged' && baseline > 0 &&
+          final.acknowledgedFrames >= 2 && final.lastFrameRevision > baseline, 'screen_share_launch_later_frame_unconfirmed');
+        summary.format = 'amita-phone-screen-share-result/2'; summary.command = 'screen_share_open_app'; summary.readonly = false;
+        summary.target = approval.target; summary.launch_system_acknowledged = true;
+        summary.launch_baseline_frame_revision = baseline; summary.later_frame_revision = final.lastFrameRevision;
+      }
       approval.state = 'closed'; await this.persistApprovals();
       return await controlBlob(summary);
     } catch (_) {
-      approval.state = 'unknown'; await this.persistApprovals();
-      try { await ScreenShareOwner.stop(); } catch (_) {}
+      approval.state = 'unknown';
+      try { await this.persistApprovals(); }
+      finally { try { await ScreenShareOwner.stop(); } catch (_) {} }
       throw new Error('screen_share_original_stream_outcome_unknown');
     } finally {
       this.executingApproval = null; this.activeScope = null; this.revokedListeners = [];
@@ -585,26 +654,38 @@ export class ScreenShareRuntime implements WorkHost {
     // A finished, quiescent metadata result may be reported on foreground
     // reunion without restarting capture or restoring a spent owner approval.
     return this.foreground() && this.memberCurrent() && approval !== undefined && approval.state === 'closed' &&
+      this.originalBound(approval, dispatch) &&
       row !== undefined && row.result_json.length > 0 && row.dispatch_json === JSON.stringify(dispatch) &&
       row.permission_context === permissionContext && approval.permissionContext === permissionContext &&
-      approval.receiptId === row.receipt_id && approval.invocationNonce === row.invocation_nonce && this.metadataOnly(row);
+      approval.receiptId === row.receipt_id && approval.invocationNonce === row.invocation_nonce && this.metadataOnly(row, approval);
   }
 
-  private metadataOnly(row: WorkRecord): boolean {
+  private metadataOnly(row: WorkRecord, approval: LocalApproval): boolean {
     try {
       const blob = JSON.parse(row.result_json) as Blob; validateWorkBlob(blob);
       const codec = new util.Base64Helper(); const bytes = codec.decodeSync(blob.base64);
       if (bytes.length !== blob.bytes || bytes.length <= 0 || bytes.length > 4096 ||
         codec.encodeToStringSync(bytes) !== blob.base64) { return false; }
       const value = JSON.parse(new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes)) as StreamSummary;
-      return Object.keys(value).sort().join('|') ===
-        'acknowledged_frames|capture_quiescent|command|format|last_ack_sha256|last_frame_revision|operation_id|readonly|source_closed|stop_reason|task_epoch|task_id' &&
-        value.format === 'amita-phone-screen-share-result/1' && value.command === 'screen_share' && value.readonly === true &&
-        value.operation_id === row.operation_id && value.task_id === row.task_id && value.task_epoch === row.task_epoch &&
+      const commonValid = value.operation_id === row.operation_id && value.task_id === row.task_id && value.task_epoch === row.task_epoch &&
         value.source_closed === true && value.capture_quiescent === true && /^[a-f0-9]{64}$/.test(value.last_ack_sha256) &&
         Number.isSafeInteger(value.acknowledged_frames) && value.acknowledged_frames > 0 &&
         Number.isSafeInteger(value.last_frame_revision) && value.last_frame_revision >= value.acknowledged_frames &&
         /^screen_share_[a-z_]{1,72}$/.test(value.stop_reason);
+      const keys = Object.keys(value).sort().join('|');
+      if (approval.target === undefined) {
+        return commonValid && keys ===
+          'acknowledged_frames|capture_quiescent|command|format|last_ack_sha256|last_frame_revision|operation_id|readonly|source_closed|stop_reason|task_epoch|task_id' &&
+          value.format === 'amita-phone-screen-share-result/1' && value.command === 'screen_share' && value.readonly === true;
+      }
+      const baseline = approval.launchAckBaseline ?? 0;
+      return commonValid && keys ===
+        'acknowledged_frames|capture_quiescent|command|format|last_ack_sha256|last_frame_revision|later_frame_revision|launch_baseline_frame_revision|launch_system_acknowledged|operation_id|readonly|source_closed|stop_reason|target|task_epoch|task_id' &&
+        value.format === 'amita-phone-screen-share-result/2' && value.command === 'screen_share_open_app' && value.readonly === false &&
+        sameScreenShareTarget(value.target, approval.target) && approval.launchStatus === 'system_acknowledged' &&
+        value.launch_system_acknowledged === true && Number.isSafeInteger(baseline) && baseline > 0 &&
+        value.launch_baseline_frame_revision === baseline && value.later_frame_revision === value.last_frame_revision &&
+        value.acknowledged_frames >= 2 && value.last_frame_revision > baseline;
     } catch (_) { return false; }
   }
 
@@ -707,10 +788,14 @@ export class ScreenShareRuntime implements WorkHost {
   pending(): ScreenSharePending | null {
     const value = this.pendingApproval;
     if (value === null || value.state !== 'pending' || this.resolveApproval === null) { return null; }
-    return { approvalId: value.approvalId, nonce: value.nonce, revision: value.revision,
+    const pending: ScreenSharePending = { approvalId: value.approvalId, nonce: value.nonce, revision: value.revision,
       operationId: value.operationId, taskId: value.taskId, taskEpoch: value.taskEpoch,
       inputHash: value.inputHash, expiresAt: value.expiresAt, allocationDeadline: value.allocationDeadline,
       durationMs: value.requestedDurationMs, maxFps: value.maxFps, purpose: value.purpose };
+    if (value.target !== undefined) {
+      pending.target = { bundle_name: value.target.bundle_name, ability_name: value.target.ability_name };
+    }
+    return pending;
   }
 
   status(): ScreenShareRuntimeStatus {
@@ -727,6 +812,9 @@ export class ScreenShareRuntime implements WorkHost {
     const original = this.pendingApproval === null ? this.executingApproval : this.pendingApproval;
     if (original !== null) {
       value.taskId = original.taskId; value.taskEpoch = original.taskEpoch; value.operationId = original.operationId;
+      value.launchStatus = original.launchStatus ?? '';
+      value.laterFrameAcknowledged = (original.launchAckBaseline ?? 0) > 0 &&
+        media.lastFrameRevision > (original.launchAckBaseline ?? 0);
     }
     const records = this.engine === null ? [] : this.engine.snapshot.records;
     value.unknownRecords = records.filter((row: WorkRecord): boolean => row.state === 'unknown').length;

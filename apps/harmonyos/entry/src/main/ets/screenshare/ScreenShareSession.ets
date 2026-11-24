@@ -86,6 +86,13 @@ export class ScreenShareSession {
       error: this.value.error, nativeCode: this.value.nativeCode, cleanupUnknown: this.value.cleanupUnknown };
   }
 
+  liveFrameRevision(scope: ScreenShareScope): number {
+    const policy = this.policy;
+    if (policy === null || !sameScreenShareScope(policy.scope, scope) || this.value.cleanupUnknown ||
+      !policy.canRemainBackground(this.authorised(policy), this.sinkLive(policy), Date.now())) { return 0; }
+    return policy.lastFrameRevision;
+  }
+
   private authorised(policy: ScreenSharePolicy): boolean {
     try { return this.authorization !== null && this.authorization.valid(copyScreenShareScope(policy.scope)); }
     catch (_) { return false; }

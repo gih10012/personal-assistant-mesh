@@ -6,10 +6,10 @@ import { Blob } from '../core/Protocol';
 import { NodeCredential, NodeCredentialStore } from '../security/NodeCredentialStore';
 import { controlDigest } from '../control/PhoneControlJSON';
 import { ScreenShareFrameSink } from './ScreenShareSession';
-import { ScreenShareScope, ScreenShareFrame, ScreenShareFrameAck,
-  copyScreenShareScope, sameScreenShareScope, validScreenShareScope } from './ScreenSharePolicy';
+import { ScreenShareScope, ScreenShareFrame, ScreenShareFrameAck, ScreenShareInput, ScreenShareTarget,
+  copyScreenShareScope, decodeScreenShareInput, sameScreenShareScope, validScreenShareLaunchScope,
+  validScreenShareScope } from './ScreenSharePolicy';
 
-interface StreamPolicy { format: string; command: string; duration_ms: number; max_fps: number; }
 interface WireBinding {
   primary_session_id: string; session_id: string; stream_id: string; task_id: string; task_epoch: number;
   operation_id: string; capability_id: string; binding_digest: string; expires_at: number;
@@ -52,7 +52,7 @@ export class PhoneScreenShareSink implements ScreenShareFrameSink {
   private gate: PhoneScreenShareGate;
   private credentials: NodeCredentialStore = new NodeCredentialStore();
   private binding: WireBinding | null = null;
-  private policy: StreamPolicy | null = null;
+  private policy: ScreenShareInput | null = null;
   private state: string = 'idle';
   private error: string = '';
   private generation: number = 0;
@@ -105,7 +105,8 @@ export class PhoneScreenShareSink implements ScreenShareFrameSink {
       row.state === 'attempted' && row.result_json === '' && row.result_reference === '' &&
       dispatch.provider === 'node:' + this.config.node_id && dispatch.capability_id === this.config.node_id + ':ui-control-v1' &&
       Number.isFinite(dispatch.deadline) && (dispatch.deadline as number) * 1000 > Date.now() &&
-      selection !== undefined && selection.action === 'inspect' && selection.capability_id === dispatch.capability_id &&
+      selection !== undefined && (selection.action === 'inspect' || selection.action === 'action') &&
+      selection.capability_id === dispatch.capability_id &&
       Number.isSafeInteger(selection.epoch) && selection.epoch > 0 &&
       selection.workload !== null && Object.keys(selection.workload).join('|') === 'input' &&
       this.localScope.taskId === row.task_id && this.localScope.taskEpoch === row.task_epoch &&
@@ -144,11 +145,10 @@ export class PhoneScreenShareSink implements ScreenShareFrameSink {
       requireSink(bytes.length > 0 && bytes.length <= 4096 && bytes.length === input?.bytes &&
         codec.encodeToStringSync(bytes) === input?.base64 && await controlDigest(bytes) === input?.sha256,
       'screen_share_sink_stream_workload_required');
-      const policy: StreamPolicy = JSON.parse(new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes)) as StreamPolicy;
-      requireSink(Object.keys(policy).sort().join('|') === 'command|duration_ms|format|max_fps' &&
-        policy.format === 'amita-phone-screen-share/1' && policy.command === 'screen_share' &&
-        Number.isSafeInteger(policy.duration_ms) && policy.duration_ms >= 1000 && policy.duration_ms <= 300000 &&
-        Number.isSafeInteger(policy.max_fps) && policy.max_fps >= 1 && policy.max_fps <= 2,
+      const selection = this.dispatch.selection as WorkSelection;
+      const policy = decodeScreenShareInput(new util.TextDecoder('utf-8', { fatal: true }).decodeToString(bytes), selection.action);
+      requireSink(selection.action !== 'action' || validScreenShareLaunchScope(selection.scope,
+        policy.target as ScreenShareTarget, this.record.task_id, this.record.task_epoch),
       'screen_share_sink_stream_workload_required');
       this.policy = policy;
       const expires: number = Math.min(this.localScope.expiresAt, (this.dispatch.deadline as number) * 1000,
@@ -210,7 +210,7 @@ export class PhoneScreenShareSink implements ScreenShareFrameSink {
   }
 
   private async delay(generation: number): Promise<void> {
-    const wait: number = Math.max(0, this.lastAckAt + Math.ceil(1000 / (this.policy as StreamPolicy).max_fps) - Date.now());
+    const wait: number = Math.max(0, this.lastAckAt + Math.ceil(1000 / (this.policy as ScreenShareInput).max_fps) - Date.now());
     if (wait > 0) {
       await new Promise<void>((resolve, reject): void => {
         const timer: number = setTimeout((): void => { this.cancelDelay = null; resolve(); }, wait);

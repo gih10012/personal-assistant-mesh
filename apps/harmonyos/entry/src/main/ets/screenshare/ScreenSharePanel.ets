@@ -18,6 +18,10 @@ export struct ScreenSharePanel {
   @State message: string = '';
   @State task: string = '';
   @State purpose: string = '';
+  @State bundleName: string = '';
+  @State abilityName: string = '';
+  @State launchStatus: string = '';
+  @State laterFrameAcknowledged: boolean = false;
   @State duration: string = '';
   @State deadline: string = '';
   @State outcomes: string = '';
@@ -39,7 +43,8 @@ export struct ScreenSharePanel {
 
   private describeError(code: string): string {
     if (code === '') { return ''; }
-    if (code === 'screen_share_owner_denied') { return '已拒绝本次请求，没有开始共享'; }
+    if (code === 'screen_share_owner_denied') { return '已拒绝本次请求'; }
+    if (code === 'screen_share_launch_system_rejected') { return '系统拒绝启动指定应用，已请求停止共享'; }
     if (code === 'screen_share_owner_stopped') { return '已要求停止共享并关闭接收'; }
     if (code === 'screen_share_background_ticket_required') {
       return '离开前台时后台共享尚未就绪，本次授权已取消';
@@ -64,8 +69,12 @@ export struct ScreenSharePanel {
     this.receiving = status.receiving; this.sourceInstalled = status.sourceInstalled;
     this.executing = status.executing; this.captureActive = status.captureActive;
     this.backgroundActive = status.backgroundActive; this.acknowledgedFrames = status.acknowledgedFrames;
+    this.launchStatus = status.launchStatus;
+    this.laterFrameAcknowledged = status.laterFrameAcknowledged;
     const pending = this.foreground ? runtime.pending() : null;
     this.pendingRequest = pending; this.pendingVisible = pending !== null;
+    this.bundleName = pending?.target?.bundle_name ?? '';
+    this.abilityName = pending?.target?.ability_name ?? '';
     if (pending !== null) {
       this.task = '协助任务 ' + pending.taskId.slice(0, 8);
       this.purpose = pending.purpose;
@@ -77,8 +86,8 @@ export struct ScreenSharePanel {
       status.sourceCloseUnknown ? '来源关闭回执尚未确认，本次不会自动恢复' :
       status.captureActive ? (status.backgroundActive ? '只读屏幕共享中，可使用其他应用' : '画面已开始，正在确认后台共享') :
       pending !== null ? '原任务请求共享屏幕，等待本人决定' : status.executing ? '等待系统授权或原请求结束确认' :
-      !status.receiving ? '只读屏幕共享已关闭' : !status.sourceInstalled ? '来源尚未安装本机共享适配' :
-      status.presenceExpiresAt <= Date.now() ? '共享请求连接尚未确认' : '等待原任务的只读共享请求';
+      !status.receiving ? '屏幕共享已关闭' : !status.sourceInstalled ? '来源尚未安装本机共享适配' :
+      status.presenceExpiresAt <= Date.now() ? '共享请求连接尚未确认' : '等待原任务的共享请求';
     this.message = this.describeError(status.error);
     this.outcomes = '原记录：已结算 ' + String(status.settledRecords) + '，待回执 ' + String(status.pendingResults) +
       '，未确认 ' + String(status.unknownRecords);
@@ -111,21 +120,28 @@ export struct ScreenSharePanel {
 
   build() {
     Column({ space: 10 }) {
-      Text('只读屏幕共享').fontSize(18).fontWeight(FontWeight.Bold)
+      Text('屏幕共享').fontSize(18).fontWeight(FontWeight.Bold)
       Text(this.phase).fontSize(14)
       Text('仅在本人逐次同意并通过系统录屏授权后共享。不会点击或输入。').fontSize(13)
       if (!this.receiving) {
-        Button('接收只读共享请求').enabled(this.foreground && this.available && !this.deciding)
+        Button('接收共享请求').enabled(this.foreground && this.available && !this.deciding)
           .onClick((): void => { this.receive(); })
       }
       if (this.pendingVisible) {
         Text(this.task).fontSize(13).width('100%')
         Text(this.purpose).fontSize(14).width('100%')
+        if (this.bundleName.length > 0) {
+          if (this.bundleName === 'com.tencent.wechat' && this.abilityName === 'EntryAbility') {
+            Text('微信').fontSize(14).fontWeight(FontWeight.Medium)
+          }
+          Text('应用包名 ' + this.bundleName).fontSize(13).width('100%')
+          Text('Ability 名称 ' + this.abilityName).fontSize(13).width('100%')
+        }
         Text(this.duration).fontSize(13)
         Text(this.deadline).fontSize(12)
         Text('实际时长受原任务剩余租约限制，本组件不会续期原任务。').fontSize(12)
         Row({ space: 12 }) {
-          Button('开始本次共享').enabled(this.foreground && !this.deciding)
+          Button(this.bundleName.length > 0 ? '同意共享并打开应用' : '开始本次共享').enabled(this.foreground && !this.deciding)
             .onClick((): void => { this.decide(true); })
           Button('拒绝本次请求').enabled(this.foreground && !this.deciding)
             .onClick((): void => { this.decide(false); })
@@ -133,6 +149,12 @@ export struct ScreenSharePanel {
       }
       if (this.captureActive || this.acknowledgedFrames > 0) {
         Text('已确认接收 ' + String(this.acknowledgedFrames) + ' 帧').fontSize(13)
+      }
+      if (this.launchStatus === 'system_acknowledged') {
+        Text('已收到系统启动回执').fontSize(13)
+      }
+      if (this.laterFrameAcknowledged) {
+        Text('共享接收端已确认后续画面').fontSize(13)
       }
       if (this.receiving || this.executing || this.pendingVisible) {
         Button('停止共享并关闭接收').onClick((): void => { this.stop(); })

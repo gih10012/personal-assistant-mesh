@@ -24,8 +24,53 @@ export interface ScreenShareFrameAck {
   acknowledged: boolean; // Verified original remote receiver acknowledgement.
 }
 
+export interface ScreenShareTarget { bundle_name: string; ability_name: string; }
+export interface ScreenShareInput {
+  format: string; command: string; duration_ms: number; max_fps: number; target?: ScreenShareTarget;
+}
+interface ScreenShareLaunchScope { task_id: string; task_epoch: number; purpose: string; target: ScreenShareTarget; }
+
 function requireShare(value: boolean, code: string): void {
   if (!value) { throw new Error(code); }
+}
+
+function screenShareAbilityIdentifier(value: string): boolean {
+  return typeof value === 'string' && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9_.]*$/.test(value) &&
+    !/[^A-Za-z0-9_.]/.test(value);
+}
+
+export function validScreenShareTarget(value: ScreenShareTarget | undefined): boolean {
+  return value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join('|') === 'ability_name|bundle_name' &&
+    screenShareAbilityIdentifier(value.bundle_name) && screenShareAbilityIdentifier(value.ability_name) &&
+    value.bundle_name.toLowerCase() !== 'org.personalassistant.mesh';
+}
+
+export function sameScreenShareTarget(left?: ScreenShareTarget, right?: ScreenShareTarget): boolean {
+  if (left === undefined || right === undefined) { return left === right; }
+  return validScreenShareTarget(left) && validScreenShareTarget(right) &&
+    left.bundle_name === right.bundle_name && left.ability_name === right.ability_name;
+}
+
+export function decodeScreenShareInput(json: string, action: string): ScreenShareInput {
+  const value = JSON.parse(json) as ScreenShareInput;
+  requireShare(value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    Number.isSafeInteger(value.duration_ms) && value.duration_ms >= 1000 && value.duration_ms <= 300000 &&
+    (value.max_fps === 1 || value.max_fps === 2), 'screen_share_dedicated_stream_required');
+  const keys = Object.keys(value).sort().join('|');
+  requireShare((action === 'inspect' && keys === 'command|duration_ms|format|max_fps' &&
+    value.format === 'amita-phone-screen-share/1' && value.command === 'screen_share') ||
+    (action === 'action' && keys === 'command|duration_ms|format|max_fps|target' &&
+    value.format === 'amita-phone-screen-share/2' && value.command === 'screen_share_open_app' &&
+    validScreenShareTarget(value.target)), 'screen_share_dedicated_stream_required');
+  return value;
+}
+
+export function validScreenShareLaunchScope(scope: Object, target: ScreenShareTarget, taskId: string, taskEpoch: number): boolean {
+  const value = scope as ScreenShareLaunchScope;
+  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join('|') === 'purpose|target|task_epoch|task_id' && value.purpose === 'screen_share_open_app' &&
+    value.task_id === taskId && value.task_epoch === taskEpoch && sameScreenShareTarget(value.target, target);
 }
 
 export function copyScreenShareScope(value: ScreenShareScope): ScreenShareScope {
