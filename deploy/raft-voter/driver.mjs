@@ -1,5 +1,5 @@
 import { bytes, digestProposal, entry, exact, hardState, MEMBERS, message, need, proposeWire, safe, withCommit } from './codec.mjs';
-import { acknowledgement, envelope, validAck, validateConfig, verify } from './protocol.mjs';
+import { acknowledgement, envelope, exchangeRequest, peerMode, validAck, validateConfig, verify, verifyExchange } from './protocol.mjs';
 
 const MAX_ENTRIES = 2048, MAX_LOG_BYTES = 1024 * 1024, MAX_OUTBOX = 256, MAX_STATE_BYTES = 4 * 1024 * 1024;
 const DAY_ROWS = 90000, DAY_EVENTS = 90000, REPLAY_WINDOW = 64;
@@ -52,6 +52,7 @@ export class VoterDriver {
       'bounded_original_state');
       need(!this.state.hold, `retained_hold_${this.state.hold}`);
       this.core = new this.Voter(this.config.member, JSON.stringify(this.state.stable));
+      if (await this.stopExpired()) return this.status();
       const pending = clone(this.state.pending);
       // RawNode can expose already-committed, not-yet-applied entries after a
       // crash. Restore/apply those first, then retry the original journaled input.
@@ -73,6 +74,12 @@ export class VoterDriver {
     catch (error) { this.closeCore(); throw error; }
   }
   closeCore() { this.core?.free(); this.core = null; this.dead = true; }
+  expired() { return this.clock() >= (this.config.qualification_until_ms ?? Infinity); }
+  async stopExpired() {
+    if (!this.expired()) return false;
+    if (this.state.enabled) { this.state.enabled = false; await this.save(); }
+    return true;
+  }
   async hold(reason) {
     this.state.hold = reason;
     try { await this.save(); } finally { this.closeCore(); }
@@ -81,14 +88,21 @@ export class VoterDriver {
   status() {
     need(this.state !== null, 'not_started');
     const hs = hardState(this.state.stable.hard_state);
-    return { format: 'amita-raft-status/1', ...binding(this.config), enabled: this.state.enabled,
+    return { format: 'amita-raft-status/1', ...binding(this.config), enabled: this.state.enabled && !this.expired(),
+      ...(this.config.qualification_until_ms === undefined ? {} : { qualification_until_ms: this.config.qualification_until_ms }),
       term: hs.term, persisted_commit: hs.commit, applied: this.state.stable.applied,
       leader_hint: this.state.leader_hint, leader_hint_is_authority: false,
       receipts: clone(this.state.receipts), queued_messages: this.state.outbox.length,
       pending_original_input: this.state.pending !== null, hold: this.state.hold, quota: clone(this.state.quota),
       core_closed: this.dead, business_fencing: false, ha_qualified: false };
   }
-  async inspect() { await this.tail; return this.status(); }
+  async inspect() {
+    await this.tail;
+    if (this.expired() && this.state.enabled && !this.dead) return this.serial(async () => {
+      await this.stopExpired(); return this.status();
+    });
+    return this.status();
+  }
   async reserveAlarm() { return this.serial(async () => { this.quota(); this.state.quota.rows++; await this.save(); }); }
   finish(event) {
     if (event?.kind === 'peer') {
@@ -178,25 +192,67 @@ export class VoterDriver {
       this.closeCore(); throw error;
     }
   }
-  async receive(value) {
-    const verified = await verify(this.config, value);
-    return this.serial(async () => {
-      need(this.state.enabled, 'voter_disabled'); this.event();
-      const list = this.state.received[value.from], last = list.at(-1)?.sequence ?? 0;
-      if (value.sequence <= last) {
-        need(list.some(row => row.sequence === value.sequence && row.hash === verified.hash), 'replay_content_or_window');
-        await this.save(); return acknowledgement(this.config, value);
-      }
-      need(value.sequence === last + 1, 'ordered_peer_sequence_required');
-      if ([3, 8].includes(verified.header.type)) this.state.leader_hint = value.from;
-      await this.process({ kind: 'peer', sender: value.from, sequence: value.sequence,
+  // The caller holds serial() and has verified both signatures. Fold a matching
+  // ACK deletion into the same durable save as receive (or the idle event).
+  async deliver(from, packet, verified, ack) {
+    need(this.state.enabled && !this.expired(), 'voter_disabled');
+    const list = this.state.received[from], last = list.at(-1)?.sequence ?? 0;
+    const head = this.state.outbox.find(row => row.to === from);
+    if (ack) need(ack.sequence <= (head?.sequence ?? this.state.next[from]), 'ack_beyond_original_head');
+    if (packet && packet.sequence <= last) {
+      need(list.some(row => row.sequence === packet.sequence && row.hash === verified.hash), 'replay_content_or_window');
+    } else if (packet) need(packet.sequence === last + 1, 'ordered_peer_sequence_required');
+    this.event();
+    if (ack && head?.sequence === ack.sequence) this.state.outbox.splice(this.state.outbox.indexOf(head), 1);
+    if (packet && packet.sequence > last) {
+      if ([3, 8].includes(verified.header.type)) this.state.leader_hint = from;
+      await this.process({ kind: 'peer', sender: from, sequence: packet.sequence,
         hash: verified.hash, wire: [...verified.wire] });
-      return acknowledgement(this.config, value);
+    } else await this.save();
+    return packet ? acknowledgement(this.config, packet) : null;
+  }
+  async receive(packet) {
+    const verified = await verify(this.config, packet);
+    return this.serial(() => this.deliver(packet.from, packet, verified, null));
+  }
+  async exchange(request) {
+    const verified = await verifyExchange(this.config, request, this.clock());
+    return this.serial(async () => {
+      need(request.expires_ms > this.clock(), 'exchange_expiry');
+      const ack = await this.deliver(request.from, request.packet, verified, request.ack);
+      // The signed request can retrieve only this exact successor, even if an
+      // old poll is replayed after another request has advanced the outbox.
+      const sequence = (request.ack?.sequence ?? 0) + 1;
+      const packet = this.state.outbox.find(row => row.to === request.from && row.sequence === sequence);
+      return { format: 'amita-raft-exchange-result/1', ack, packet: packet ? clone(packet) : null };
     });
+  }
+  async prepareExchange(to) {
+    return this.serial(async () => {
+      need(peerMode(this.config, to) === 'poll', 'exchange_poll_binding');
+      if (!this.state.enabled || this.expired()) return null;
+      const packet = this.state.outbox.find(row => row.to === to) ?? null;
+      const received = this.state.received[to].at(-1);
+      const ack = received ? await acknowledgement(this.config, { from: to, sequence: received.sequence }) : null;
+      return exchangeRequest(this.config, to, clone(packet), ack, this.clock());
+    });
+  }
+  async finishExchange(request, result) {
+    need(exact(result, ['format', 'packet', 'ack']) && result.format === 'amita-raft-exchange-result/1', 'exchange_result');
+    if (request.packet) need(await validAck(this.config, request.packet, result.ack), 'authenticated_original_ack');
+    else need(result.ack === null, 'unsolicited_ack');
+    if (result.packet === null && result.ack === null) return;
+    let verified = null;
+    if (result.packet !== null) {
+      need(result.packet?.from === request.to && result.packet.sequence === (request.ack?.sequence ?? 0) + 1,
+        'exchange_result_binding');
+      verified = await verify(this.config, result.packet);
+    }
+    return this.serial(() => this.deliver(request.to, result.packet, verified, result.ack));
   }
   async tick({ alarmWrite = false } = {}) {
     return this.serial(async () => {
-      if (!this.state.enabled) return this.status();
+      if (await this.stopExpired() || !this.state.enabled) return this.status();
       this.event();
       if (alarmWrite) this.state.quota.rows++; // setAlarm itself is a billed row.
       const now = this.clock();
@@ -209,7 +265,7 @@ export class VoterDriver {
   async propose(value) {
     const proposal = digestProposal(value);
     return this.serial(async () => {
-      need(this.state.enabled, 'voter_disabled'); this.event();
+      need(this.state.enabled && !this.expired(), 'voter_disabled'); this.event();
       const old = this.state.receipts[proposal.operation_id];
       if (old) { need(old.digest === proposal.digest, 'original_operation_digest_conflict'); return clone(old); }
       need(this.state.stable.entries.length < MAX_ENTRIES - 32, 'log_capacity_hold_no_compaction');
@@ -219,12 +275,14 @@ export class VoterDriver {
   }
   async enable(value) {
     return this.serial(async () => {
-      need(typeof value === 'boolean', 'enabled_boolean'); this.state.enabled = value; await this.save(); return this.status();
+      need(typeof value === 'boolean', 'enabled_boolean'); need(!value || !this.expired(), 'qualification_expired');
+      this.state.enabled = value; await this.save(); return this.status();
     });
   }
-  async outbound() { return this.serial(() => this.state.enabled ? clone(this.state.outbox) : []); }
+  async outbound() { return this.serial(() => this.state.enabled && !this.expired() ? clone(this.state.outbox) : []); }
   async acknowledge(pairs) {
     return this.serial(async () => {
+      if (this.expired()) return;
       const remove = [];
       for (const { outgoing, ack } of pairs) {
         need(await validAck(this.config, outgoing, ack), 'authenticated_original_ack');
@@ -240,12 +298,14 @@ export class VoterDriver {
 // The transport runs outside the driver lock, so a response can be accepted
 // while our own outbox is in flight. ACK deletion is batched into one write.
 export function flusher(driver, send) {
+  const peers = MEMBERS.filter(id => id !== driver.config.member && peerMode(driver.config, id) === 'push');
   let running = null;
   return () => {
+    if (!peers.length) return Promise.resolve(0);
     if (running) return running;
     running = (async () => {
       const queue = await driver.outbound(), pairs = [];
-      for (const member of MEMBERS.filter(id => id !== driver.config.member)) {
+      for (const member of peers) {
         const row = queue.find(value => value.to === member); if (!row) continue;
         try { pairs.push({ outgoing: row, ack: await send(row) }); } catch { /* durable original outbox retries later */ }
       }
@@ -254,4 +314,17 @@ export function flusher(driver, send) {
     })().finally(() => { running = null; });
     return running;
   };
+}
+
+// Node calls this once per timer tick. HTTP requests, startup and Raft Ready
+// callbacks never trigger an extra poll. A lost response retains both heads.
+export async function pollExchanges(driver, send) {
+  for (const member of MEMBERS.filter(id => id !== driver.config.member && peerMode(driver.config, id) === 'poll')) {
+    const request = await driver.prepareExchange(member);
+    if (request) {
+      let result;
+      try { result = await send(request); } catch { continue; }
+      await driver.finishExchange(request, result);
+    }
+  }
 }

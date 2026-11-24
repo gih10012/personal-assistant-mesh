@@ -124,6 +124,42 @@ means submitted locally, never committed. Read the original operation's receipt
 in status for actual local durable application. S2 must separately bind that
 commit to its existing term, data copies, original operations and effect fences.
 
+### Outbound-only hosted voter
+
+On holders 1 and 2, retain their mutual HTTPS `/raft/peer` endpoints and set
+`peers["3"]` to the fixed hosted HTTPS URL ending in `/raft/exchange`. On
+member 3 set `peers` to `{"1":"accept_exchange","2":"accept_exchange"}`. This
+configuration has no egress URL for either private holder. Keep the original
+pairwise keys, group, scope, member IDs and stored states. Exchange routes
+require `start_enabled:false` for fresh stores. Existing stores retain their
+durable enabled state. Disable an existing candidate before switching routes.
+
+For a bounded trial, set the optional private integer `qualification_until_ms`
+on all three voters to the same absolute Unix epoch millisecond deadline.
+Deploy the stopped candidate, verify all three status responses show the
+intended deadline, then enable each voter through its existing management route.
+The hosted voter caps its alarm at the deadline. At expiry each voter stops
+participating, preserves its queue and receipts, and rejects re-enablement.
+Continue using status to inspect the result. A later trial needs an explicit
+private configuration change. Keep the clocks synchronized.
+
+Each enabled holder initiates one HTTPS POST per tick, including idle ticks.
+The signed request binds its format, group, scope, sender, recipient, expiration,
+one optional original outbound envelope and the signed ACK of the last durable
+packet from the edge. The holder signs a 15-second validity window, capped at
+its trial deadline. The edge accepts an expiry up to 30 seconds ahead of its
+current time. The public verifier bounds the body and authenticates the request,
+packet and ACK before invoking the one configured DO. Its response contains
+the matching ACK and at most the original queued envelope at the ACK cursor's
+next sequence. Receipt and queue changes share the existing durable save
+barrier. Lost responses, restarts and replay reuse the original sequences.
+Only a matching signed ACK retires a queued packet.
+
+`node exchange-smoke.mjs` in the assembled candidate exercises the real pinned
+WASM, a file holder and SQLite voter, the public verifier and DO handler over
+in-memory HTTP. The holder and edge must commit without the other holder,
+including a lost response, a holder restart, scoped replay and trial expiry.
+
 ## Cloudflare candidate and budget gate
 
 `cloudflare-worker.mjs` imports the static compiled WASM module; only its DO
@@ -177,6 +213,15 @@ the remaining margin. Quota exhaustion holds only this candidate; never buys
 capacity. Root must qualify actual CPU, row accounting and account-wide budget
 before enabling continuous production ticks. The approximate two-minute Goal
 remains an unfulfilled real deployment/failover requirement.
+
+For two outbound-only holders polling every five seconds, the steady full-day
+estimate is 34,560 Worker requests and 51,840 DO invocations including 17,280
+alarms. With one durable event save per poll, one save per tick and one alarm
+write per tick, the estimate is 69,120 rows written. Elections, log changes,
+activations and extra Ready batches can add writes. Startup, status and rejected
+traffic also draw on shared account quotas. One packet each way per holder tick
+limits recovery throughput. A sustained backlog or an offline voter can reach
+the existing 256-packet outbox limit. Inspect queue counts during the trial.
 
 Remaining integration: real three-host transport and existing authority binding,
 Free DO startup/CPU/budget measurement, portable snapshots/compaction, S2 leases

@@ -2,7 +2,7 @@ import http from 'node:http';
 import { existsSync, lstatSync, readFileSync, chmodSync, unlinkSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { need } from './codec.mjs';
-import { VoterDriver, flusher } from './driver.mjs';
+import { VoterDriver, flusher, pollExchanges } from './driver.mjs';
 import { FileStore, sqliteStore } from './storage-node.mjs';
 import { loadNodeVoter } from './loader-node.mjs';
 import { handle, transport } from './http.mjs';
@@ -20,7 +20,7 @@ if (local.listen.socket) need(!existsSync(local.listen.socket), 'original_socket
 const store = local.storage === 'sqlite' ? await sqliteStore(local.state_directory) : new FileStore(local.state_directory);
 const driver = new VoterDriver({ Voter: await loadNodeVoter(local.artifact_directory), store, config: local.voter });
 await driver.start();
-const flush = flusher(driver, transport(driver.config));
+const send = transport(driver.config), flush = flusher(driver, send);
 let timer = null, stopping = false;
 const laterFlush = () => { void flush().catch(error => console.error(String(error))); };
 const server = http.createServer(async (incoming, outgoing) => {
@@ -43,10 +43,19 @@ await new Promise((resolve, reject) => { server.once('error', reject); server.li
 if (local.listen.socket) chmodSync(local.listen.socket, 0o600);
 async function tick() {
   if (stopping) return;
-  try { await driver.tick(); await flush(); } catch (error) { console.error(String(error)); }
-  timer = setTimeout(tick, driver.config.tick_ms);
+  const expiredAtStart = driver.expired(), due = Date.now() + driver.config.tick_ms;
+  try {
+    await driver.tick();
+    await Promise.all([flush(), pollExchanges(driver, send)]);
+  } catch (error) { console.error(String(error)); }
+  if (!stopping && !expiredAtStart) schedule(due);
 }
-timer = setTimeout(tick, driver.config.tick_ms); laterFlush();
+function schedule(due) {
+  const next = Math.min(due, driver.config.qualification_until_ms ?? Infinity);
+  timer = setTimeout(tick, Math.max(0, next - Date.now()));
+}
+if (!driver.expired()) schedule(Date.now() + driver.config.tick_ms);
+laterFlush();
 console.log(JSON.stringify({ format: 'amita-raft-node-listening/1', member: driver.config.member,
   group: driver.config.group, listen: options, business_fencing: false }));
 async function stop() {

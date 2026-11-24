@@ -1,14 +1,17 @@
-import { exact, need } from './codec.mjs';
-import { verify } from './protocol.mjs';
+import { exact, MEMBERS, need } from './codec.mjs';
+import { peerMode, verify, verifyExchange } from './protocol.mjs';
 
 export async function boundedJSON(request) {
   need(request.method === 'POST' && request.headers.get('content-type')?.split(';')[0] === 'application/json', 'json_post_required');
-  const reader = request.body?.getReader(); need(reader, 'body_required');
+  return readJSON(request, 49152);
+}
+async function readJSON(message, maximum) {
+  const reader = message.body?.getReader(); need(reader, 'body_required');
   const chunks = []; let length = 0;
   try {
     while (true) {
       const { done, value } = await reader.read(); if (done) break;
-      length += value.length; need(length <= 49152, 'http_body_budget'); chunks.push(value);
+      length += value.length; need(length <= maximum, 'http_body_budget'); chunks.push(value);
     }
   } finally { await reader.cancel().catch(() => {}); }
   const data = new Uint8Array(length); let offset = 0;
@@ -24,18 +27,25 @@ function authorized(header, expected) {
 
 // Verify at the public ingress, before charging the separate DO quota for
 // a request. Forward the parsed bounded body without teeing the input stream.
-export async function authenticatedForward(config, request) {
-  const path = new URL(request.url).pathname;
+export async function authenticatedForward(config, request, clock = Date.now) {
+  const url = new URL(request.url), path = url.pathname;
   const authorization = request.headers.get('authorization');
-  need(path === '/raft/peer' ||
+  const peers = MEMBERS.filter(id => id !== config.member);
+  need(path === '/raft/manage' || clock() < (config.qualification_until_ms ?? Infinity), 'qualification_expired');
+  need((path === '/raft/peer' && peers.some(id => peerMode(config, id) === 'push')) ||
+    (path === '/raft/exchange' && !url.search && peers.some(id => peerMode(config, id) === 'accept')) ||
     (path === '/raft/manage' && authorized(authorization, config.operator_key)),
     'voter_ingress_not_authorized');
   const value = await boundedJSON(request);
   if (path === '/raft/peer') {
     await verify(config, value);
+    need(peerMode(config, value.from) === 'push', 'peer_push_binding');
+  } else if (path === '/raft/exchange') {
+    await verifyExchange(config, value, clock());
   } else {
     need(value?.group === config.group && value?.scope === config.scope &&
       value?.member === config.member, 'management_group_binding');
+    need(['status', 'disable'].includes(value.action) || clock() < (config.qualification_until_ms ?? Infinity), 'qualification_expired');
   }
   const headers = { 'content-type': 'application/json' };
   if (path === '/raft/manage') headers.authorization = authorization;
@@ -43,7 +53,12 @@ export async function authenticatedForward(config, request) {
 }
 export async function handle(driver, request) {
   const path = new URL(request.url).pathname, value = await boundedJSON(request);
-  if (path === '/raft/peer') return driver.receive(value);
+  if (path === '/raft/peer') {
+    need(MEMBERS.includes(value?.from) && value.from !== driver.config.member &&
+      peerMode(driver.config, value.from) === 'push', 'peer_push_binding');
+    return driver.receive(value);
+  }
+  if (path === '/raft/exchange') return driver.exchange(value);
   need(path === '/raft/manage' && authorized(request.headers.get('authorization'), driver.config.operator_key), 'existing_operator_binding_required');
   need(value?.group === driver.config.group && value?.scope === driver.config.scope && value?.member === driver.config.member,
     'management_group_binding');
@@ -58,11 +73,12 @@ export async function handle(driver, request) {
 }
 export function transport(config) {
   return async outgoing => {
+    const timeout = Math.min(3000, (config.qualification_until_ms ?? Infinity) - Date.now());
+    need(timeout > 0, 'qualification_expired');
     const response = await fetch(config.peers[outgoing.to], { method: 'POST',
       headers: { 'content-type': 'application/json', 'user-agent': 'AMITA-Raft/1.0' },
-      body: JSON.stringify(outgoing), redirect: 'error', signal: AbortSignal.timeout(3000) });
+      body: JSON.stringify(outgoing), redirect: 'error', signal: AbortSignal.timeout(timeout) });
     need(response.ok, 'peer_transport_rejected');
-    // ACKs are small and signed, and never carry an arbitrary response body.
-    const text = await response.text(); need(text.length <= 2048, 'ack_budget'); return JSON.parse(text);
+    return readJSON(response, peerMode(config, outgoing.to) === 'poll' ? 49152 : 2048);
   };
 }

@@ -2,16 +2,18 @@
 // Never compile bytes or fetch a WASM URL inside a Worker.
 import compiled from './artifact/wasm/amita_raft_portability_bg.wasm';
 import { initSync, Voter } from './artifact/wasm/amita_raft_portability.js';
-import { need } from './codec.mjs';
+import { MEMBERS, need } from './codec.mjs';
 import { VoterDriver, flusher } from './driver.mjs';
 import { authenticatedForward, handle, transport } from './http.mjs';
-import { validateConfig } from './protocol.mjs';
+import { peerMode, validateConfig } from './protocol.mjs';
 
 function configuration(env) {
   // This is a fail-closed deployment assertion, not an account/billing API.
   // Root must independently verify the actual account remains Workers Free.
   need(env.DEPLOYMENT_PLAN === 'free' && typeof env.VOTER_CONFIG_JSON === 'string', 'verified_free_plan_and_private_binding_required');
-  return validateConfig(JSON.parse(env.VOTER_CONFIG_JSON));
+  const config = validateConfig(JSON.parse(env.VOTER_CONFIG_JSON));
+  need(MEMBERS.every(id => id === config.member || peerMode(config, id) !== 'poll'), 'hosted_voter_cannot_poll');
+  return config;
 }
 class SQLStore {
   constructor(storage) {
@@ -46,9 +48,10 @@ export class RaftVoter {
   async schedule(accounted) {
     const status = await this.driver.inspect();
     if (!status.enabled || status.core_closed || status.hold) return;
-    if (await this.ctx.storage.getAlarm() === null) {
+    const alarm = await this.ctx.storage.getAlarm(), cutoff = this.driver.config.qualification_until_ms ?? Infinity;
+    if (alarm === null || alarm > cutoff) {
       if (!accounted) await this.driver.reserveAlarm();
-      await this.ctx.storage.setAlarm(Date.now() + this.driver.config.tick_ms);
+      await this.ctx.storage.setAlarm(Math.min(cutoff, Date.now() + this.driver.config.tick_ms));
     }
   }
   async fetch(request) {
