@@ -8,6 +8,7 @@ import json
 import base64
 
 from .ingress import _identifier
+from .phone_screen_share import LAUNCH_COMMAND, LAUNCH_FORMAT, launch_workload, stream_policy
 from .session_nodes import arguments
 from .store import Conflict
 
@@ -32,15 +33,19 @@ def validate_adapter(node):
     _identifier(session, 'phone_control_session')
     if (session == node['session_id'] or not isinstance(adapter, dict)
             or not {'enabled', 'capability_id', 'contract', 'actions', 'epoch'} <= set(adapter)
-            or set(adapter) - {'enabled', 'capability_id', 'contract', 'actions', 'epoch', 'screen_share_enabled'}
+            or set(adapter) - {'enabled', 'capability_id', 'contract', 'actions', 'epoch',
+                               'screen_share_enabled', 'screen_share_launch_enabled'}
             or type(adapter['enabled']) is not bool
             or type(adapter.get('screen_share_enabled', False)) is not bool
+            or type(adapter.get('screen_share_launch_enabled', False)) is not bool
             or adapter['capability_id'] != node['node_id'] + ':ui-control-v1'
             or adapter['capability_id'] in node['capabilities'] or adapter['contract'] != CONTRACT
             or type(adapter['epoch']) is not int or adapter['epoch'] < 1
             or not isinstance(adapter['actions'], list) or not adapter['actions']
             or any(not isinstance(a, str) for a in adapter['actions'])
-            or set(adapter['actions']) - ACTIONS or len(set(adapter['actions'])) != len(adapter['actions'])):
+            or set(adapter['actions']) - ACTIONS or len(set(adapter['actions'])) != len(adapter['actions'])
+            or adapter.get('screen_share_launch_enabled') and (
+                not adapter.get('screen_share_enabled') or 'inspect' not in adapter['actions'])):
         raise ValueError('invalid_phone_installed_control_adapter')
 
 
@@ -52,6 +57,9 @@ def spec(adapter):
     if adapter.get('screen_share_enabled', False):
         value['screen_share'] = {'format': 'amita-phone-screen-share/1', 'command': 'screen_share',
                                 'max_duration_ms': 300000, 'max_fps': 2}
+    if adapter.get('screen_share_launch_enabled'):
+        value['screen_share_launch'] = {'format': LAUNCH_FORMAT, 'command': LAUNCH_COMMAND, 'action': 'action',
+                                        'max_duration_ms': 300000, 'max_fps': 2}
     return value
 
 
@@ -124,6 +132,8 @@ class PhoneControl:
                 'enabled': adapter['enabled'], 'screen_share_enabled': True,
                 'capability_id': adapter['capability_id'], 'epoch': adapter['epoch'],
                 'execution_verification': 'declared_only'}
+            if adapter.get('screen_share_launch_enabled'):
+                view['installed_adapter']['screen_share_launch_enabled'] = True
         return view
 
     def control(self, node, action, payload):
@@ -176,11 +186,10 @@ class PhoneControl:
         self.registry._audit(db, row['principal'], 'phone_control_presence', row['id'],
                              {'epoch': row['epoch'], 'available': live, 'session_id': node['session_id']})
 
-    @staticmethod
-    def validate_selection(node, selection):
+    def validate_selection(self, node, selection, *, db=None, actor=None, task_id=None, task_epoch=None):
         adapter = node['installed_control_adapter']
-        if (selection.get('capability_id') != adapter['capability_id'] or selection.get('epoch') != adapter['epoch']
-                or selection.get('action') not in adapter['actions']):
+        if (selection.get('capability_id') != adapter['capability_id']
+                or type(selection.get('epoch')) is not int or selection['epoch'] != adapter['epoch']):
             raise PermissionError('phone_control_installed_action_required')
         workload = selection.get('workload')
         if not isinstance(workload, dict) or set(workload) != {'input'}:
@@ -198,4 +207,24 @@ class PhoneControl:
         if (len(raw) != blob['bytes'] or hashlib.sha256(raw).hexdigest() != blob['sha256']
                 or not isinstance(body, dict)):
             raise ValueError('phone_control_json_blob_required')
+        if launch_workload(body):
+            stream_policy(body)
+            scope = {'task_id': task_id, 'task_epoch': task_epoch, 'purpose': LAUNCH_COMMAND, 'target': body['target']}
+            if (not adapter.get('screen_share_launch_enabled') or selection.get('action') != 'action'
+                    or db is None or not isinstance(task_id, str) or type(task_epoch) is not int
+                    or canonical(selection.get('scope')) != canonical(scope)):
+                raise PermissionError('phone_control_targeted_launch_required')
+            grant_id = _identifier(selection.get('grant_id'), 'phone_screen_launch_grant')
+            # General Allocations can admit a provider's own work without a
+            # grant. Launch always requires this exact, live operator grant.
+            grant = db.execute('''SELECT 1 FROM capability_grants WHERE id=? AND principal=? AND
+                capability_id=? AND capability_epoch=? AND action='action' AND scope=? AND
+                approved_by=? AND revoked=0 AND deadline>?''',
+                (grant_id, actor, adapter['capability_id'], adapter['epoch'], canonical(scope),
+                 self.registry.owner_principal, self.store.clock())).fetchone()
+            if grant is None:
+                raise PermissionError('phone_control_exact_launch_grant_required')
+        elif (isinstance(selection.get('scope'), dict) and selection['scope'].get('purpose') == LAUNCH_COMMAND
+              or selection.get('action') not in adapter['actions']):
+            raise PermissionError('phone_control_installed_action_required')
         return body

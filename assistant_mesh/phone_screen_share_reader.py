@@ -6,7 +6,7 @@ Installation is explicit in the incumbent phone ready hook. Import is inert.
 from urllib.parse import urlsplit
 
 from .ingress import _identifier
-from .phone_screen_share import BINDING_FIELDS, stream_policy
+from .phone_screen_share import BINDING_FIELDS, launch_workload, stream_policy
 
 
 ROUTE = '/v1/phone/screen-share/frame'
@@ -24,9 +24,8 @@ def _observe(service, actor, payload):
     _identifier(task_id, 'phone_screen_observation_task')
     if (type(epoch) is not int or epoch < 1 or not isinstance(selection, dict)
             or set(selection) != {'capability_id', 'epoch', 'action', 'scope', 'workload', 'grant_id'}
-            or selection['action'] != 'inspect'
-            or type(selection['epoch']) is not int or selection['epoch'] < 1
-            or selection['scope'] != {'task_id': task_id, 'task_epoch': epoch, 'purpose': 'screen_share'}):
+            or selection['action'] not in ('inspect', 'action')
+            or type(selection['epoch']) is not int or selection['epoch'] < 1):
         raise ValueError('phone_screen_observation_original_scope_required')
     capability_id = selection['capability_id']
     _identifier(capability_id, 'phone_screen_observation_capability')
@@ -46,7 +45,11 @@ def _observe(service, actor, payload):
                 raise PermissionError('phone_screen_observation_share_adapter_required')
             control = service.control.select(node, node['control_session_id'])
             presence = service._presence(db, control, live=True, capability=capability_id)
-            stream_policy(service.control.validate_selection(control, selection))
+            body = stream_policy(service.control.validate_selection(
+                control, selection, db=db, actor=actor, task_id=task_id, task_epoch=epoch))
+            if not launch_workload(body) and (selection['action'] != 'inspect'
+                    or selection['scope'] != {'task_id': task_id, 'task_epoch': epoch, 'purpose': 'screen_share'}):
+                raise ValueError('phone_screen_observation_original_scope_required')
             allocations._authorize(db, actor, cap, selection, now)
             # The Source received this real signed presence. The observation
             # proves control transport only, never capture, permission or FPS.

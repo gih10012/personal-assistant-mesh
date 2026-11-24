@@ -1,13 +1,14 @@
 """Private latest screen frame on the incumbent phone/Allocation authority.
 
 No listener, Store, schema, task, grant, frame journal or import-time hook.
-Opaque wire bindings correlate an already running read-only dispatch; they
+Opaque wire bindings correlate an already running screen-share dispatch; they
 never authorize it. Local owner UI approval IDs/nonces are not wire fields.
 """
 import base64
 import hashlib
 import json
 import math
+import re
 
 from .ingress import _identifier
 from .store import Conflict
@@ -21,6 +22,15 @@ MAX_JSON = 65536
 MAX_FRAME = 42000
 IDLE_TTL = 30
 MAX_SCOPE_TTL = 300
+LAUNCH_FORMAT = 'amita-phone-screen-share/2'
+LAUNCH_COMMAND = 'screen_share_open_app'
+TARGET_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.]{0,127}')
+
+
+def launch_workload(body):
+    # Reserve both markers. A malformed launch must never fall back to a
+    # provider's legacy generic action parser.
+    return body.get('format') == LAUNCH_FORMAT or body.get('command') == LAUNCH_COMMAND
 
 
 def _encoded(value):
@@ -45,10 +55,20 @@ def _finite(value):
 
 
 def stream_policy(body):
-    if (not isinstance(body, dict) or set(body) != {'format', 'command', 'duration_ms', 'max_fps'}
-            or body['format'] != 'amita-phone-screen-share/1' or body['command'] != 'screen_share'
-            or type(body['duration_ms']) is not int or not 1000 <= body['duration_ms'] <= 300000
-            or type(body['max_fps']) is not int or not 1 <= body['max_fps'] <= 2):
+    if (not isinstance(body, dict) or type(body.get('duration_ms')) is not int
+            or not 1000 <= body['duration_ms'] <= 300000 or type(body.get('max_fps')) is not int
+            or body['max_fps'] not in (1, 2)):
+        raise PermissionError('screen_share_dedicated_stream_workload_required')
+    fields = {'format', 'command', 'duration_ms', 'max_fps'}
+    if launch_workload(body):
+        target = body.get('target')
+        if (set(body) != fields | {'target'} or body['format'] != LAUNCH_FORMAT or body['command'] != LAUNCH_COMMAND
+                or not isinstance(target, dict) or set(target) != {'bundle_name', 'ability_name'}
+                or any(not isinstance(name, str) or not TARGET_NAME.fullmatch(name) for name in target.values())
+                or target['bundle_name'] == 'org.personalassistant.mesh'):
+            raise PermissionError('screen_share_exact_external_ability_required')
+    elif (set(body) != fields or body['format'] != 'amita-phone-screen-share/1'
+          or body['command'] != 'screen_share'):
         raise PermissionError('screen_share_dedicated_stream_workload_required')
     return body
 
@@ -119,10 +139,13 @@ class PhoneScreenShare:
         allocations._admission(db, allocation, self.service.store.clock())
         selection = next((item for item in json.loads(allocation['plan'])['selections']
                           if item['capability_id'] == binding['capability_id']), None)
-        if selection is None or selection['action'] != 'inspect':
+        if selection is None:
+            raise PermissionError('screen_share_original_selection_required')
+        body = self.service.control.validate_selection(
+            selected, selection, db=db, actor=allocation['actor'],
+            task_id=allocation['task_id'], task_epoch=allocation['task_epoch'])
+        if not launch_workload(body) and selection['action'] != 'inspect':
             raise PermissionError('screen_share_read_only_selection_required')
-        self.service.control.validate_selection(selected, selection)
-        body = json.loads(base64.b64decode(selection['workload']['input']['base64'], validate=True))
         return stream_policy(body)
 
     def _expire(self):
@@ -271,7 +294,8 @@ class PhoneScreenShare:
                 try:
                     self._guard(db, node['node_id'], binding)
                 except (PermissionError, Conflict, ValueError):
-                    self._slots.pop(node['node_id'], None)
+                    if slot is not None and slot.binding == binding:
+                        self._slots.pop(node['node_id'], None)
                     raise
                 self._guard(db, node['node_id'], binding, reader=actor)
                 if slot is None or slot.binding != binding or not slot.active or not slot.frame:

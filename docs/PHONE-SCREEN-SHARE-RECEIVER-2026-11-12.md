@@ -76,7 +76,7 @@ sends only the public binding/frame above. It verifies the source ACK tuple,
 frame hash/revision/length, then constructs in-process `ack.scope` from the
 captured original LOCAL ScreenShareScope. Never serialize that local scope.
 
-Every admission/read reuses original authenticated node identity, owner-enabled
+Every v1 admission/read reuses original authenticated node identity, owner-enabled
 installed adapter, live selected control presence, Registry capability/provider
 and epoch, exact current owner-approved read-only allocation grant/resolution,
 running original provider dispatch, and current original task owner/epoch/lease.
@@ -101,6 +101,47 @@ An opaque digest, node-supplied boolean,
 metadata receipt, action grant or provider identity is never a new grant.
 Primary session ID is bound to installed identity; only control service presence
 must remain live, allowing the primary page to background legitimately.
+
+### Opening a named HarmonyOS Ability during a share
+
+Version 2 uses the same stream, phone session, frame reader, fixed allocation
+deadline and original task. The single declared launch action takes this body.
+
+```json
+{"format":"amita-phone-screen-share/2","command":"screen_share_open_app","duration_ms":30000,"max_fps":1,"target":{"bundle_name":"org.example.app","ability_name":"EntryAbility"}}
+```
+
+Both target strings must match `[A-Za-z0-9][A-Za-z0-9_.]{0,127}` in full.
+The AMITA bundle `org.personalassistant.mesh` is excluded. The receiver accepts
+exactly the shown keys and uses the v1 duration and FPS limits. The original
+worker requests an `action` grant from the owner for the exact task and target.
+
+```json
+{"task_id":"original-task","task_epoch":1,"purpose":"screen_share_open_app","target":{"bundle_name":"org.example.app","ability_name":"EntryAbility"}}
+```
+
+The selection carries the approved `grant_id`, the installed capability epoch,
+the action `action` and that scope. Source checks them during the presence
+observation, phone pull, accept/start and frame access. A presence observation
+records reachability. The owner's phone confirmation, system capture consent
+and actual launch outcome belong to the phone.
+
+After installing a matching signed HAP, the operator can enable the declaration
+on an existing share-enabled adapter. Set `screen_share_launch_enabled` to
+`true` and increment its capability epoch by exactly one, preserving the
+existing `actions` list. Submit the private owner file's SHA-256 to
+`reload-installed`. An inspect-only adapter can then use the exact launch
+workload. The transition checks the prior Registry principal, spec, epoch and
+health, and requires any accepted, running or unknown dispatch for this
+capability to be reconciled first. If refused, restore the installed file
+before the phone resumes its existing work.
+
+The upgrade records the file digest and both epochs in Registry audit. A fresh
+authenticated control connect is required. Bind the existing pool at the new
+capability epoch, then request the named target grant and a current observation.
+Old grants, observations, pool bindings, operations and receipts retain their
+original epochs. Source installation alone leaves the launch flag disabled on
+existing deployments.
 
 Cache idle TTL is 30 seconds, refreshed only by valid provider open/status/frame
 requests, bounded by the fixed original expiry. A static screen stays legitimate

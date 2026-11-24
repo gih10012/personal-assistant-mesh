@@ -18,7 +18,7 @@ from .enrollment_relay import EnrollmentRelay
 from .ingress import _identifier
 from .session_nodes import FORMAT, TOOLS
 from .store import Conflict
-from .phone_control import PhoneControl, validate_adapter, spec as control_spec, KIND as CONTROL_KIND
+from .phone_control import PhoneControl, validate_adapter, spec as control_spec, KIND as CONTROL_KIND, PREFIX as CONTROL_PRESENCE
 from .provider_runtime import _owner_bytes
 from .phone_screen_share import PhoneScreenShare, ACTIONS as SCREEN_SHARE_ACTIONS
 
@@ -245,16 +245,23 @@ class PhoneAuthority:
             if set(old) != {n['node_id'] for n in candidate['nodes']}:
                 raise PermissionError('phone_reload_existing_members_only')
             immutable = ('node_id', 'subject', 'session_id', 'token_sha256', 'enrollment', 'capabilities')
+            launch_upgrades = {}
             for node in candidate['nodes']:
                 prior = old[node['node_id']]
                 if any(node[k] != prior[k] for k in immutable) or node.get('visible_nodes', {}) != prior.get('visible_nodes', {}):
                     raise PermissionError('phone_reload_enrolled_identity_changed')
                 installed_adapter = prior.get('installed_control_adapter')
-                if installed_adapter is not None and (
-                        node.get('control_session_id') != prior.get('control_session_id')
-                        or node.get('installed_control_adapter') is None
-                        or any(node['installed_control_adapter'][k] != installed_adapter[k]
-                               for k in installed_adapter if k != 'enabled')):
+                if installed_adapter is None:
+                    continue
+                adapter = node.get('installed_control_adapter')
+                if adapter is None or node.get('control_session_id') != prior.get('control_session_id'):
+                    raise PermissionError('phone_reload_installed_control_identity_changed')
+                if (installed_adapter.get('screen_share_enabled') and not installed_adapter.get('screen_share_launch_enabled')
+                        and adapter == dict(installed_adapter, screen_share_launch_enabled=True, epoch=installed_adapter['epoch'] + 1)):
+                    launch_upgrades[node['node_id']] = installed_adapter
+                elif (adapter.get('screen_share_launch_enabled', False) != installed_adapter.get('screen_share_launch_enabled', False)
+                      or any(adapter.get(k) != installed_adapter.get(k)
+                             for k in installed_adapter if k not in ('enabled', 'screen_share_launch_enabled'))):
                     raise PermissionError('phone_reload_installed_control_identity_changed')
             subjects, bindings = self.prepare_bindings(candidate)
             already = candidate == self.installed
@@ -268,12 +275,21 @@ class PhoneAuthority:
                         if adapter is None:
                             continue
                         row = db.execute('SELECT * FROM capabilities WHERE id=?', (adapter['capability_id'],)).fetchone()
+                        previous = launch_upgrades.get(node['node_id'])
+                        expected = previous or adapter
                         if row is not None and (row['principal'] != 'node:' + node['node_id']
-                                or row['kind'] != CONTROL_KIND or row['epoch'] != adapter['epoch']
-                                or json.loads(row['spec']) != control_spec(adapter)):
+                                or row['kind'] != CONTROL_KIND or row['epoch'] != expected['epoch']
+                                or json.loads(row['spec']) != control_spec(expected)):
                             raise Conflict('phone_reload_original_control_registry_required')
                         if row is None and adapter['epoch'] != 1:
                             raise Conflict('phone_reload_original_control_epoch_required')
+                        if previous:
+                            if row['revoked'] or row['health'] == 'failed':
+                                raise Conflict('phone_reload_original_control_registry_required')
+                            outstanding = db.execute("""SELECT 1 FROM managed_dispatch WHERE capability_id=?
+                                AND state IN ('accepted','running','unknown') LIMIT 1""", (adapter['capability_id'],)).fetchone()
+                            if outstanding:
+                                raise Conflict('phone_reload_unsettled_control_dispatch')
                         controls.append((node, adapter, row))
                     now, registry = self.store.clock(), self.api.resources
                     for node, adapter, row in controls:
@@ -284,6 +300,14 @@ class PhoneAuthority:
                                  _json(control_spec(adapter)), 0, 'unavailable', now, now, now))
                             registry._audit(db, 'node:' + node['node_id'], 'advertise', adapter['capability_id'],
                                             {'epoch': 1, 'kind': CONTROL_KIND, 'installation': 'owner_reload_declared'})
+                        if node['node_id'] in launch_upgrades:
+                            db.execute("""UPDATE capabilities SET spec=?,epoch=?,health='unavailable',deadline=?,updated=?
+                                WHERE id=? AND epoch=? AND revoked=0""",
+                                (_json(control_spec(adapter)), adapter['epoch'], now, now, row['id'], row['epoch']))
+                            db.execute('DELETE FROM meta WHERE key=?', (CONTROL_PRESENCE + node['node_id'],))
+                            registry._audit(db, registry.owner_principal, 'phone_control_launch_install', row['id'],
+                                            {'previous_epoch': row['epoch'], 'epoch': adapter['epoch'],
+                                             'owner_config_sha256': digest, 'execution_verification': 'declared_only'})
                         previous_adapter = old[node['node_id']].get('installed_control_adapter')
                         if row is not None and (not enabled or previous_adapter is None or not previous_adapter['enabled']):
                             # Installation/re-enable is not an observed service
@@ -418,22 +442,22 @@ class PhoneAuthority:
                 with self.store.transaction() as db:
                     self._presence(db, node, live=True)
                 pending = self.api.allocations.pending('node:' + node['node_id'])
+                eligible, rejected = [], []
                 with self.store.transaction() as db:
                     session = self._presence(db, node, live=True)
                     caps = self._presence_view(node, session)['managed_capabilities']
-                eligible, rejected = [], []
-                for dispatch in pending['dispatch']:
-                    if dispatch['capability_id'] not in caps:
-                        continue
-                    if node.get('_control_service'):
-                        try:
-                            self.control.validate_selection(node, dispatch['selection'])
-                        except (ValueError, PermissionError):
-                            rejected.append({'operation_id': dispatch['operation_id'],
-                                             'capability_id': dispatch['capability_id'],
-                                             'reason': 'installed_control_contract_required'})
+                    for dispatch in pending['dispatch']:
+                        if dispatch['capability_id'] not in caps:
                             continue
-                    eligible.append(dispatch)
+                        if node.get('_control_service'):
+                            try:
+                                self._validate_control_dispatch(db, node, dispatch['operation_id'], dispatch['capability_id'])
+                            except (ValueError, PermissionError):
+                                rejected.append({'operation_id': dispatch['operation_id'],
+                                                 'capability_id': dispatch['capability_id'],
+                                                 'reason': 'installed_control_contract_required'})
+                                continue
+                        eligible.append(dispatch)
                 return {'format': FORMAT, 'mesh_id': self.sessions.mesh_id, 'work': None,
                         'pull_id': value['pull_id'], 'dispatch': eligible,
                         'rejected_dispatch': rejected, 'execution_authorized': False}
@@ -490,6 +514,12 @@ class PhoneAuthority:
             registry._audit(db, row['principal'], 'phone_presence', identity,
                             {'epoch': epoch, 'deadline': deadline, 'available': available})
 
+    def _validate_control_dispatch(self, db, node, operation_id, capability_id):
+        allocation = self.api.allocations._allocation(db, operation_id)
+        selection = next(s for s in json.loads(allocation['plan'])['selections'] if s['capability_id'] == capability_id)
+        self.control.validate_selection(node, selection, db=db, actor=allocation['actor'],
+                                        task_id=allocation['task_id'], task_epoch=allocation['task_epoch'])
+
     def _provider(self, node, provider):
         if not isinstance(provider, dict) or set(provider) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_provider')
@@ -505,17 +535,16 @@ class PhoneAuthority:
         actor, allocations = 'node:' + node['node_id'], self.api.allocations
         if args['capability_id'] not in node['capabilities']:
             raise PermissionError('phone_session_capability_scope_required')
+        def admission(db):
+            self._presence(db, node, live=True, capability=args['capability_id'])
+            if node.get('_control_service'):
+                self._validate_control_dispatch(db, node, args['operation_id'], args['capability_id'])
         # An allocation may have multiple providers: never expose another
         # provider's operation through an arbitrary capability ID.
         with self.store.transaction() as db:
-            dispatch = allocations._dispatch(db, args['operation_id'], args['capability_id'], actor)
+            allocations._dispatch(db, args['operation_id'], args['capability_id'], actor)
             if action in ('accept', 'start'):
-                self._presence(db, node, live=True, capability=args['capability_id'])
-                if node.get('_control_service'):
-                    allocation = allocations._allocation(db, args['operation_id'])
-                    selection = next(s for s in json.loads(allocation['plan'])['selections']
-                                     if s['capability_id'] == args['capability_id'])
-                    self.control.validate_selection(node, selection)
+                admission(db)
         if action == 'inspect':
             result = allocations.inspect(actor, args['operation_id'])
             # An operation can include several providers/sessions. Return only
@@ -541,8 +570,6 @@ class PhoneAuthority:
                         or evidence.get('bytes') != len(blob['body'])):
                     raise Conflict('phone_full_result_required_before_settlement')
         if action in ('accept', 'start'):
-            def admission(db):
-                self._presence(db, node, live=True, capability=args['capability_id'])
             return getattr(allocations, action)(actor, admission_check=admission, **args)
         return getattr(allocations, action)(actor, **args)
 
