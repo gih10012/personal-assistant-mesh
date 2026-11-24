@@ -1,5 +1,12 @@
 # 鸿蒙 7 手机操控路线核实与调整
 
+## 2026-11-24 完整 Computer Use 路线补充
+
+- 华为支持普通蓝牙键鼠配对，并给出按住鼠标左键从右边缘拖动返回、从底部向上拖动回到桌面的操作。AMITA 已补足蓝牙持续按住、拖动和可选绝对坐标报告。以本人零售机的正常配对、最新画面与真实操作效果为验收依据；任意位置可点击是交付要求。绝对报告的兼容性需实测。如果手机只接受相对鼠标且共享画面可见光标，使用观测校准与回读定位任意坐标。 [配对](https://consumer.huawei.com/cn/support/content/zh-cn16053504/) [鼠标手势](https://consumer.huawei.com/cn/support/content/zh-cn15767062/)
+- Pura 80 Pro 在华为多屏协同支持清单中。华为电脑的镜像窗口可用键鼠、滚轮、电脑输入法和复制粘贴。现有 Linux 主机的官方兼容性未知。 [手机操作方式](https://consumer.huawei.com/cn/support/content/zh-cn16070803/) [鸿蒙电脑连接指导](https://consumer.huawei.com/cn/support/content/zh-cn16050334/)
+- 第三方 `InputMethodExtensionAbility` 可通过 `InputClient` 向系统交付的当前焦点编辑器插入 Unicode、选择文字和移动光标。需本人主动启用并选中输入法，按系统安全模式处理任务；继续核对零售版本和后台接续。 [IME API](https://developer.huawei.com/consumer/en/doc/doccenter-references/api/js-apis-inputmethodengine/) [输入法安全模式](https://developer.huawei.com/consumer/cn/doc/harmonyOS-guides/ime-kit-security/)
+- `INPUT_MONITORING` 自 API 12 起允许普通应用向 AGC 申请系统授权，适用范围包括桌面共享。获批后可按本机触摸、鼠标、键盘事件触发输入会话释放，只记录停止原因。AMITA 尚未获批。`CONTROL_DEVICE` 的公开说明适用于 PC/2in1，Pura 80 Pro 的通用触屏注入仍需其他正式能力。 [权限申请范围](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/restricted-permissions/) [输入事件监听](https://developer.huawei.com/consumer/cn/doc/harmonyOS-guides/monitor-guidelines/)
+
 后续真机结果已更新：[0.3实际交付](PHONE-STATUS-2026-11-11.md)。手机内回环
 HDC 认证及 Shell 已在 `.111` 成功，截图、输入和后台仍未验收。下文保留
 研究当时的证据边界，不用早先“尚未验证”覆盖后来的实际结果。
