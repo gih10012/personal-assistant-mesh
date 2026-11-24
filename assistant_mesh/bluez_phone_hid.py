@@ -12,8 +12,9 @@ import dbus.mainloop.glib
 import dbus.service
 from gi.repository import GLib
 
-from .paired_phone_input import (KEYBOARD_ID, KEYBOARD_MAP, NEUTRAL, POINTER_ID, POINTER_MAP,
-                                 SESSION_SECONDS, validate_att, validate_peer)
+from .paired_phone_input import (ABSOLUTE_POINTER_ID, ABSOLUTE_POINTER_MAP, KEYBOARD_ID, KEYBOARD_MAP,
+                                 NEUTRAL, POINTER_ID, POINTER_MAP, SESSION_SECONDS, held_release,
+                                 validate_att, validate_peer)
 
 
 BLUEZ = 'org.bluez'
@@ -33,6 +34,13 @@ AD = ROOT + '/advertisement'
 READ = 'encrypt-authenticated-read'
 WRITE = 'encrypt-authenticated-write'
 NOTIFY = 'encrypt-authenticated-notify'
+REPORT_DRAIN_SECONDS = 0.2
+RELEASE_DRAIN_SECONDS = 0.05
+HID_REPORTS = (
+    ('keyboard', KEYBOARD_ID, KEYBOARD_MAP),
+    ('pointer', POINTER_ID, POINTER_MAP),
+    ('pointer_absolute', ABSOLUTE_POINTER_ID, ABSOLUTE_POINTER_MAP),
+)
 
 
 def uuid(number):
@@ -164,15 +172,14 @@ class Application(dbus.service.Object):
         super().__init__(session.bus, ROOT)
         self.session = session
         modes = session.binding['report_modes']
-        report_map = b''.join(descriptor for mode, descriptor in (
-            ('keyboard', KEYBOARD_MAP), ('pointer', POINTER_MAP)) if mode in modes)
+        report_map = b''.join(descriptor for mode, _, descriptor in HID_REPORTS if mode in modes)
         self.children = [
             Export(session, HID, GATT_SERVICE, {'UUID': uuid(0x1812), 'Primary': dbus.Boolean(True)}),
             Characteristic(session, 'information', 0x2A4A, [READ], b'\x11\x01\x00\x00'),
             Characteristic(session, 'map', 0x2A4B, [READ], report_map),
             Characteristic(session, 'control', 0x2A4C, [WRITE, 'write-without-response']),
         ]
-        for mode, report_id in (('keyboard', KEYBOARD_ID), ('pointer', POINTER_ID)):
+        for mode, report_id, _ in HID_REPORTS:
             if mode in modes:
                 characteristic = Characteristic(session, mode, 0x2A4D, [READ, NOTIFY], NEUTRAL[mode], mode)
                 self.children.extend((characteristic, ReportReference(session, characteristic, report_id, 1)))
@@ -212,7 +219,11 @@ class Session:
         self.authenticated = self.suspended = self.registered = self.advertising = False
         self.prompted = self.claimed = False
         self.sent = 0
+        self.next_report_at = 0
         self.drained_at = None
+        self.pending_release = None
+        self.release_drained_at = 0
+        self.release_queued = None
         self.reason = None
 
     def require_owner(self, sender):
@@ -284,9 +295,10 @@ class Session:
     def adapter_changed(self, interface, changed, invalidated):
         if interface != ADAPTER:
             return
-        if ('Powered' in invalidated or 'Powered' in changed and not changed['Powered']
-                or self.advertise and ('Pairable' in invalidated or changed.get('Pairable'))):
+        if 'Powered' in invalidated or 'Powered' in changed and not changed['Powered']:
             self.authenticated = False
+            self.stop('paired_phone_adapter_changed')
+        elif self.advertise and ('Pairable' in invalidated or changed.get('Pairable')):
             self.stop('paired_phone_adapter_changed')
 
     def interfaces_removed(self, path, interfaces):
@@ -348,18 +360,34 @@ class Session:
             self.check_peer(connected=True)
             if self.advertise and self.properties(self.adapter, ADAPTER).get('Pairable') != False:
                 raise PermissionError('paired_phone_adapter_became_pairable')
+            report_seconds = sum(step.delay_ms for step in self.reports[1:]) / 1000
+            if now() + report_seconds + REPORT_DRAIN_SECONDS >= self.deadline:
+                self.stop('paired_phone_session_time_insufficient')
+                return GLib.SOURCE_REMOVE
             self.receipt.write('.claim', 'dispatch_unknown')
             self.claimed = True
+        current = now()
         if self.sent < len(self.reports):
-            if now() >= self.deadline:
+            if current >= self.deadline:
                 self.stop('paired_phone_session_expired')
                 return GLib.SOURCE_REMOVE
-            report = self.reports[self.sent]
+            if current < self.next_report_at:
+                return GLib.SOURCE_CONTINUE
+            report = self.reports[self.sent].payload
+            release = held_release(self.mode, report)
+            if self.pending_release is None:
+                self.pending_release = release
             if channel.send(report) != len(report):
                 raise OSError('paired_phone_short_report_write')
+            sent_at = now()
+            if self.pending_release is not None and release is None:
+                self.release_drained_at = sent_at + RELEASE_DRAIN_SECONDS
+            self.pending_release = release
             self.sent += 1
             if self.sent == len(self.reports):
-                self.drained_at = now() + 0.2
+                self.drained_at = sent_at + REPORT_DRAIN_SECONDS
+            else:
+                self.next_report_at = sent_at + self.reports[self.sent].delay_ms / 1000
         elif current >= self.drained_at:
             self.stop('reports_queued_to_bluez')
             return GLib.SOURCE_REMOVE
@@ -371,18 +399,31 @@ class Session:
         poller.register(channel, select.POLLHUP | select.POLLERR | select.POLLRDHUP)
         return bool(poller.poll(0))
 
-    def close(self):
+    def release_held(self):
         channel = self.channels.get(self.mode)
-        # A cancelled press may need a release on the same still-valid link.
-        neutral = NEUTRAL[self.mode]
-        if (self.claimed and 0 < self.sent < len(self.reports) and self.reports[self.sent - 1] != neutral
-                and self.authenticated and channel is not None and not self.channel_closed(channel)):
-            try:
-                self.check_peer(connected=True)
-                channel.send(neutral)
-                time.sleep(0.05)
-            except (OSError, dbus.exceptions.DBusException):
-                pass
+        if not self.authenticated or channel is None:
+            return False
+        try:
+            self.check_peer(connected=True)
+            poller = select.poll()
+            poller.register(channel, select.POLLOUT)
+            if not poller.poll(80) or self.channel_closed(channel):
+                return False
+            if channel.send(self.pending_release) != len(self.pending_release):
+                return False
+            time.sleep(RELEASE_DRAIN_SECONDS)
+            return True
+        except (OSError, dbus.exceptions.DBusException):
+            return False
+
+    def close(self):
+        if self.pending_release is not None:
+            # Release on the acquired peer channel only, including on deadline.
+            self.release_queued = self.release_held()
+        elif self.authenticated:
+            remaining = self.release_drained_at - now()
+            if remaining > 0:
+                time.sleep(remaining)
         for channel in self.channels.values():
             channel.close()
         # BlueZ cleans up exported services and advertising when this private
@@ -400,7 +441,9 @@ def run_session(binding, mode, reports, receipt, tty, advertise):
         session.start()
     except dbus.exceptions.DBusException as error:
         reason = 'paired_phone_bluez_unavailable:' + error.get_dbus_name()
-        return dict(receipt.identity, state='not_sent', reason=reason)
+        if session is None:
+            return dict(receipt.identity, state='not_sent', reason=reason)
+        session.stop(reason)
     finally:
         if session is not None:
             session.close()
@@ -408,5 +451,8 @@ def run_session(binding, mode, reports, receipt, tty, advertise):
             bus.close()
     if session.claimed:
         state = session.reason if session.reason == 'reports_queued_to_bluez' else 'dispatch_unknown'
-        return receipt.write('.result', state, reason=session.reason, reports_queued=session.sent)
+        details = {'reason': session.reason, 'reports_queued': session.sent}
+        if session.release_queued is not None:
+            details['release_queued_to_bluez'] = session.release_queued
+        return receipt.write('.result', state, **details)
     return dict(receipt.identity, state='not_sent', reason=session.reason)

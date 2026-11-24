@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from assistant_mesh import paired_phone_input as hid
 
@@ -46,6 +47,45 @@ class PairedPhoneInputTest(unittest.TestCase):
         self.assertEqual((mode, reports), ('pointer', (b'\x02\x00\x00\x00', bytes(4))))
         with self.assertRaises(ValueError):
             hid.encode_reports({'kind': 'move', 'dx': True, 'dy': 1, 'wheel': 0})
+
+    def test_relative_gesture_releases_between_actions(self):
+        drag = {'kind': 'drag', 'button': 'right', 'deltas': [{'dx': 12, 'dy': -5}, {'dx': 1, 'dy': 0}]}
+        hold = {'kind': 'long_press', 'button': 'left', 'hold_ms': 700}
+        mode, reports = hid.encode_plan({'kind': 'gesture', 'steps': [drag, hold]})
+        self.assertEqual(mode, 'pointer')
+        self.assertEqual([step.payload.hex() for step in reports],
+                         ['02000000', '020cfb00', '02010000', '00000000', '01000000', '00000000'])
+        self.assertEqual([step.delay_ms for step in reports], [20] * 5 + [700])
+        invalid = (
+            {'kind': 'gesture', 'steps': [drag, {'kind': 'tap', 'x': 1, 'y': 2}]},
+            {'kind': 'gesture', 'steps': [dict(hold, hold_ms=3000)] * 2},
+            {'kind': 'gesture', 'steps': [dict(drag, deltas=drag['deltas'] * 8)] * 4},
+            {'kind': 'gesture', 'steps': [drag] * 9},
+            dict(hold, hold_ms=True),
+            dict(drag, deltas=[{'dx': 0, 'dy': 0}]),
+            dict(drag, deltas=[{'dx': -128, 'dy': 1}]),
+        )
+        for action in invalid:
+            with self.subTest(action=action), self.assertRaises(ValueError):
+                hid.encode_plan(action)
+
+    def test_absolute_pointer_requires_explicit_binding_and_preserves_release_position(self):
+        tap = {'kind': 'tap', 'x': 32767, 'y': 4609}
+        request = dict(self.request, action=tap)
+        with self.assertRaises(PermissionError):
+            hid.prepare(self.binding, request)
+        binding = dict(self.binding, report_modes=['pointer_absolute'])
+        mode, reports, digest = hid.prepare(binding, request)
+        self.assertEqual(mode, 'pointer_absolute')
+        self.assertEqual([step.payload.hex() for step in reports], ['00ff7f0112', '01ff7f0112', '00ff7f0112'])
+        self.assertNotEqual(digest, hid.prepare(binding, dict(request, action=dict(tap, x=16384)))[2])
+        drag = {'kind': 'drag_to', 'button': 'left', 'points': [{'x': 0, 'y': 32767}, {'x': 259, 'y': 515}]}
+        _, reports = hid.encode_plan(drag)
+        self.assertEqual([step.payload.hex() for step in reports],
+                         ['000000ff7f', '010000ff7f', '0103010302', '0003010302'])
+        for x in (-1, 32768, True, 0.5):
+            with self.subTest(x=x), self.assertRaises(ValueError):
+                hid.prepare(binding, dict(request, action=dict(tap, x=x)))
 
     def test_binding_and_att_match_exact_identity(self):
         binding_file = self.root / 'binding.json'
@@ -107,11 +147,15 @@ class PairedPhoneInputTest(unittest.TestCase):
 
 
 class BluezReportSocketTest(unittest.TestCase):
-    def test_notification_fd_uses_exact_att_context_and_packet_boundaries(self):
+    def setUp(self):
         try:
             from assistant_mesh import bluez_phone_hid as bluez
         except ImportError as error:
             self.skipTest(str(error))
+        self.bluez = bluez
+
+    def test_notification_fd_uses_exact_att_context_and_packet_boundaries(self):
+        bluez = self.bluez
         session = SimpleNamespace(owner=':1.5', peer='/org/bluez/hci0/dev_test', channels={},
                                   reason=None, deadline=bluez.now() + 30)
         session.att = lambda sender, options: bluez.Session.att(session, sender, options)
@@ -138,6 +182,57 @@ class BluezReportSocketTest(unittest.TestCase):
             self.assertFalse(bluez.Session.channel_closed(channel))
             daemon.close()
             self.assertTrue(bluez.Session.channel_closed(channel))
+
+    def test_report_map_exports_only_the_bound_profiles(self):
+        bluez = self.bluez
+        for modes, descriptors, references in (
+                (['pointer'], hid.POINTER_MAP, [b'\x02\x01']),
+                (['pointer', 'pointer_absolute'], hid.POINTER_MAP + hid.ABSOLUTE_POINTER_MAP,
+                 [b'\x02\x01', b'\x03\x01'])):
+            session = SimpleNamespace(bus=None, binding={'report_modes': modes})
+            with self.subTest(modes=modes), patch.object(bluez.dbus.service.Object, '__init__', return_value=None):
+                app = bluez.Application(session)
+                self.assertEqual(next(child.value for child in app.children if child.path.endswith('/map')),
+                                 descriptors)
+                self.assertEqual([child.value for child in app.children if isinstance(child, bluez.ReportReference)],
+                                 references)
+                if 'pointer_absolute' in modes:
+                    self.assertEqual(next(child.value for child in app.children
+                                          if child.path.endswith('/pointer_absolute')), b'\x00\xff\xff\xff\xff')
+
+    def test_timed_press_releases_same_coordinate_when_session_expires(self):
+        bluez = self.bluez
+        binding = {'adapter': 'hci7', 'peer_address': '00:11:22:33:44:55'}
+        mode, reports = hid.encode_plan(
+            {'kind': 'long_press_at', 'x': 4321, 'y': 18901, 'button': 'left', 'hold_ms': 700})
+        bus = Mock()
+        tty = SimpleNamespace(fileno=lambda: 1)
+        with (patch.object(bluez, 'now', return_value=100.0) as clock,
+              patch.object(bluez.os, 'tcgetpgrp', return_value=bluez.os.getpgrp())):
+            session = bluez.Session(bus, binding, mode, reports, None, tty, False)
+            session.check_peer = Mock()
+            session.authenticated = session.registered = session.prompted = session.claimed = True
+            channel, daemon = bluez.socket.socketpair(bluez.socket.AF_UNIX, bluez.socket.SOCK_SEQPACKET)
+            with channel, daemon:
+                daemon.setblocking(False)
+                session.channels[mode] = channel
+                self.assertTrue(session.advance())
+                self.assertEqual(daemon.recv(256), reports[0].payload)
+                clock.return_value = 100.03
+                self.assertTrue(session.advance())
+                self.assertEqual(daemon.recv(256), reports[1].payload)
+                clock.return_value = 100.7
+                self.assertTrue(session.advance())
+                with self.assertRaises(BlockingIOError):
+                    daemon.recv(256)
+                session.deadline = 100.75
+                clock.return_value = 100.76
+                self.assertFalse(session.advance())
+                session.close()
+                self.assertEqual(daemon.recv(256), reports[2].payload)
+        self.assertEqual(session.sent, 2)
+        self.assertEqual(session.reason, 'paired_phone_session_expired')
+        self.assertTrue(session.release_queued)
 
 
 if __name__ == '__main__':

@@ -11,6 +11,7 @@ import stat
 import struct
 import sys
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import private_json
@@ -21,8 +22,15 @@ from .phone_computer_use import canonical, private_output
 BINDING = 'amita-paired-phone-input-binding/1'
 CONTRACT = 'amita-paired-phone-input/1'
 SESSION_SECONDS = 30
-NEUTRAL = {'keyboard': bytes(8), 'pointer': bytes(4)}
-KEYBOARD_ID, POINTER_ID = 1, 2
+REPORT_INTERVAL_MS = 20
+MAX_HOLD_MS = 3000
+MAX_DRAG_POINTS = 16
+MAX_GESTURE_STEPS = 8
+MAX_GESTURE_REPORTS = 64
+MAX_GESTURE_MS = 6000
+ABSOLUTE_MAX = 32767
+NEUTRAL = {'keyboard': bytes(8), 'pointer': bytes(4), 'pointer_absolute': b'\x00\xff\xff\xff\xff'}
+KEYBOARD_ID, POINTER_ID, ABSOLUTE_POINTER_ID = 1, 2, 3
 
 # HID report IDs are in the Report Reference descriptors. GATT report values
 # carry only the content of the reports, without a second copy of the ID.
@@ -40,6 +48,13 @@ POINTER_MAP = bytes.fromhex('''
     75 05 95 01 81 01
     05 01 09 30 09 31 09 38 15 81 25 7f 75 08 95 03 81 06 c0 c0
 ''')
+# Null-state axes let an initial authenticated report read carry no position.
+ABSOLUTE_POINTER_MAP = bytes.fromhex('''
+    05 01 09 02 a1 01 85 03 09 01 a1 00
+    05 09 19 01 29 03 15 00 25 01 75 01 95 03 81 02
+    75 05 95 01 81 01
+    05 01 09 30 09 31 15 00 26 ff 7f 75 10 95 02 81 42 c0 c0
+''')
 KEYS = {char: code for code, char in enumerate('abcdefghijklmnopqrstuvwxyz1234567890', 4)}
 KEYS.update(enter=40, escape=41, backspace=42, tab=43, space=44, home=74,
             page_up=75, delete=76, end=77, page_down=78, right=79, left=80, down=81, up=82)
@@ -47,6 +62,20 @@ MODIFIERS = dict(ctrl=1, shift=2, alt=4, meta=8)
 PUNCTUATION = dict(zip("-=[]\\;'`,./", (45, 46, 47, 48, 49, 51, 52, 53, 54, 55, 56)))
 SHIFTED = dict(zip('!@#$%^&*()_+{}|:"~<>?', '1234567890-=[]\\;\'`,./'))
 BUTTONS = dict(left=1, right=2, middle=4)
+
+
+@dataclass(frozen=True)
+class ReportStep:
+    """One report and the minimum interval from the preceding report."""
+
+    payload: bytes
+    delay_ms: int = REPORT_INTERVAL_MS
+
+
+def button_mask(button):
+    if type(button) is not str or button not in BUTTONS:
+        raise ValueError('invalid_paired_phone_button')
+    return BUTTONS[button]
 
 
 def encode_reports(action):
@@ -85,11 +114,101 @@ def encode_reports(action):
             raise ValueError('invalid_paired_phone_pointer_delta')
         return 'pointer', (struct.pack('Bbbb', 0, *axes),)
     if kind == 'click' and set(action) == {'kind', 'button'}:
-        button = action['button']
-        if type(button) is not str or button not in BUTTONS:
-            raise ValueError('invalid_paired_phone_button')
-        return 'pointer', (bytes((BUTTONS[button], 0, 0, 0)), NEUTRAL['pointer'])
+        return 'pointer', (bytes((button_mask(action['button']), 0, 0, 0)), NEUTRAL['pointer'])
     raise ValueError('invalid_paired_phone_action')
+
+
+def hold_duration(value):
+    if type(value) is not int or not 100 <= value <= MAX_HOLD_MS:
+        raise ValueError('invalid_paired_phone_hold_duration')
+    return value
+
+
+def pointer_deltas(points):
+    if not isinstance(points, list) or not 1 <= len(points) <= MAX_DRAG_POINTS:
+        raise ValueError('invalid_paired_phone_drag')
+    for point in points:
+        if not isinstance(point, dict) or set(point) != {'dx', 'dy'}:
+            raise ValueError('invalid_paired_phone_pointer_delta')
+        axes = point['dx'], point['dy']
+        if not any(axes) or any(type(value) is not int or not -127 <= value <= 127 for value in axes):
+            raise ValueError('invalid_paired_phone_pointer_delta')
+        yield axes
+
+
+def absolute_report(point, button=0):
+    axes = point['x'], point['y']
+    if any(type(value) is not int or not 0 <= value <= ABSOLUTE_MAX for value in axes):
+        raise ValueError('invalid_paired_phone_absolute_position')
+    return struct.pack('<BHH', button, *axes)
+
+
+def absolute_drag(points, button):
+    if not isinstance(points, list) or not 2 <= len(points) <= MAX_DRAG_POINTS:
+        raise ValueError('invalid_paired_phone_drag')
+    if any(not isinstance(point, dict) or set(point) != {'x', 'y'} for point in points):
+        raise ValueError('invalid_paired_phone_absolute_position')
+    return (ReportStep(absolute_report(points[0])),
+            *(ReportStep(absolute_report(point, button)) for point in points),
+            ReportStep(absolute_report(points[-1])))
+
+
+def encode_step(action):
+    if not isinstance(action, dict) or type(action.get('kind')) is not str:
+        raise ValueError('invalid_paired_phone_action')
+    kind, fields = action['kind'], set(action)
+    if kind == 'long_press' and fields == {'kind', 'button', 'hold_ms'}:
+        pressed = bytes((button_mask(action['button']), 0, 0, 0))
+        return 'pointer', (ReportStep(pressed), ReportStep(NEUTRAL['pointer'], hold_duration(action['hold_ms'])))
+    if kind == 'drag' and fields == {'kind', 'button', 'deltas'}:
+        button = button_mask(action['button'])
+        return 'pointer', (
+            ReportStep(bytes((button, 0, 0, 0))),
+            *(ReportStep(struct.pack('Bbbb', button, dx, dy, 0)) for dx, dy in pointer_deltas(action['deltas'])),
+            ReportStep(NEUTRAL['pointer']))
+    if kind == 'move_to' and fields == {'kind', 'x', 'y'}:
+        return 'pointer_absolute', (ReportStep(absolute_report(action)),)
+    if kind == 'tap' and fields == {'kind', 'x', 'y'}:
+        release = ReportStep(absolute_report(action))
+        return 'pointer_absolute', (release, ReportStep(absolute_report(action, BUTTONS['left'])), release)
+    if kind == 'long_press_at' and fields == {'kind', 'x', 'y', 'button', 'hold_ms'}:
+        position = absolute_report(action)
+        pressed = absolute_report(action, button_mask(action['button']))
+        return 'pointer_absolute', (ReportStep(position), ReportStep(pressed),
+                                    ReportStep(position, hold_duration(action['hold_ms'])))
+    if kind == 'drag_to' and fields == {'kind', 'button', 'points'}:
+        return 'pointer_absolute', absolute_drag(action['points'], button_mask(action['button']))
+    mode, reports = encode_reports(action)
+    return mode, tuple(ReportStep(report) for report in reports)
+
+
+def encode_plan(action):
+    if not isinstance(action, dict) or action.get('kind') != 'gesture':
+        return encode_step(action)
+    steps = action.get('steps')
+    if set(action) != {'kind', 'steps'} or not isinstance(steps, list) or not 1 <= len(steps) <= MAX_GESTURE_STEPS:
+        raise ValueError('invalid_paired_phone_gesture')
+    mode, reports = None, []
+    for step in steps:
+        step_mode, step_reports = encode_step(step)
+        if step_mode == 'keyboard' or mode not in (None, step_mode):
+            raise ValueError('paired_phone_gesture_requires_one_pointer_mode')
+        mode = step_mode
+        reports.extend(step_reports)
+    if len(reports) > MAX_GESTURE_REPORTS or sum(report.delay_ms for report in reports) > MAX_GESTURE_MS:
+        raise ValueError('paired_phone_gesture_exceeds_limit')
+    return mode, tuple(reports)
+
+
+def held_release(mode, payload):
+    if mode == 'keyboard':
+        return NEUTRAL[mode] if any(payload) else None
+    if not payload[0]:
+        return None
+    if mode == 'pointer_absolute':
+        # Releasing at zero would move an absolute pointer to the corner.
+        return b'\0' + payload[1:]
+    return NEUTRAL[mode]
 
 
 def load_binding(path):
@@ -117,7 +236,7 @@ def prepare(binding, request):
         raise ValueError('invalid_paired_phone_scope')
     _identifier(request['task_id'], 'paired_phone_task_id', 180)
     _identifier(request['operation_id'], 'paired_phone_operation_id', 180)
-    mode, reports = encode_reports(request['action'])
+    mode, reports = encode_plan(request['action'])
     if mode not in binding['report_modes']:
         raise PermissionError('paired_phone_report_mode_disabled')
     target = {'adapter': binding['adapter'], 'peer_address': binding['peer_address']}
