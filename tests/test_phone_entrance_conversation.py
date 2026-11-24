@@ -67,11 +67,16 @@ class PhoneConversationTests(unittest.TestCase):
 
 
     def test_fresh_claw_message_can_reply_despite_an_unresolved_shared_turn(self):
+        self.call('send', event_id='branch-note', branch_id='prior-phone-branch',
+                  created_at_ms=1699999999000, text='the saved color is blue')
+        branch = self.store.claim('entry')
+        self.store.update_task(branch['id'], 'entry', branch['epoch'], {}, 'remembered', 'completed')
         original = dict(event_id='prior', created_at_ms=1700000000000, text='previous work')
         self.call('send', **original)
         blocked = self.store.claim('entry')
         self.store.update_task(blocked['id'], 'entry', blocked['epoch'],
                                {'side_effect_started': True}, 'unknown', 'needs_review')
+        self.assertEqual('successor', self.call('status')['context'])
         message = {'message_id':'new-claw', 'create_time_ms':1700000001000,
                    'from_user_id':'owner', 'to_user_id':'bot', 'message_type':1,
                    'context_token':'fixture-only',
@@ -80,10 +85,16 @@ class PhoneConversationTests(unittest.TestCase):
         task = self.store.claim('entry')
         self.assertTrue(task['scope'].startswith('entrance:claw-branch:'))
         self.assertIn('new request', task['input'])
+        self.assertIn('the saved color is blue', task['input'])
         self.assertEqual([self.scope['capability']], json.loads(task['required']))
         event = task['context']['entrance']['event_id']
         self.store.agent_action(task['id'], 'entry', task['epoch'], 'reply-claw', 'entrance_reply',
                                 {'text':'accepted', 'observed_latest_message_id':event})
+        self.store.update_task(task['id'], 'entry', task['epoch'], {}, 'done', 'completed')
+        self.call('send', event_id='shared-phone', created_at_ms=1700000002000, text='new phone message')
+        phone = self.store.claim('entry')
+        self.assertEqual(task['scope'], phone['scope'])
+        self.assertNotIn('the saved color is blue', phone['input'])
         with self.store.transaction() as db:
             old = db.execute('SELECT status,checkpoint FROM tasks WHERE id=?', (blocked['id'],)).fetchone()
             self.assertEqual('needs_review', old['status'])

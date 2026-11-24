@@ -103,8 +103,7 @@ class PhoneChat:
             existing = db.execute('SELECT 1 FROM entrance_events WHERE event_id=?', (event_id,)).fetchone()
             task_id = previous_record(db, event_id, kind, source_ref, text, metadata, *args, **kwargs)
             if existing is None and kind == 'message' and not metadata.get('branch_id'):
-                if metadata.get('channel') != 'phone' and self._select_claw_branch(db, event_id, task_id):
-                    return task_id
+                self._select_shared_branch(db, event_id, task_id)
                 self._include_branch_history(db, task_id)
             return task_id
 
@@ -173,20 +172,24 @@ class PhoneChat:
 
     def _include_branch_history(self, db, task_id):
         """Supply branch messages as reference material to a shared entrance turn."""
-        task = db.execute('SELECT context,status FROM tasks WHERE id=?', (task_id,)).fetchone()
+        task = db.execute('SELECT context,status,scope FROM tasks WHERE id=?', (task_id,)).fetchone()
         if task is None or task['status'] != 'pending':
             return
         context = json.loads(task['context'])
         if 'phone_branch_history' in context:
             return
         rows = db.execute("""SELECT e.* FROM entrance_events e
+            LEFT JOIN entrance_events parent ON parent.event_id=e.reply_to
+              AND parent.conversation_id=e.conversation_id
             WHERE e.conversation_id=? AND (EXISTS (
               SELECT 1 FROM phone_chat_inputs p WHERE p.branch<>'' AND
               (p.event_id=e.event_id OR p.event_id=e.reply_to))
               OR EXISTS (SELECT 1 FROM claw_chat_branches b WHERE b.event_id=e.event_id OR b.event_id=e.reply_to))
+            AND (COALESCE(e.task_id,parent.task_id) IS NULL OR EXISTS (SELECT 1 FROM tasks old
+              WHERE old.id=COALESCE(e.task_id,parent.task_id) AND old.status='completed' AND old.scope<>?))
             AND NOT EXISTS (SELECT 1 FROM phone_chat_context_delivery d JOIN tasks t ON t.id=d.task_id
-              WHERE d.event_id=e.event_id AND t.status='completed')
-            ORDER BY e.rowid LIMIT 32""", (self.policy['conversation_id'],))
+              WHERE d.event_id=e.event_id AND t.status='completed' AND t.scope=?)
+            ORDER BY e.rowid LIMIT 32""", (self.policy['conversation_id'], task['scope'], task['scope']))
         history = []
         for event in rows:
             metadata = json.loads(event['metadata'])
@@ -213,29 +216,33 @@ class PhoneChat:
                 return [row['id'], row['epoch']]
         return None
 
-    def _select_claw_branch(self, db, event_id, task_id):
-        # A persisted unresolved effect is definitive. Preserve every old
-        # task and put only the newly admitted message in the derived scope.
+    def _shared_scope(self, db):
+        # Both owned entrances use the same successor when the original
+        # scope is held by unresolved work. A successor has its own native
+        # thread. No original task or native turn is moved, retried or reset.
         scope = self.policy['scope']
         blocked = self._unresolved_session(db, scope)
-        if blocked is None:
-            return False
         while blocked is not None:
             scope = 'entrance:claw-branch:' + digest([scope, blocked])
             blocked = self._unresolved_session(db, scope)
+        return scope
+
+    def _select_shared_branch(self, db, event_id, task_id):
+        scope = self._shared_scope(db)
+        if scope == self.policy['scope']:
+            return
         task = db.execute('SELECT context FROM tasks WHERE id=?', (task_id,)).fetchone()
         context = json.loads(task['context'])
         context['session_scope'] = scope
         db.execute('UPDATE tasks SET context=?,scope=? WHERE id=?',
                    (canonical(context), scope, task_id))
         db.execute('INSERT INTO claw_chat_branches VALUES(?,?)', (event_id, scope))
-        return True
 
     def _mode(self, db):
         workers = db.execute('SELECT capabilities FROM nodes WHERE seen>?', (self.store.clock()-60,))
         if not any(self.policy['capability'] in json.loads(row[0]) for row in workers):
             return 'independent'
-        return 'independent' if self._unresolved_session(db, self.policy['scope']) else 'shared'
+        return 'shared'
 
     def request(self, node, action, value):
         if not isinstance(value, dict) or value.get('session_id') != node['session_id']:
@@ -248,7 +255,9 @@ class PhoneChat:
             if action == 'mesh_chat_status':
                 _fields(args, ())
                 mode = self._mode(db)
-                return {'mode': mode, 'available': mode == 'shared'}
+                return {'mode': mode, 'available': mode == 'shared',
+                        'context': ('successor' if mode == 'shared' and self._shared_scope(db) != self.policy['scope']
+                                    else 'original' if mode == 'shared' else 'independent')}
             if action == 'mesh_chat_send':
                 return self._input(db, node, args)
             if action == 'mesh_chat_events':
