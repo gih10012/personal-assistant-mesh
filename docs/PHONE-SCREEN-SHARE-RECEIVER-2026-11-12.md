@@ -292,3 +292,49 @@ still requires the original live task, grant, capacity and local owner
 approval. Capture verification requires the first real acknowledged frame.
 Inspect an unconfirmed reservation using the same operation ID before taking
 another action.
+
+### Owner-operated read-only acceptance
+
+Run on the original Source with the owner operator config and a dedicated
+manual worker config on the same control URL. Register that worker for exact
+`c2` claims and configure its sole capability as `mesh.node:<worker-node-id>`.
+The original phone needs its installed inspect adapter, the original
+`<phone-node-id>:ui-control-v1:foreground` capacity pool, and live authenticated
+control presence. In AMITA on the phone, open **Settings → Screen sharing** and
+enable receiving requests.
+
+Use a new private directory for the acceptance journal and first preview.
+
+```sh
+install -d -m 700 /PRIVATE/acceptance
+python3 -m assistant_mesh.phone_share_acceptance \
+  --operator-config /PRIVATE/operator.json --worker-config /PRIVATE/worker.json \
+  --directory /PRIVATE/acceptance dispatch --phone-node ORIGINAL_PHONE_NODE --wait-ready 120
+```
+
+Dispatch waits for the original control capability, restores the existing
+single-session pool if its lease expired, claims only this acceptance task,
+and uses the exact task-scoped Source grant. The operator credential authorizes
+that Source grant. The phone owner still approves the request in AMITA and
+confirms the system recording prompt. Sharing is requested for 30 seconds by
+default at 1 FPS.
+
+```sh
+python3 -m assistant_mesh.phone_share_acceptance \
+  --operator-config /PRIVATE/operator.json --worker-config /PRIVATE/worker.json \
+  --directory /PRIVATE/acceptance observe
+```
+
+Run `observe` during sharing. It saves the first available verified JPEG as
+0600 and reports its path and metadata. Inspect it privately and delete it
+afterward. After the phone stops sharing and the Source reports settlement,
+use the same command with `finish` in place of `observe` while the task lease
+is live. This records completion through the original worker task API, which
+can enqueue the usual task completion notice on Source.
+
+If a write is unconfirmed, use `reconcile` in the same directory. It checks
+the original Source receipt or recorded state. If that confirms a step before
+reservation, run `dispatch` again in the same directory to continue with the
+same identities. If the write remains unconfirmed, retain the journal. A
+second `dispatch` using the same journal will neither repeat a pending write
+nor start another share.

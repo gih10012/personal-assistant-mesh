@@ -33,10 +33,10 @@ def scope_for(task_id, epoch, target=None):
     return result
 
 
-def submit(client, task_id, task_epoch, operation, capability, capability_epoch, grant_id,
-           duration_ms=30000, max_fps=1, target=None):
+def selection_for(task_id, task_epoch, capability, capability_epoch, grant_id,
+                  duration_ms=30000, max_fps=1, target=None):
     scope = scope_for(task_id, task_epoch, target)
-    for value in (operation, capability, grant_id):
+    for value in (capability, grant_id):
         _identifier(value, 'screen_share_identity')
     if type(capability_epoch) is not int or capability_epoch < 1:
         raise ValueError('screen_share_original_capability_epoch_required')
@@ -49,15 +49,32 @@ def submit(client, task_id, task_epoch, operation, capability, capability_epoch,
     raw = json.dumps(workload, sort_keys=True, separators=(',', ':')).encode()
     blob = {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
             'base64': base64.b64encode(raw).decode('ascii')}
-    selection = {'capability_id': capability, 'epoch': capability_epoch,
-                 'action': 'action' if target is not None else 'inspect',
-                 'scope': scope, 'workload': {'input': blob}, 'grant_id': grant_id}
-    observation = client.request(OBSERVATION_ROUTE, {
-        'task_id': task_id, 'task_epoch': task_epoch, 'selection': selection})
-    selection['observations'] = [observation]
+    return {'capability_id': capability, 'epoch': capability_epoch,
+            'action': 'action' if target is not None else 'inspect',
+            'scope': scope, 'workload': {'input': blob}, 'grant_id': grant_id}
+
+
+def observe(client, selection):
+    scope = selection['scope']
+    return client.request(OBSERVATION_ROUTE, {
+        'task_id': scope['task_id'], 'task_epoch': scope['task_epoch'], 'selection': selection})
+
+
+def reserve(client, operation, selection, observation):
+    _identifier(operation, 'screen_share_identity')
+    scope, capability = selection['scope'], selection['capability_id']
     return client.request('/v1/allocation/action', {'action': 'reserve', 'arguments': {
-        'operation_id': operation, 'task_id': task_id, 'task_epoch': task_epoch,
-        'plan': {'target': capability, 'selections': [selection], 'route': []}, 'lease_seconds': 90}})
+        'operation_id': operation, 'task_id': scope['task_id'], 'task_epoch': scope['task_epoch'],
+        'plan': {'target': capability, 'selections': [dict(selection, observations=[observation])],
+                 'route': []}, 'lease_seconds': 90}})
+
+
+def submit(client, task_id, task_epoch, operation, capability, capability_epoch, grant_id,
+           duration_ms=30000, max_fps=1, target=None):
+    _identifier(operation, 'screen_share_identity')
+    selection = selection_for(task_id, task_epoch, capability, capability_epoch, grant_id,
+                              duration_ms, max_fps, target)
+    return reserve(client, operation, selection, observe(client, selection))
 
 
 def main(argv=None):
