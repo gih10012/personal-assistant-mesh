@@ -14,6 +14,8 @@ from unittest import mock
 
 from assistant_mesh import worker_maintenance as maintenance
 from assistant_mesh import worker_claim_receipts as claims
+from assistant_mesh.operation_isolation import make_store_class
+from assistant_mesh.store import Store
 from tests.test_legacy_fenced_receiver import _source_base
 
 
@@ -118,6 +120,53 @@ class WorkerMaintenanceTests(unittest.TestCase):
         self.assertIsNone(dispatch('POST', claims.CLAIM, lease_poll, self.a)['receipt']['task_id'])
         with self.store.transaction() as db:
             self.assertEqual('pending', db.execute('SELECT status FROM tasks WHERE id=?', (replacement,)).fetchone()[0])
+
+    def test_exact_claim_preserves_queue_and_recovers_original_receipt(self):
+        self.now = 1795120000
+        # Match the receiver composition that binds atomic claim onto the
+        # frozen Store before installing the receipt and maintenance wrappers.
+        self.store = make_store_class(self.Store, Store)(
+            self.database, clock=lambda: self.now, recover_inflight=False)
+        self.store.heartbeat(self.a['node'], ['a'])
+        self.store.heartbeat(self.b['node'], ['b'])
+        self.api = self.make_api(self.store)
+        claims.install_dispatch(self.api)
+        maintenance.attach(self.api)
+        oldest = self.task('oldest')
+        self.now += 1
+        selected = self.task('selected')
+        different_node = self.task('different-node', 'b')
+        with mock.patch.object(claims.time, 'time', return_value=self.now):
+            identity = claims.exact_claim_id(selected)
+            other_identity = claims.exact_claim_id(different_node)
+            held_identity = claims.exact_claim_id(oldest)
+        claim = {'claim_id': identity, 'task_id': selected}
+        receipt = {'claim_id': identity}
+        post = self.api.dispatch
+
+        with self.assertRaisesRegex(ValueError, 'task_binding_changed'):
+            post('POST', claims.CLAIM, dict(claim, task_id=oldest), self.a)
+        with self.assertRaises(PermissionError):
+            post('POST', claims.CLAIM, claim, self.operator)
+        self.assertEqual([], self.calls)
+        denied = post('POST', claims.CLAIM, {'claim_id': other_identity, 'task_id': different_node}, self.a)
+        self.assertIsNone(denied['task'])
+
+        self.post('acquire', operation='hold', control='hold-acquire', ttl=60)
+        held = post('POST', claims.CLAIM, {'claim_id': held_identity, 'task_id': oldest}, self.a)
+        self.assertIsNone(held['task'])
+        self.post('release', operation='hold', control='hold-release')
+
+        # Ignore the successful POST response, as when a reply is lost.
+        post('POST', claims.CLAIM, claim, self.a)
+        observed = post('POST', claims.RECEIPT, receipt, self.a)
+        self.assertEqual((selected, 1), (observed['receipt']['task_id'], observed['receipt']['task_epoch']))
+        self.assertIsNone(observed['task'])
+        self.assertEqual(observed, post('POST', claims.CLAIM, claim, self.a))
+        self.assertIsNone(post('POST', claims.RECEIPT, receipt, self.b)['receipt'])
+        self.assertEqual('pending', self.store.task_status(oldest)['status'])
+        self.assertEqual('pending', self.store.task_status(different_node)['status'])
+        self.assertEqual(oldest, self.claim()['id'])
 
     def test_concurrent_claim_acquire_waits_for_commit_and_only_blocks_target_new_claims(self):
         current = self.task('already-running')
