@@ -1,0 +1,6 @@
+{
+  "string": [
+    { "name": "ime_label", "value": "AMITA 编辑确认" },
+    { "name": "ime_description", "value": "在当前普通输入框中确认一次编辑操作" }
+  ]
+}

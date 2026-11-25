@@ -1,0 +1,8 @@
+{
+  "subtypes": [{
+    "id": "AmitaInputMethod",
+    "label": "$string:ime_label",
+    "locale": "zh-CN",
+    "mode": "lower"
+  }]
+}

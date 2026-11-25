@@ -1,0 +1,24 @@
+{
+  "module": {
+    "name": "phoneime",
+    "type": "feature",
+    "deviceTypes": ["phone", "tablet"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:ime_pages",
+    "extensionAbilities": [
+      {
+        "name": "AmitaInputMethod",
+        "srcEntry": "./ets/AmitaInputMethod.ets",
+        "type": "inputMethod",
+        "exported": true,
+        "label": "$string:ime_label",
+        "description": "$string:ime_description",
+        "metadata": [{
+          "name": "ohos.extension.input_method",
+          "resource": "$profile:input_method_config"
+        }]
+      }
+    ]
+  }
+}
