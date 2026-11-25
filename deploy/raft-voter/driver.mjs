@@ -1,5 +1,6 @@
-import { bytes, digestProposal, entry, exact, hardState, MEMBERS, message, need, proposeWire, safe, withCommit } from './codec.mjs';
+import { bytes, entry, exact, hardState, MEMBERS, message, need, OWNER_TRANSFER, parseProposal, proposeWire, safe, withCommit } from './codec.mjs';
 import { acknowledgement, envelope, exchangeRequest, peerMode, validAck, validateConfig, verify, verifyExchange } from './protocol.mjs';
+import { applyOwner, canonical, contentHash, originalReceipt, ownerRequestError, receiptMatches, recordReceipt } from './owner-fsm.mjs';
 
 const MAX_ENTRIES = 2048, MAX_LOG_BYTES = 1024 * 1024, MAX_OUTBOX = 256, MAX_STATE_BYTES = 4 * 1024 * 1024;
 const DAY_ROWS = 90000, DAY_EVENTS = 90000, REPLAY_WINDOW = 64;
@@ -21,13 +22,40 @@ function validateStable(stable) {
   need(stable.snapshot.length === 0, 'snapshot_requires_qualified_port_export');
   const hs = hardState(stable.hard_state);
   need(hs.vote === 0 || MEMBERS.includes(hs.vote), 'static_vote_member');
-  let previous = 0, size = 0;
+  let previous = 0, size = 0, appliedOwner = false;
   for (const wire of stable.entries) {
     const record = entry(wire); size += wire.length;
     need(record.index === previous + 1 && record.term <= hs.term, 'contiguous_bound_log');
     previous = record.index;
+    if (record.index <= stable.applied && record.proposal?.format === OWNER_TRANSFER) appliedOwner = true;
   }
   need(size <= MAX_LOG_BYTES && stable.applied <= hs.commit && hs.commit <= previous, 'stable_commit_applied_bounds');
+  return appliedOwner;
+}
+
+async function applyProposal(state, record) {
+  const proposal = record.proposal;
+  if (!proposal) return;
+  if (proposal.format === OWNER_TRANSFER) return applyOwner(state, proposal, record);
+  const previous = originalReceipt(state.receipts, proposal.operation_id);
+  if (previous) {
+    // The original typed request already owns this ID. A later opaque entry
+    // can neither overwrite that receipt nor stop unrelated typed transfers.
+    if (previous.format === undefined && previous.digest !== proposal.digest) return 'original_operation_digest_conflict';
+  } else recordReceipt(state.receipts, proposal.operation_id, { digest: proposal.digest, index: record.index, term: record.term });
+}
+
+async function verifyOwnerRestore(state, appliedOwner) {
+  if (!appliedOwner && state.replica_writer == null && !Object.values(state.receipts).some(r => r.format)) return;
+  // The pinned host retains the entire bounded log. A missing FSM row or
+  // receipt at an already-applied index must never be treated as virgin state.
+  const replay = { binding: state.binding, receipts: {} };
+  for (const wire of state.stable.entries.slice(0, state.stable.applied)) {
+    const reason = await applyProposal(replay, entry(wire));
+    need(!reason, reason);
+  }
+  need(canonical(replay.replica_writer ?? null) === canonical(state.replica_writer ?? null) &&
+    canonical(replay.receipts) === canonical(state.receipts), 'original_applied_owner_state_required');
 }
 
 // One pure ESM state machine shared by Node and SQLite DO. Store.save must be
@@ -36,7 +64,7 @@ function validateStable(stable) {
 export class VoterDriver {
   constructor({ Voter, store, config, clock = Date.now }) {
     this.Voter = Voter; this.store = store; this.config = validateConfig(config); this.clock = clock;
-    this.state = null; this.core = null; this.tail = Promise.resolve(); this.dead = false;
+    this.state = null; this.durable = null; this.core = null; this.tail = Promise.resolve(); this.dead = false;
   }
   serial(action) {
     const result = this.tail.then(() => { need(!this.dead, 'core_closed_reconstruct_required'); return action(); });
@@ -46,11 +74,13 @@ export class VoterDriver {
     return this.serial(async () => {
       this.state = await this.store.read() ?? fresh(this.config);
       need(this.state.format === 'amita-raft-host-state/1' && same(this.state.binding, binding(this.config)), 'original_group_member_binding');
-      validateStable(this.state.stable);
+      const appliedOwner = validateStable(this.state.stable);
       need(Array.isArray(this.state.outbox) && this.state.outbox.length <= MAX_OUTBOX &&
         typeof this.state.enabled === 'boolean' && Object.keys(this.state.receipts).length <= MAX_ENTRIES,
       'bounded_original_state');
       need(!this.state.hold, `retained_hold_${this.state.hold}`);
+      await verifyOwnerRestore(this.state, appliedOwner);
+      this.durable = clone(this.state);
       this.core = new this.Voter(this.config.member, JSON.stringify(this.state.stable));
       if (await this.stopExpired()) return this.status();
       const pending = clone(this.state.pending);
@@ -70,7 +100,10 @@ export class VoterDriver {
   async save() {
     this.quota(); this.state.quota.rows++;
     need(JSON.stringify(this.state).length <= MAX_STATE_BYTES, 'state_budget_hold');
-    try { await this.store.save(clone(this.state)); }
+    try {
+      const image = clone(this.state);
+      await this.store.save(image); this.durable = image;
+    }
     catch (error) { this.closeCore(); throw error; }
   }
   closeCore() { this.core?.free(); this.core = null; this.dead = true; }
@@ -86,14 +119,16 @@ export class VoterDriver {
     throw new Error(`raft_voter_retained_hold_${reason}`);
   }
   status() {
-    need(this.state !== null, 'not_started');
-    const hs = hardState(this.state.stable.hard_state);
-    return { format: 'amita-raft-status/1', ...binding(this.config), enabled: this.state.enabled && !this.expired(),
+    const state = this.durable;
+    need(state !== null, 'not_started');
+    const hs = hardState(state.stable.hard_state);
+    return { format: 'amita-raft-status/1', ...binding(this.config), enabled: state.enabled && !this.expired(),
       ...(this.config.qualification_until_ms === undefined ? {} : { qualification_until_ms: this.config.qualification_until_ms }),
-      term: hs.term, persisted_commit: hs.commit, applied: this.state.stable.applied,
-      leader_hint: this.state.leader_hint, leader_hint_is_authority: false,
-      receipts: clone(this.state.receipts), queued_messages: this.state.outbox.length,
-      pending_original_input: this.state.pending !== null, hold: this.state.hold, quota: clone(this.state.quota),
+      term: hs.term, persisted_commit: hs.commit, applied: state.stable.applied,
+      leader_hint: state.leader_hint, leader_hint_is_authority: false,
+      replica_writer: clone(state.replica_writer ?? null), owner_read_consistency: 'local_durable_applied',
+      receipts: clone(state.receipts), queued_messages: state.outbox.length,
+      pending_original_input: state.pending !== null, hold: state.hold, quota: clone(state.quota),
       core_closed: this.dead, business_fencing: false, ha_qualified: false };
   }
   async inspect() {
@@ -151,14 +186,8 @@ export class VoterDriver {
         const record = entry(wire);
         need(record.index === this.state.stable.applied + 1 &&
           same([...bytes(wire)], this.state.stable.entries[record.index - 1]), 'original_committed_entry');
-        if (record.data.length) {
-          const proposal = digestProposal(JSON.parse(new TextDecoder().decode(record.data)));
-          const previous = this.state.receipts[proposal.operation_id];
-          if (previous && previous.digest !== proposal.digest) return this.hold('original_operation_digest_conflict');
-          if (!previous) this.state.receipts[proposal.operation_id] = {
-            digest: proposal.digest, index: record.index, term: record.term
-          };
-        }
+        const reason = await applyProposal(this.state, record);
+        if (reason) return this.hold(reason);
         // Empty leader/no-op entries advance applied too, atomically with FSM.
         this.state.stable.applied = record.index; last = record.index;
       }
@@ -263,11 +292,17 @@ export class VoterDriver {
     });
   }
   async propose(value) {
-    const proposal = digestProposal(value);
+    const proposal = parseProposal(clone(value));
     return this.serial(async () => {
       need(this.state.enabled && !this.expired(), 'voter_disabled'); this.event();
-      const old = this.state.receipts[proposal.operation_id];
-      if (old) { need(old.digest === proposal.digest, 'original_operation_digest_conflict'); return clone(old); }
+      let requestHash = null;
+      if (proposal.format === OWNER_TRANSFER) {
+        const reason = await ownerRequestError(proposal, this.state.binding);
+        need(reason === null, reason);
+        requestHash = await contentHash(proposal);
+      }
+      const old = originalReceipt(this.state.receipts, proposal.operation_id);
+      if (old) { need(receiptMatches(old, proposal, requestHash), 'original_operation_digest_conflict'); return clone(old); }
       need(this.state.stable.entries.length < MAX_ENTRIES - 32, 'log_capacity_hold_no_compaction');
       await this.process({ kind: 'proposal', wire: [...proposeWire(this.config.member, proposal)] });
       return { status: 'submitted_not_commit_receipt', operation_id: proposal.operation_id };

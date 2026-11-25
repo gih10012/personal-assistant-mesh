@@ -4,7 +4,7 @@ export const MAX_WIRE = 32768;
 export function need(value, reason) { if (!value) throw new Error(`raft_voter_${reason}`); }
 export function exact(value, keys) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&
-    Object.keys(value).sort().join('|') === [...keys].sort().join('|');
+    Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 }
 export function bytes(value, maximum = MAX_WIRE) {
   need((Array.isArray(value) || value instanceof Uint8Array) && value.length <= maximum &&
@@ -66,7 +66,7 @@ export function entry(wire) {
   need(rows.every(row => [1, 2, 3, 4, 5, 6].includes(row.number)) &&
     uint(rows, 1) === 0 && uint(rows, 5) <= 1 && blob(rows, 6).length === 0, 'static_normal_entries_only');
   const value = { term: uint(rows, 2), index: uint(rows, 3), data: blob(rows, 4) };
-  if (value.data.length) digestProposal(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(value.data)));
+  if (value.data.length) value.proposal = parseProposal(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(value.data)));
   return value;
 }
 export function message(wire, { remote = false } = {}) {
@@ -97,8 +97,42 @@ export function digestProposal(value) {
     typeof value.digest === 'string' && /^[0-9a-f]{64}$/.test(value.digest), 'digest_only_proposal');
   return { format: value.format, operation_id: value.operation_id, digest: value.digest };
 }
+export const OWNER_TRANSFER = 'amita-replica-writer-transfer/1';
+export const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
+const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+const integer = value => Number.isSafeInteger(value) && value >= 0;
+export function parseProposal(value) {
+  if (value?.format !== OWNER_TRANSFER) return digestProposal(value);
+  need(exact(value, ['format', 'operation_id', 'group', 'role', 'scope', 'previous', 'next_owner',
+    'next_epoch', 'checkpoint', 'checkpoint_sha256']) && identifier(value.operation_id) &&
+    identifier(value.group) && value.role === 'replica_writer' && identifier(value.scope) &&
+    identifier(value.next_owner) && integer(value.next_epoch) && value.next_epoch > 0 &&
+    hash(value.checkpoint_sha256), 'owner_transfer_fields');
+  const p = value.previous;
+  need(exact(p, ['owner', 'epoch', 'head']) && integer(p.epoch) &&
+    (p.epoch === 0 ? p.owner === null : identifier(p.owner)) &&
+    exact(p.head, ['index', 'sha256']) && integer(p.head.index) && hash(p.head.sha256) &&
+    (p.epoch === 0 ? p.head.index === 0 && p.head.sha256 === '0'.repeat(64) : p.head.index > 0) &&
+    value.next_epoch === p.epoch + 1 && value.next_owner !== p.owner, 'owner_predecessor_fields');
+  const c = value.checkpoint;
+  need(exact(c, ['authority', 'incarnation', 'generation', 'manifest_sha256', 'sealed_journal_head',
+    'typed_rows_sha256', 'external_dependencies_manifest_sha256', 'worker_claim_protocol',
+    'source_holder', 'source_seal_sha256', 'holder_receipts', 'retained_effects_sha256']) &&
+    identifier(c.authority) && identifier(c.incarnation) && integer(c.generation) && c.generation > 0 &&
+    integer(c.sealed_journal_head) && hash(c.manifest_sha256) && hash(c.typed_rows_sha256) &&
+    hash(c.external_dependencies_manifest_sha256) && c.worker_claim_protocol === 'amita-worker-claim/1' &&
+    identifier(c.source_holder) && hash(c.source_seal_sha256) && hash(c.retained_effects_sha256) &&
+    (p.owner === null || c.source_holder === p.owner) && c.source_holder !== value.next_owner, 'sealed_checkpoint_fields');
+  const receipts = c.holder_receipts;
+  need(Array.isArray(receipts) && receipts.length === 2 &&
+    receipts.every(r => exact(r, ['holder', 'sha256']) && identifier(r.holder) && hash(r.sha256)) &&
+    receipts[0].holder < receipts[1].holder && receipts[0].sha256 !== receipts[1].sha256 &&
+    receipts.some(r => r.holder === c.source_holder) && receipts.some(r => r.holder === value.next_owner),
+  'two_distinct_sorted_holder_receipts');
+  return value;
+}
 export function proposeWire(id, value) {
-  const data = new TextEncoder().encode(JSON.stringify(digestProposal(value)));
+  const data = new TextEncoder().encode(JSON.stringify(parseProposal(value)));
   return Uint8Array.from([...scalar(1, 2), ...scalar(2, id), ...scalar(3, id), ...binary(7, binary(4, data))]);
 }
 export function encode64(value) {

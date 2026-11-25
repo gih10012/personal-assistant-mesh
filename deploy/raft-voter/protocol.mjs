@@ -8,6 +8,12 @@ export function peerMode(config, id) {
 }
 export function validateConfig(value) {
   const fields = ['group', 'scope', 'member', 'links', 'operator_key', 'tick_ms', 'start_enabled', 'peers'];
+  if (value && Object.hasOwn(value, 'owner_command_key')) {
+    fields.push('owner_command_key');
+    need(typeof value.owner_command_key === 'string' && /^[0-9a-f]{64}$/.test(value.owner_command_key) &&
+      value.owner_command_key !== value.operator_key &&
+      !Object.values(value.links ?? {}).includes(value.owner_command_key), 'separate_owner_command_key');
+  }
   if (value && Object.hasOwn(value, 'qualification_until_ms')) {
     fields.push('qualification_until_ms');
     need(Number.isSafeInteger(value.qualification_until_ms) && value.qualification_until_ms > 0, 'absolute_qualification_deadline');

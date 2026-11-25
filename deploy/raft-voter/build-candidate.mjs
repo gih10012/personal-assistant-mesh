@@ -15,8 +15,8 @@ need(isAbsolute(destination) && !existsSync(destination), 'new_private_destinati
 const upstream = inspectArtifact(artifact);
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: source, encoding: 'utf8' }).trim();
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8' }).trim();
-const sourceFiles = ['codec.mjs', 'protocol.mjs', 'driver.mjs', 'storage-node.mjs', 'loader-node.mjs',
-  'http.mjs', 'node.mjs', 'cloudflare-worker.mjs', 'artifact-pins.json', 'wrangler.candidate.json', 'smoke.mjs', 'exchange-smoke.mjs', 'README.md'];
+const sourceFiles = ['codec.mjs', 'protocol.mjs', 'owner-fsm.mjs', 'driver.mjs', 'storage-node.mjs', 'loader-node.mjs',
+  'http.mjs', 'node.mjs', 'cloudflare-worker.mjs', 'artifact-pins.json', 'wrangler.candidate.json', 'smoke.mjs', 'exchange-smoke.mjs', 'owner-smoke.mjs', 'README.md'];
 const outputs = [];
 for (const name of sourceFiles) outputs.push([name, execFileSync('git', ['show', `${commit}:deploy/raft-voter/${name}`], { cwd: root })]);
 const artifactFiles = [...Object.keys(pins.files), 'HOSTED-MANIFEST.json', 'WASM-RECOVERY.json'];

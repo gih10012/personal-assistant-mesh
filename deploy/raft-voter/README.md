@@ -21,10 +21,11 @@ commit. Local status exposes persisted term/commit/applied, original digest
 receipts and an explicitly nonauthoritative leader hint. It issues no lease,
 coordinator permission, ReadIndex guarantee or Shell/OAuth/iLink fencing grant.
 
-Only `{format:"amita-quorum-digest/1",operation_id,digest}` enters normal log
-entries. `digest` is 64 lowercase hex characters. No business text, credentials,
-chat or payload is accepted. Duplicate original operation/digest is idempotent;
-conflicting committed digests retain a hold instead of overwriting receipts.
+Normal log entries support opaque digest receipts and controlled business
+writer transfers. Existing `{format:"amita-quorum-digest/1",operation_id,digest}`
+operations accept a 64-character lowercase hex digest. Repeating the original
+operation and digest returns the original receipt. Conflicting committed v1
+digests retain a hold. Legacy receipts confer no writer epoch.
 
 Before calling `persisted(sequence)`, every nonempty Ready HardState/log batch
 is atomically saved and synchronized. No outgoing message is sent at this point.
@@ -56,6 +57,70 @@ nonempty Ready snapshot is retained durably in a hold before `persisted()` can
 release messages. u64 values are parsed as BigInt and limited to JavaScript's
 exact integer range before passing the old JSON API. A proper upstream port
 snapshot/compaction and u64 schema remain required before unbounded operation.
+
+## Controlled business writer transfers
+
+`POST /raft/manage` with `action: "propose"` accepts an
+`amita-replica-writer-transfer/1` command on a voter with the optional private
+`owner_command_key` configured. This bearer may submit transfers and read
+status, owner and original receipts. The existing operator may manage the
+voter, submit opaque digest proposals and read the same local views. Configure
+a distinct 64-character lowercase hex owner key on explicitly chosen command
+entrances only. All three trusted members must understand the wire format
+before a holder submits the first typed entry.
+
+The typed command contains the exact original `operation_id`, voter `group`
+and `scope`, `role: "replica_writer"`, `previous: {owner,epoch,head}`,
+`next_owner`, `next_epoch`, `checkpoint` and `checkpoint_sha256`. The first
+explicit transfer uses `previous.owner = null`, epoch and head index zero,
+and a head SHA256 of 64 zeroes. It identifies the sealed source holder in the
+checkpoint. Each later command must name the current holder, epoch and head
+pair and increment the epoch by exactly one. The new head binds the actual
+Raft entry index and SHA256 of the complete canonical request. The Raft term
+is recorded separately on the immutable receipt.
+
+Each checkpoint binds these fields:
+
+- `authority`, `incarnation`, `generation`, `manifest_sha256`,
+  `sealed_journal_head` and `typed_rows_sha256` identify the sealed data.
+- `external_dependencies_manifest_sha256`, `worker_claim_protocol`
+  (`amita-worker-claim/1`) and `retained_effects_sha256` preserve evidence
+  references for outstanding claims, native work, external effects and unknowns.
+- `source_holder`, `source_seal_sha256` and two distinct `holder_receipts`
+  identify the old writer seal and the independent disk receipts. The array
+  contains exactly the source and target, sorted by ASCII holder ID, each
+  with `{holder,sha256}`. Every digest uses 64 lowercase hex characters.
+
+Hash the UTF-8 bytes of compact JSON with sorted object keys at every level
+and array order preserved. The checkpoint hash covers every field, including
+both receipt digests. The request hash additionally covers the format, original
+operation, group, role, scope, predecessor and successor. A submission response
+of `submitted_not_commit_receipt` can precede loss of the original operation.
+After a lost response, read `action: "receipt"` with that `operation_id`.
+A missing local receipt returns `unknown_here`. A recorded receipt identifies
+the exact request hash. An eligible committed transfer returns `applied`,
+and a stale predecessor returns a durable `rejected` receipt. Keep the same
+operation identity for reconciliation. Previously committed IDs stay occupied
+across both formats.
+
+`action: "owner"` returns the member's locally durable applied current state
+and applied index. A historical grant remains queryable after its successor.
+The voter stores the current compact checkpoint, receipt, applied index and
+peer outbox atomically. Reconstruction checks the complete retained applied
+log against the owner state and receipts before continuing. A missing row
+requires recovery of the original store. Existing snapshot limits apply.
+
+These commands commit control data. Private verification of the actual signed
+disk receipts and old writer seal, coverage of retained effects, and the
+business SQLite activation/fencing boundary belong to the subsequent handoff.
+A local read may lag the quorum. Business consumers must keep their original
+execution guards. All status responses continue to report `business_fencing:
+false` and `ha_qualified: false`.
+
+The focused local acceptance uses `node --test owner-smoke.mjs` in the assembled
+candidate. In a source checkout set `AMITA_RAFT_ARTIFACT` to the original
+download directory. The test uses the pinned WASM, real local fsync/SQLite
+stores, authenticated management calls and an interrupted apply boundary.
 
 ## Candidate assembly
 
@@ -223,7 +288,9 @@ traffic also draw on shared account quotas. One packet each way per holder tick
 limits recovery throughput. A sustained backlog or an offline voter can reach
 the existing 256-packet outbox limit. Inspect queue counts during the trial.
 
-Remaining integration: real three-host transport and existing authority binding,
-Free DO startup/CPU/budget measurement, portable snapshots/compaction, S2 leases
-and effect fencing, and both full business state copies. This candidate neither
-opens the existing business DB nor claims those outcomes.
+The separate laptop/VPS/Cloudflare trial observed a term-1 VPS leader followed
+by a term-2 laptop leader in 96.325 seconds. That trial exercised the earlier
+digest voter. This typed command adds an applied control-state record for a
+future controlled handoff. Signed disk and old-writer-seal verification,
+production business writer activation, portable snapshots/compaction and
+sustained Free-tier qualification remain separate integration work.

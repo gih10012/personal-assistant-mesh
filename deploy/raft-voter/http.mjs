@@ -1,4 +1,5 @@
-import { exact, MEMBERS, need } from './codec.mjs';
+import { exact, identifier, MEMBERS, need, OWNER_TRANSFER } from './codec.mjs';
+import { originalReceipt } from './owner-fsm.mjs';
 import { peerMode, verify, verifyExchange } from './protocol.mjs';
 
 export async function boundedJSON(request) {
@@ -24,6 +25,17 @@ function authorized(header, expected) {
   for (let i = 0; i < wanted.length; i++) difference |= (header.charCodeAt(i) || 0) ^ wanted.charCodeAt(i);
   return difference === 0;
 }
+function checkManagement(config, value, authorization) {
+  const operator = authorized(authorization, config.operator_key);
+  const owner = authorized(authorization, config.owner_command_key);
+  if (value?.action === 'propose' && value.proposal?.format === OWNER_TRANSFER) {
+    need(owner, 'owner_command_key_required');
+  } else if (['status', 'receipt', 'owner'].includes(value?.action)) {
+    need(operator || owner, 'existing_operator_binding_required');
+  } else need(operator, 'existing_operator_binding_required');
+  need(value?.group === config.group && value?.scope === config.scope && value?.member === config.member,
+    'management_group_binding');
+}
 
 // Verify at the public ingress, before charging the separate DO quota for
 // a request. Forward the parsed bounded body without teeing the input stream.
@@ -34,7 +46,7 @@ export async function authenticatedForward(config, request, clock = Date.now) {
   need(path === '/raft/manage' || clock() < (config.qualification_until_ms ?? Infinity), 'qualification_expired');
   need((path === '/raft/peer' && peers.some(id => peerMode(config, id) === 'push')) ||
     (path === '/raft/exchange' && !url.search && peers.some(id => peerMode(config, id) === 'accept')) ||
-    (path === '/raft/manage' && authorized(authorization, config.operator_key)),
+    (path === '/raft/manage' && (authorized(authorization, config.operator_key) || authorized(authorization, config.owner_command_key))),
     'voter_ingress_not_authorized');
   const value = await boundedJSON(request);
   if (path === '/raft/peer') {
@@ -43,9 +55,9 @@ export async function authenticatedForward(config, request, clock = Date.now) {
   } else if (path === '/raft/exchange') {
     await verifyExchange(config, value, clock());
   } else {
-    need(value?.group === config.group && value?.scope === config.scope &&
-      value?.member === config.member, 'management_group_binding');
-    need(['status', 'disable'].includes(value.action) || clock() < (config.qualification_until_ms ?? Infinity), 'qualification_expired');
+    checkManagement(config, value, authorization);
+    need(['status', 'owner', 'receipt', 'disable'].includes(value.action) ||
+      clock() < (config.qualification_until_ms ?? Infinity), 'qualification_expired');
   }
   const headers = { 'content-type': 'application/json' };
   if (path === '/raft/manage') headers.authorization = authorization;
@@ -59,12 +71,22 @@ export async function handle(driver, request) {
     return driver.receive(value);
   }
   if (path === '/raft/exchange') return driver.exchange(value);
-  need(path === '/raft/manage' && authorized(request.headers.get('authorization'), driver.config.operator_key), 'existing_operator_binding_required');
-  need(value?.group === driver.config.group && value?.scope === driver.config.scope && value?.member === driver.config.member,
-    'management_group_binding');
+  need(path === '/raft/manage', 'existing_operator_binding_required');
+  checkManagement(driver.config, value, request.headers.get('authorization'));
   const keys = ['group', 'scope', 'member', 'action'];
   if (value.action === 'propose') {
     need(exact(value, [...keys, 'proposal']), 'management_fields'); return driver.propose(value.proposal);
+  }
+  if (value.action === 'receipt' || value.action === 'owner') {
+    const readReceipt = value.action === 'receipt';
+    need(readReceipt ? exact(value, [...keys, 'operation_id']) && identifier(value.operation_id) : exact(value, keys),
+      'management_fields');
+    const state = await driver.inspect();
+    const read = { group: state.group, scope: state.scope, member: state.member, applied: state.applied,
+      consistency: state.owner_read_consistency, core_closed: state.core_closed, hold: state.hold, business_fencing: false };
+    if (!readReceipt) return { ...read, role: 'replica_writer', current: state.replica_writer };
+    const receipt = originalReceipt(state.receipts, value.operation_id);
+    return { ...read, operation_id: value.operation_id, status: receipt ? 'recorded' : 'unknown_here', receipt };
   }
   need(exact(value, keys), 'management_fields');
   if (value.action === 'status') return driver.inspect();
