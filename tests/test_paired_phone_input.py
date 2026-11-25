@@ -186,6 +186,39 @@ class BluezReportSocketTest(unittest.TestCase):
             self.skipTest(str(error))
         self.bluez = bluez
 
+    def test_resolves_identity_on_retained_private_address_path(self):
+        bluez = self.bluez
+        binding = {'adapter': 'hci7', 'peer_address': '00:11:22:33:44:55'}
+        bus = Mock()
+        bus.get_name_owner.return_value = ':1.5'
+        session = bluez.Session(bus, binding, 'keyboard', [], None, None, False)
+        path = session.adapter + '/dev_40_AA_BB_CC_DD_EE'
+        identity_path = session.adapter + '/dev_00_11_22_33_44_55'
+        properties = {'Adapter': session.adapter, 'Address': binding['peer_address'],
+                      'Paired': True, 'Bonded': True, 'Connected': True}
+        objects = bus.get_object.return_value.GetManagedObjects
+        objects.return_value = {
+            path: {bluez.DEVICE: properties},
+            '/org/bluez/hci8/dev_00_11_22_33_44_55': {
+                bluez.DEVICE: dict(properties, Adapter='/org/bluez/hci8')},
+        }
+        with patch.object(bluez.dbus, 'Interface', return_value=bus.get_object.return_value) as interface:
+            session.peer = session.resolve_peer()
+            self.assertEqual(session.peer, path)
+            bus.get_object.assert_called_once_with(':1.5', '/', introspect=False)
+            interface.assert_called_once_with(bus.get_object.return_value, bluez.OBJECT_MANAGER)
+            session.att(':1.5', {'device': path, 'link': 'LE'})
+            with self.assertRaises(bluez.dbus.DBusException):
+                session.att(':1.5', {'device': identity_path, 'link': 'LE'})
+
+            objects.return_value[identity_path] = {bluez.DEVICE: properties}
+            with self.assertRaises(PermissionError):
+                session.resolve_peer()
+            del objects.return_value[path]
+            del objects.return_value[identity_path]
+            with self.assertRaises(PermissionError):
+                session.resolve_peer()
+
     @contextmanager
     def guarded_session(self, verifier):
         bluez = self.bluez

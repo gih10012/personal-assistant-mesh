@@ -214,7 +214,7 @@ class Session:
         self.bus, self.binding, self.mode = bus, binding, mode
         self.reports, self.receipt, self.tty, self.advertise = reports, receipt, tty, advertise
         self.adapter = '/org/bluez/' + binding['adapter']
-        self.peer = self.adapter + '/dev_' + binding['peer_address'].replace(':', '_')
+        self.peer = None
         self.owner = bus.get_name_owner(BLUEZ)
         self.loop = GLib.MainLoop()
         self.deadline = now() + SESSION_SECONDS
@@ -249,6 +249,20 @@ class Session:
     def properties(self, path, interface):
         return self.proxy(path, PROPERTIES).GetAll(interface, timeout=1)
 
+    def resolve_peer(self):
+        # BlueZ may update Address after resolving LE privacy while retaining
+        # the object path originally created for the temporary address.
+        objects = self.proxy('/', OBJECT_MANAGER).GetManagedObjects(timeout=1)
+        matches = []
+        for path, interfaces in objects.items():
+            properties = interfaces.get(DEVICE, {})
+            if (path.startswith(self.adapter + '/dev_') and properties.get('Adapter') == self.adapter
+                    and properties.get('Address') == self.binding['peer_address']):
+                matches.append(path)
+        if len(matches) != 1:
+            raise PermissionError('paired_phone_exact_bond_required')
+        return matches[0]
+
     def check_peer(self, *, connected):
         validate_peer(self.binding, self.properties(self.peer, DEVICE), connected=connected)
 
@@ -267,13 +281,7 @@ class Session:
             self.stop('paired_phone_peer_binding_changed')
 
     def start(self):
-        self.check_peer(connected=not self.advertise)
-        adapter = self.properties(self.adapter, ADAPTER)
-        if not adapter.get('Powered'):
-            raise PermissionError('paired_phone_powered_adapter_required')
-        if self.advertise and adapter.get('Pairable') != False:
-            raise PermissionError('paired_phone_existing_bond_and_non_pairable_adapter_required')
-
+        self.peer = self.resolve_peer()
         self.bus.add_signal_receiver(self.peer_changed, signal_name='PropertiesChanged',
                                      dbus_interface=PROPERTIES, bus_name=self.owner, path=self.peer)
         self.bus.add_signal_receiver(self.adapter_changed, signal_name='PropertiesChanged',
@@ -281,6 +289,13 @@ class Session:
         self.bus.add_signal_receiver(self.interfaces_removed, signal_name='InterfacesRemoved',
                                      dbus_interface=OBJECT_MANAGER, bus_name=self.owner, path='/')
         self.bus.watch_name_owner(BLUEZ, self.bluez_changed)
+        self.check_peer(connected=not self.advertise)
+        adapter = self.properties(self.adapter, ADAPTER)
+        if not adapter.get('Powered'):
+            raise PermissionError('paired_phone_powered_adapter_required')
+        if self.advertise and adapter.get('Pairable') != False:
+            raise PermissionError('paired_phone_existing_bond_and_non_pairable_adapter_required')
+
         self.application = Application(self)
         self.advertisement = Advertisement(self) if self.advertise else None
         self.proxy(self.adapter, GATT_MANAGER).RegisterApplication(

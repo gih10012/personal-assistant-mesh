@@ -265,7 +265,7 @@ def validate_peer(binding, properties, *, connected):
 
 
 def validate_att(sender, owner, options, peer_path):
-    if sender != owner or options.get('device') != peer_path or options.get('link') != 'LE':
+    if not peer_path or sender != owner or options.get('device') != peer_path or options.get('link') != 'LE':
         raise PermissionError('paired_phone_exact_le_att_peer_required')
 
 
