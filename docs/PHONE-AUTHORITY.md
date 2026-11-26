@@ -58,6 +58,11 @@ and handset receipt are recorded separately. This route displays a Huawei
 system alert. The regular notification route and the phone work channel keep
 their own identities and behavior. [Huawei notification API](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/push-send-alert/) [Service account](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/push-jwt-token/)
 
+```sh
+python3 -m assistant_mesh.cli --config /PRIVATE/worker.json notify-phone --request-id ORIGINAL_ID --text 'AMITA update'
+python3 -m assistant_mesh.cli --config /PRIVATE/worker.json notify-phone-status --request-id ORIGINAL_ID
+```
+
 ## Real enrollment window
 
 1. The phone generates and preserves its own real node_id. Bind a real original

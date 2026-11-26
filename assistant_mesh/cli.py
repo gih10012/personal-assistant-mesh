@@ -350,6 +350,7 @@ def main():
     parser = _CLIParser(description='Durable personal-assistant mesh')
     parser.add_argument('--config', help='Required private configuration except for local network-inventory')
     parser.add_argument('command', choices=['serve', 'worker', 'recovery', 'status', 'submit', 'notify', 'doctor', 'probe-codex',
+                                          'notify-phone', 'notify-phone-status',
                                           'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'ingress-submit', 'ingress-status', 'ingress-result', 'ingress-publish', 'capability-events', 'resource-graph', 'node',
                                           'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export', 'provider', 'tool-release', 'network-inventory',
                                           'capability-call', 'capability-status', 'capability-result'])
@@ -417,7 +418,7 @@ def main():
     if args.command == 'recovery':
         from .recovery import run
         return run(config)
-    if args.command in ('status', 'submit', 'notify', 'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'ingress-submit', 'ingress-status', 'ingress-result', 'ingress-publish', 'capability-events', 'resource-graph',
+    if args.command in ('status', 'submit', 'notify', 'notify-phone', 'notify-phone-status', 'resources', 'resource', 'allocation', 'routing', 'route-decisions', 'ingress-submit', 'ingress-status', 'ingress-result', 'ingress-publish', 'capability-events', 'resource-graph',
                         'mesh-hello', 'mesh-links', 'mesh-local', 'mesh-queue', 'mesh-task', 'mesh-delegate', 'mesh-capabilities', 'mesh-capability-export'):
         from .worker import Client
         client = Client(config)
@@ -484,6 +485,20 @@ def main():
             if not args.request_id:
                 parser.error('notify requires --request-id')
             value = client.request('/v1/notify', {'text': args.text, 'request_id': args.request_id})
+        elif args.command in ('notify-phone', 'notify-phone-status'):
+            from .phone_push import ROUTE
+            if not args.request_id:
+                parser.error('phone notification requires the original --request-id')
+            payload = {'request_id': args.request_id}
+            if args.command == 'notify-phone':
+                if not args.text:
+                    parser.error('notify-phone requires --text')
+                payload['text'] = args.text
+                value = client.request(ROUTE, payload)
+            else:
+                if args.text is not None:
+                    parser.error('notify-phone-status accepts only the original request ID')
+                value = client.request(ROUTE + '/status', payload)
         elif args.command in ('resource', 'allocation'):
             if args.principal is not None:
                 parser.error('--principal is a discovery filter, not a resource actor override')
