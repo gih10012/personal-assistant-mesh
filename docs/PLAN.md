@@ -1,5 +1,12 @@
 # AMITA 当前实施计划
 
+2026-11-26 系统推送：VPS 已部署华为 Alert 接收和发送接口，原 `owner.notify`
+Worker 的状态查询通过。通知只绑定原手机，原消息 ID 按发送者记录在现有出站
+账本。0.7.1（1000007）已通过商业 SDK 构建并用原证书和 Profile 签名。
+原华为项目尚未提供 Push Kit 配置与项目服务密钥，服务端保留未开通状态。
+取得原项目权限并签发对应 Profile 后，按系统权限弹窗完成首次绑定，再验收
+挂起手机的真实系统通知送达。系统通知的可见性不证明挂起进程能自动执行任务。
+
 2026-11-26 交付：云端、电脑及 Claw Worker 的实际 Codex 配置均为
 `approval_policy=never`、`sandbox=danger-full-access`。VPS 已对三者启用原
 `owner.notify` 能力，并用各自原凭据成功查询通知接口。通知收件范围仍为
