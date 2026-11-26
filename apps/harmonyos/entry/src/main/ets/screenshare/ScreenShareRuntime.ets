@@ -10,7 +10,7 @@ import { PhoneResponse, ProviderDispatch, SessionView, WorkConfig, WorkEngine, W
 import { NodeCredential, NodeCredentialStore } from '../security/NodeCredentialStore';
 import { TrustedRuntimeConfig } from '../update/TrustedRuntimeConfig';
 import { controlBlob, controlDigest } from '../control/PhoneControlJSON';
-import { ComputerUseSurface } from '../control/ComputerUseSurface';
+import { ComputerUseScope, ComputerUseSurface } from '../control/ComputerUseSurface';
 import { ScreenShareOwner } from './ScreenShareOwner';
 import { ScreenShareAuthorization, ScreenShareSessionStatus } from './ScreenShareSession';
 import { ScreenShareInput, ScreenShareScope, ScreenShareTarget, decodeScreenShareInput, sameScreenShareScope,
@@ -677,6 +677,7 @@ export class ScreenShareRuntime implements WorkHost {
       operationId: row.operation_id, approvalId: approval.approvalId, nonce: approval.nonce,
       revision: approval.revision, expiresAt: approval.scopeExpiresAt };
     const scope = this.activeScope as ScreenShareScope;
+    const surfaceScope: ComputerUseScope = { operationId: scope.operationId, taskId: scope.taskId, expiresAt: scope.expiresAt };
     const authorization: ScreenShareAuthorization = {
       isForeground: (): boolean => this.foreground(),
       valid: (value: ScreenShareScope): boolean => this.scopeValid(value),
@@ -712,7 +713,7 @@ export class ScreenShareRuntime implements WorkHost {
         }
         if (!surfaceStarted && media.captureActive && media.backgroundActive && media.acknowledgedFrames > 0) {
           surfaceStarted = true;
-          this.presentOperation(scope);
+          this.presentOperation(scope, surfaceScope);
         }
         this.state = media.backgroundActive ? 'sharing' : 'awaiting_capture_or_frame_ack';
         await new Promise<void>((resolve): void => { setTimeout(resolve, 250); });
@@ -747,14 +748,14 @@ export class ScreenShareRuntime implements WorkHost {
       finally { try { await ScreenShareOwner.stop(); } catch (_) {} }
       throw new Error('screen_share_original_stream_outcome_unknown');
     } finally {
-      if (surfaceStarted) { ComputerUseSurface.close(scope).catch((): void => {}); }
+      if (surfaceStarted) { ComputerUseSurface.close(surfaceScope).catch((): void => {}); }
       this.executingApproval = null; this.activeScope = null; this.revokedListeners = [];
     }
   }
 
-  private async presentOperation(scope: ScreenShareScope): Promise<void> {
+  private async presentOperation(scope: ScreenShareScope, surfaceScope: ComputerUseScope): Promise<void> {
     try {
-      await ComputerUseSurface.operating(scope, this.liveviewEvent, async (): Promise<boolean> => {
+      await ComputerUseSurface.operating(surfaceScope, this.liveviewEvent, async (): Promise<boolean> => {
         if (this.activeScope === null || !sameScreenShareScope(this.activeScope, scope)) { return false; }
         await ScreenShareOwner.stop();
         return true;
