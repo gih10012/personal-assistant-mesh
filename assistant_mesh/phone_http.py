@@ -87,8 +87,11 @@ def start(api, config_path, *, origin, port, relays=(), updates=None,
         raise ValueError('invalid_phone_listener_installation')
     service = PhoneAuthority(api, config_path, relays=relays, updates=updates)
     previous = api.dispatch
+    from .phone_push import ROUTE as PUSH_ROUTE
 
     def dispatch(method, path, payload, peer):
+        if path.split('?', 1)[0] in (PUSH_ROUTE, PUSH_ROUTE + '/status'):
+            return service.owner_push.dispatch(method, path, payload, peer)
         if path.split('?', 1)[0] == '/v1/phone/result':
             if method != 'POST' or path != '/v1/phone/result' or peer.get('role') not in ('operator', 'worker'):
                 raise PermissionError('phone_result_route_not_authorized')

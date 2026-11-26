@@ -36,6 +36,28 @@ incumbent Store/receiver wrappers, passive recovery and media changes. Restart
 the receiver through its already authorized maintenance procedure. Roll back
 the ready addition and exact proxy routes without restoring a database.
 
+## Owner system notifications on HarmonyOS
+
+The owner selects the same enrolled phone in an owner-only `owner-push.json`
+beside `authority.json`. Use format `amita-harmony-owner-push/1` and fields
+`node_id`, `project_id`, `service_key_file` (absolute path to the official
+Huawei project service account JSON) and boolean `test_message`. Open Push Kit
+for the original AppGallery Connect project and use its current official
+debug/release Profile with the original signing identity. Store both files in
+the private Source runtime. The phone obtains its Push Token through Push Kit
+and binds it through the original phone session. The notification permission
+dialog opens only when Huawei has assigned a token and notification permission
+is missing. There is no per-message confirmation.
+
+An existing operator or authenticated `owner.notify` worker submits
+`POST /v1/phone/push` with `request_id` and `text` (up to 512 UTF-8 bytes).
+`POST /v1/phone/push/status` accepts the same `request_id` under the same sender
+identity. The original Store retains one dispatch receipt. A lost provider
+response leaves the original attempt pending verification. Huawei acceptance
+and handset receipt are recorded separately. This route displays a Huawei
+system alert. The regular notification route and the phone work channel keep
+their own identities and behavior. [Huawei notification API](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/push-send-alert/) [Service account](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/push-jwt-token/)
+
 ## Real enrollment window
 
 1. The phone generates and preserves its own real node_id. Bind a real original

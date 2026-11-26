@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { notificationManager } from '@kit.NotificationKit';
 import { NativeServices } from '../platform/NativeServices';
 import { WorkClient, WorkStatus, WorkTaskStatus } from '../platform/WorkClient';
 import { MaintenanceService } from '../update/MaintenanceService';
@@ -15,6 +16,7 @@ import { CHAT_MAX_FILES, ChatApproval, ChatAttachment, ChatView, initialChatView
 struct Index {
   @StorageLink('meshForeground') @Watch('onVisibilityChanged') foreground: boolean = false;
   @StorageLink('meshUpdateStatus') updateStatus: string = '尚未配置维护';
+  @StorageLink('meshPushState') pushState: string = '';
   @State nodeId: string = '正在读取应用私有身份';
   @State status: string = '未配置；未注册 Mesh';
   @State enrollment: string = '';
@@ -324,6 +326,23 @@ struct Index {
     return true;
   }
 
+  private pushStatus(): string {
+    switch (this.pushState) {
+      case 'bound': return '系统推送已绑定';
+      case 'provider_entitlement_required': return '原应用尚未开通华为推送权益';
+      case 'permission_missing': return '系统通知权限尚未开启';
+      case 'unavailable': return '暂时无法绑定系统推送';
+      default: return '系统推送服务待接入';
+    }
+  }
+
+  private async pushSettings(): Promise<void> {
+    const context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try { await notificationManager.openNotificationSettingsWithResult(context); }
+    catch (_) { return; }
+    this.chat?.refresh();
+  }
+
   @Builder
   private settings() {
     Scroll() {
@@ -342,6 +361,10 @@ struct Index {
         }
         if (this.settingsLevel === 2) {
           Text(this.workStatus).fontSize(13)
+          Text(this.pushStatus()).fontSize(13)
+          if (this.pushState === 'permission_missing') {
+            Button('系统通知设置').onClick((): void => { this.pushSettings(); })
+          }
           Row({ space: 12 }) {
             Toggle({ type: ToggleType.Switch, isOn: this.share }).enabled(this.memberConfigured && !this.importing)
               .onChange((value: boolean): void => { if (value !== this.share) { this.setSharing(value); } })

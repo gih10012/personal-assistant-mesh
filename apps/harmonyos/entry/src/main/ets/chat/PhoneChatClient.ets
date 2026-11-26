@@ -1,7 +1,9 @@
 import { common } from '@kit.AbilityKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
+import { pushService } from '@kit.PushKit';
+import { ApprovalSurface } from '../control/ApprovalSurface';
 import { WorkConfig, validateWorkConfig } from '../core/WorkProtocol';
 import { NodeCredential, NodeCredentialStore } from '../security/NodeCredentialStore';
 import { CHAT_CHUNK_BYTES, CHAT_MAX_FILE_BYTES, CHAT_MAX_FILES, CHAT_MAX_LOCAL_MESSAGES, CHAT_MAX_TEXT_BYTES,
@@ -15,6 +17,8 @@ const SHARED_RECHECK_MS: number = 10000;
 interface ChatRequest { session_id: string; }
 interface AttachmentRequest extends ChatRequest { attachment_id: string; offset: number; }
 interface DecisionRequest extends ChatRequest { interaction_id: string; decision: string; }
+interface OwnerPushRequest extends ChatRequest { token: string; }
+interface OwnerPushReply { format: string; enabled: boolean; bound: boolean; }
 interface EventsRequest extends ChatRequest { after: number; limit: number; }
 interface MessageRequest extends ChatRequest {
   event_id: string;
@@ -49,6 +53,8 @@ export class PhoneChatClient {
   private generation: number = 0;
   private timer: number = -1;
   private nextSync: number = 0;
+  private nextPush: number = 0;
+  private pushBusy: boolean = false;
   private uploadOffsets: Map<string, number> = new Map();
 
   constructor(context: common.UIAbilityContext, nodeId: string, config: () => WorkConfig | null,
@@ -69,6 +75,7 @@ export class PhoneChatClient {
     if (foreground) {
       this.lastProbe = 0;
       this.nextSync = 0;
+      this.nextPush = 0;
       this.timer = setInterval((): void => { this.tick(); }, 750);
       this.tick();
     } else {
@@ -82,6 +89,7 @@ export class PhoneChatClient {
   refresh(): void {
     this.lastProbe = 0;
     this.nextSync = 0;
+    this.nextPush = 0;
     this.tick();
   }
 
@@ -180,6 +188,7 @@ export class PhoneChatClient {
       }
       this.problem = '';
       this.nextSync = Date.now() + (this.journal.queue.length === 0 ? 1250 : 250);
+      if (!this.pushBusy && Date.now() >= this.nextPush) { this.syncOwnerPush(expected); }
     } catch (error) {
       if (expected === this.generation) {
         this.problem = (error as Error).message === 'chat_journal_size' ? 'storage' : 'sync';
@@ -191,6 +200,41 @@ export class PhoneChatClient {
       this.busy = false;
       this.publish();
     }
+  }
+
+  private async syncOwnerPush(expected: number): Promise<void> {
+    this.pushBusy = true;
+    this.nextPush = Date.now() + 60000;
+    try {
+      const session: ChatRequest = { session_id: this.sessionId() };
+      const raw: string = await this.exchange('mesh_phone_push_status', session, 5000, expected);
+      const route: OwnerPushReply = JSON.parse(raw) as OwnerPushReply;
+      if (route.format !== 'amita-harmony-owner-push/1' || route.enabled !== true) {
+        AppStorage.setOrCreate<string>('meshPushState', 'unconfigured');
+        return;
+      }
+      const assigned: string = await pushService.getToken();
+      this.assertForeground(expected);
+      if (assigned.length === 0) { throw new Error('phone_push_token_unavailable'); }
+      const authorized: boolean = await ApprovalSurface.notificationEnabled((): boolean =>
+        expected === this.generation && this.foreground);
+      this.assertForeground(expected);
+      if (authorized || route.bound === true) {
+        const binding: OwnerPushRequest = { session_id: session.session_id, token: authorized ? assigned : '' };
+        const reply: OwnerPushReply = JSON.parse(await this.exchange('mesh_phone_push_bind', binding, 5000, expected)) as OwnerPushReply;
+        if (reply.format !== route.format || reply.enabled !== true || reply.bound !== authorized) {
+          throw new Error('phone_push_binding_unconfirmed');
+        }
+      }
+      AppStorage.setOrCreate<string>('meshPushState', authorized ? 'bound' : 'permission_missing');
+      if (authorized) { this.nextPush = Date.now() + 300000; }
+    } catch (error) {
+      if (this.foreground && expected === this.generation) {
+        AppStorage.setOrCreate<string>('meshPushState', (error as BusinessError).code === 1000900012 ?
+          'provider_entitlement_required' : 'unavailable');
+      }
+    }
+    finally { this.pushBusy = false; }
   }
 
   private async probe(expected: number): Promise<void> {

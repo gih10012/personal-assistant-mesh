@@ -72,7 +72,7 @@ export class ApprovalSurface {
     ApprovalSurface.notificationContext = context;
   }
 
-  private static async notificationEnabled(current: () => boolean): Promise<boolean> {
+  static async notificationEnabled(current: () => boolean): Promise<boolean> {
     if (await notificationManager.isNotificationEnabled()) { return true; }
     const context = ApprovalSurface.notificationContext;
     if (context === null || ApprovalSurface.notificationAsked || !current() ||

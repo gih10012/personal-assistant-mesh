@@ -116,6 +116,8 @@ class PhoneAuthority:
         for node in self.installed['nodes']:
             self.control.install(node)
         self.screen_share = PhoneScreenShare(self)
+        from .phone_push import OwnerPush
+        self.owner_push = OwnerPush(self)
         self.chat = None
         if any('phone:chat' in node['scope'] for node in self.installed['nodes']):
             from .phone_chat import PhoneChat
@@ -394,6 +396,9 @@ class PhoneAuthority:
         node = self.principal(token, 'phone:node')
         if not isinstance(envelope, dict) or set(envelope) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_request')
+        from .phone_push import BIND as PUSH_BIND, STATUS as PUSH_STATUS
+        if envelope['action'] in (PUSH_BIND, PUSH_STATUS):
+            return self.owner_push.phone_request(node, envelope['action'], envelope['arguments'])
         if isinstance(envelope['action'], str) and envelope['action'].startswith('mesh_chat_'):
             from .phone_chat import PhoneChat, ACTIONS
             if envelope['action'] not in ACTIONS:
