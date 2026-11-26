@@ -256,12 +256,17 @@ class PhoneAuthority:
                 adapter = node.get('installed_control_adapter')
                 if adapter is None or node.get('control_session_id') != prior.get('control_session_id'):
                     raise PermissionError('phone_reload_installed_control_identity_changed')
+                # Standing authorization only changes what the same phone
+                # may auto-accept. It does not add actions or rotate epochs.
+                standing = 'screen_share_standing_allowed'
+                prior_contract = {key: v for key, v in installed_adapter.items() if key != standing}
+                next_contract = {key: v for key, v in adapter.items() if key != standing}
                 if (installed_adapter.get('screen_share_enabled') and not installed_adapter.get('screen_share_launch_enabled')
-                        and adapter == dict(installed_adapter, screen_share_launch_enabled=True, epoch=installed_adapter['epoch'] + 1)):
+                        and next_contract == dict(prior_contract, screen_share_launch_enabled=True, epoch=installed_adapter['epoch'] + 1)):
                     launch_upgrades[node['node_id']] = installed_adapter
                 elif (adapter.get('screen_share_launch_enabled', False) != installed_adapter.get('screen_share_launch_enabled', False)
-                      or any(adapter.get(k) != installed_adapter.get(k)
-                             for k in installed_adapter if k not in ('enabled', 'screen_share_launch_enabled'))):
+                      or any(next_contract.get(k) != prior_contract.get(k)
+                             for k in prior_contract if k not in ('enabled', 'screen_share_launch_enabled'))):
                     raise PermissionError('phone_reload_installed_control_identity_changed')
             subjects, bindings = self.prepare_bindings(candidate)
             already = candidate == self.installed
@@ -418,7 +423,7 @@ class PhoneAuthority:
                     if set(value) != {'session_id'}:
                         raise ValueError('invalid_phone_control_discover')
                     with self.store.transaction() as db:
-                        view = self._presence_view(node, self._presence(db, node))
+                        view = self.control.discover(db, node)
                     return self.sessions._base(session=view, nodes=[], business_task_created=False,
                                                network={'state': 'reachable', 'control_available': True})
                 if action in ('connect', 'node_update') and set(value.get('capabilities', [])) - set(node['capabilities']):

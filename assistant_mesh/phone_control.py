@@ -34,17 +34,19 @@ def validate_adapter(node):
     if (session == node['session_id'] or not isinstance(adapter, dict)
             or not {'enabled', 'capability_id', 'contract', 'actions', 'epoch'} <= set(adapter)
             or set(adapter) - {'enabled', 'capability_id', 'contract', 'actions', 'epoch',
-                               'screen_share_enabled', 'screen_share_launch_enabled'}
+                               'screen_share_enabled', 'screen_share_launch_enabled',
+                               'screen_share_standing_allowed'}
             or type(adapter['enabled']) is not bool
             or type(adapter.get('screen_share_enabled', False)) is not bool
             or type(adapter.get('screen_share_launch_enabled', False)) is not bool
+            or type(adapter.get('screen_share_standing_allowed', False)) is not bool
             or adapter['capability_id'] != node['node_id'] + ':ui-control-v1'
             or adapter['capability_id'] in node['capabilities'] or adapter['contract'] != CONTRACT
             or type(adapter['epoch']) is not int or adapter['epoch'] < 1
             or not isinstance(adapter['actions'], list) or not adapter['actions']
             or any(not isinstance(a, str) for a in adapter['actions'])
             or set(adapter['actions']) - ACTIONS or len(set(adapter['actions'])) != len(adapter['actions'])
-            or adapter.get('screen_share_launch_enabled') and (
+            or (adapter.get('screen_share_launch_enabled') or adapter.get('screen_share_standing_allowed')) and (
                 not adapter.get('screen_share_enabled') or 'inspect' not in adapter['actions'])):
         raise ValueError('invalid_phone_installed_control_adapter')
 
@@ -134,7 +136,21 @@ class PhoneControl:
                 'execution_verification': 'declared_only'}
             if adapter.get('screen_share_launch_enabled'):
                 view['installed_adapter']['screen_share_launch_enabled'] = True
+            if adapter.get('screen_share_standing_allowed'):
+                view['installed_adapter']['screen_share_standing_allowed'] = True
         return view
+
+    def discover(self, db, node):
+        # The enrolled phone can read its standing policy before publishing
+        # any readiness. An unconnected service remains unavailable to callers.
+        try:
+            row = self.presence(db, node)
+        except PermissionError:
+            if not node['installed_control_adapter'].get('screen_share_standing_allowed'):
+                raise
+            row = {'online': False, 'expires': 0, 'generation': 0, 'capabilities': [],
+                   'agent_state': 'idle', 'model_state': 'unknown'}
+        return self.view(node, row)
 
     def control(self, node, action, payload):
         value = arguments(action, payload)

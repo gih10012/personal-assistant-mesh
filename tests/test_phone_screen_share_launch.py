@@ -3,7 +3,7 @@ import copy
 import json
 import unittest
 
-from assistant_mesh.phone_control import CONTRACT
+from assistant_mesh.phone_control import CONTRACT, PREFIX
 from assistant_mesh.phone_screen_share import LAUNCH_COMMAND, LAUNCH_FORMAT, stream_policy
 from assistant_mesh.phone_screen_share_reader import OBSERVATION_ROUTE, ROUTE, install_dispatch
 from assistant_mesh.store import Conflict
@@ -73,6 +73,28 @@ class ScreenShareLaunchTests(unittest.TestCase):
     def report(self, action, epoch):
         return self.call('mesh_work_report', report_id=action, provider={'action': action, 'arguments': {
             'operation_id': 'launch-op', 'capability_id': self.cap, 'epoch': epoch, 'receipt_id': 'phone-receipt'}})['provider']
+
+    def test_owner_standing_discovery_needs_no_online_presence_or_new_epoch(self):
+        node = self.config['nodes'][0]
+        key = PREFIX + node['node_id']
+        with self.f.store.transaction() as db:
+            db.execute('DELETE FROM meta WHERE key=?', (key,))
+        with self.assertRaises(PermissionError):
+            self.call('mesh_discover')
+        self.adapter['screen_share_standing_allowed'] = True
+        self.owner.reload(self.owner.write(self.config))
+        reply = self.call('mesh_discover')
+        self.assertTrue(reply['session']['installed_adapter']['screen_share_standing_allowed'])
+        self.assertEqual(0, reply['session']['generation'])
+        self.assertEqual('offline', reply['session']['network']['state'])
+        self.assertEqual([], reply['session']['managed_capabilities'])
+        with self.f.store.transaction() as db:
+            self.assertIsNone(db.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone())
+        self.assertEqual(1, self.connect('standing-connect')['installed_adapter']['epoch'])
+        self.adapter['screen_share_standing_allowed'] = False
+        self.owner.reload(self.owner.write(self.config))
+        self.assertNotIn('screen_share_standing_allowed', self.call('mesh_discover')['session']['installed_adapter'])
+        self.assertEqual(1, self.f.registry.describe(self.cap)['epoch'])
 
     def test_owner_upgrade_target_grant_dispatch_and_private_frames(self):
         old = self.grant('inspect', dict(self.task, purpose='screen_share'), 'old-inspect')
