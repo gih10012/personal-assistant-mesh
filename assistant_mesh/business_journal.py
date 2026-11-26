@@ -279,6 +279,11 @@ class Journal:
         return alias + '."key" IN (' + values + ')'
 
     def _triggers(self, db, table, info, generation):
+        for _, statement in self._trigger_statements(db, table, info, generation):
+            db.execute(statement)
+
+    def _trigger_statements(self, db, table, info, generation):
+        """The persisted SQL is also checked by the owner-operated writer seal."""
         sid = digest(info)
         def emit(operation, alias):
             condition = self._filter(table, alias, db)
@@ -289,6 +294,7 @@ class Journal:
             return ("INSERT INTO " + PREFIX + "events(generation,table_name,operation,schema_id) SELECT "
                 + str(generation) + ",'" + table + "','" + operation + "','" + sid + "' WHERE " + condition + '; '
                 + 'INSERT INTO ' + PREFIX + 'cells(sequence,position,value) SELECT * FROM (VALUES ' + cells + ') WHERE ' + condition + '; ')
+        statements = []
         for action in ('INSERT', 'UPDATE', 'DELETE'):
             body = (emit('delete', 'OLD') if action in ('UPDATE', 'DELETE') else '')
             body += emit('upsert', 'NEW') if action in ('UPDATE', 'INSERT') else ''
@@ -296,8 +302,11 @@ class Journal:
             condition = ' OR '.join(self._filter(table, alias, db) for alias in aliases)
             guard = ("SELECT RAISE(ABORT,'business_replication_writer_hook_required') WHERE (" + condition
                      + ') AND (SELECT recursive_triggers FROM pragma_recursive_triggers)<>1; ')
-            db.execute('CREATE TRIGGER ' + quote(PREFIX + table + '_' + action.lower())
-                       + ' AFTER ' + action + ' ON ' + quote(table) + ' BEGIN ' + guard + body + 'END')
+            trigger = PREFIX + table + '_' + action.lower()
+            statements.append((trigger, 'CREATE TRIGGER ' + quote(trigger)
+                               + ' AFTER ' + action + ' ON ' + quote(table)
+                               + ' BEGIN ' + guard + body + 'END'))
+        return statements
 
     def _description(self, db):
         state = self._state(db)
