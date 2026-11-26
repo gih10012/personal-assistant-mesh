@@ -107,9 +107,8 @@ export class ScreenShareSession {
     return generation === this.generation && this.policy !== null && this.policy.active;
   }
 
-  // Call only from the real owner's UI gesture after the existing trusted
-  // adapter validated the ORIGINAL task/operation/approval and remote receiver.
-  // This requests the OS privacy dialog; it is not proof of permission or frames.
+  // The original-task adapter validates the exact authorization and receiver.
+  // AVScreenCapture still requests the system's session-specific consent.
   start(context: common.UIAbilityContext, scope: ScreenShareScope,
     authorization: ScreenShareAuthorization, sink: ScreenShareFrameSink): void {
     if (this.stopping !== null || this.backgroundPending !== null || this.value.cleanupUnknown ||
@@ -175,13 +174,15 @@ export class ScreenShareSession {
     }
     if (state.state === 'start_requested') { return; }
     // Privacy interruption/pausing is not an active sharing qualification.
-    // Resume requires a new owner action and original authorized session scope.
+    // A new stream requires its own original authorized session scope.
     if (['stopped', 'canceled', 'interrupted', 'error', 'paused', 'private_scene'].includes(state.state)) {
       this.value.nativeCode = Number.isSafeInteger(state.errorCode) && Math.abs(state.errorCode) <= 99999999 ?
         state.errorCode : 0;
       this.stop(state.state === 'error' ? 'screen_share_native_error' :
         state.state === 'private_scene' ? 'screen_share_private_scene' :
-        state.state === 'paused' ? 'screen_share_capture_paused' : 'screen_share_capture_stopped');
+        state.state === 'paused' ? 'screen_share_capture_paused' :
+        state.state === 'canceled' && !this.policy.captureActive ? 'screen_share_capture_consent_denied' :
+        'screen_share_capture_stopped');
       return;
     }
     if (state.state !== 'resumed' && state.state !== 'private_scene_exit') {

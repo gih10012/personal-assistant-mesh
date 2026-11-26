@@ -1,6 +1,6 @@
 import { common, Want } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { deviceInfo, screenLock } from '@kit.BasicServicesKit';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { Blob, requireValue } from '../core/Protocol';
@@ -21,6 +21,7 @@ interface RuntimeIdentity { format: string; node_id: string; control_session_id:
 interface SourceAdapter {
   enabled: boolean; screen_share_enabled: boolean; capability_id: string;
   screen_share_launch_enabled?: boolean;
+  screen_share_standing_allowed?: boolean;
   epoch: number; execution_verification: string;
 }
 interface SourceView extends SessionView { lifecycle: string; installed_adapter: SourceAdapter; }
@@ -39,6 +40,7 @@ interface LocalApproval {
   approvedAt: number; permissionContext: string; streamSessionId: string;
   receiptId: string; invocationNonce: string; authorityEpoch: number;
   target?: ScreenShareTarget; launchStatus?: string; launchAckBaseline?: number;
+  standing?: boolean;
 }
 export interface ScreenSharePending {
   approvalId: string; nonce: string; revision: number; operationId: string;
@@ -54,6 +56,10 @@ export class ScreenShareRuntimeStatus {
   identityObservation: string = 'declared_app_component';
   receiving: boolean = false;
   sourceInstalled: boolean = false;
+  standingAllowed: boolean = false;
+  receptionPaused: boolean = false;
+  screenState: string = 'unchecked';
+  captureConsentPending: boolean = false;
   capabilityEpoch: number = 0;
   presenceExpiresAt: number = 0;
   foreground: boolean = false;
@@ -119,12 +125,16 @@ export class ScreenShareRuntime implements WorkHost {
   private approvalTimer: number = -1;
   private pulseTimer: number = -1;
   private tickTimer: number = -1;
-  private enabled: boolean = false;
+  private manualReceiving: boolean = false;
+  private receptionPaused: boolean = false;
   private destroyed: boolean = false;
   private connected: boolean = false;
   private presenceAttempted: boolean = false;
   private sourceInstalled: boolean = false;
   private sourceLaunchEnabled: boolean = false;
+  private sourceStandingAllowed: boolean = false;
+  private screenState: string = 'unchecked';
+  private screenCheck: Promise<void> | null = null;
   private capabilityEpoch: number = 0;
   private presenceExpires: number = 0;
   private credentialExpires: number = 0;
@@ -147,6 +157,7 @@ export class ScreenShareRuntime implements WorkHost {
       control_session_id: nodeId + ':screen-share-v1' } : JSON.parse(saved) as RuntimeIdentity;
     requireValue(this.identity.format === 'amita-screen-share-component/1' && this.identity.node_id === nodeId &&
       this.identity.control_session_id === nodeId + ':screen-share-v1', 'screen_share_original_component_required');
+    this.receptionPaused = this.store.getSync('reception_paused', 'false') === 'true';
     const rawApprovals: string = this.store.getSync('approvals', '[]') as string;
     this.approvals = JSON.parse(rawApprovals) as LocalApproval[];
     requireValue(Array.isArray(this.approvals) && this.approvals.length <= 256, 'screen_share_private_approval_state_invalid');
@@ -165,7 +176,9 @@ export class ScreenShareRuntime implements WorkHost {
         typeof approval.permissionContext === 'string' && approval.permissionContext.length <= 512 &&
         typeof approval.receiptId === 'string' && typeof approval.invocationNonce === 'string' &&
         approval.receiptId.length <= 256 && approval.invocationNonce.length <= 256 &&
-        (approval.target === undefined || validScreenShareTarget(approval.target)),
+        (approval.target === undefined || validScreenShareTarget(approval.target)) &&
+        (approval.standing === undefined || typeof approval.standing === 'boolean') &&
+        (approval.standing !== true || approval.target === undefined),
       'screen_share_private_approval_state_invalid');
       if (!['closed', 'denied', 'revoked', 'unknown'].includes(approval.state)) { approval.state = 'unknown'; }
     }
@@ -216,6 +229,28 @@ export class ScreenShareRuntime implements WorkHost {
   now(): number { return Math.floor(Date.now() / 1000); }
   private foreground(): boolean { return !this.destroyed && AppStorage.get<boolean>('meshForeground') === true; }
 
+  private observeScreenState(): Promise<void> {
+    if (this.screenCheck === null) {
+      this.screenCheck = this.readScreenState().finally((): void => { this.screenCheck = null; });
+    }
+    return this.screenCheck;
+  }
+
+  private async readScreenState(): Promise<void> {
+    try {
+      const locked = await screenLock.isScreenLocked();
+      this.screenState = locked === false ? 'unlocked' : locked === true ? 'locked' : 'unavailable';
+    } catch (_) { this.screenState = 'unavailable'; }
+  }
+
+  private standingReady(): boolean {
+    return this.sourceStandingAllowed && !this.receptionPaused && this.screenState === 'unlocked';
+  }
+
+  private receptionRequested(): boolean {
+    return !this.receptionPaused && (this.manualReceiving || this.sourceStandingAllowed);
+  }
+
   private memberCurrent(): boolean {
     try {
       if (this.originalMember === null) { return false; }
@@ -238,7 +273,8 @@ export class ScreenShareRuntime implements WorkHost {
     if (this.primary !== null && !sameConfig(this.primary, primary)) {
       requireValue(this.executingApproval === null && this.pendingApproval === null,
         'screen_share_route_changed_during_original_request');
-      this.connected = false; this.sourceInstalled = false; this.sourceLaunchEnabled = false; this.capabilityEpoch = 0;
+      this.connected = false; this.sourceInstalled = false; this.sourceLaunchEnabled = false;
+      this.sourceStandingAllowed = false; this.capabilityEpoch = 0;
     }
     this.originalMember = { format: original.format, resource_url: original.resource_url, node_id: original.node_id,
       session_id: original.session_id, mesh_id: original.mesh_id, authority_id: original.authority_id };
@@ -292,27 +328,35 @@ export class ScreenShareRuntime implements WorkHost {
   }
   private eligible(): boolean {
     const media = ScreenShareOwner.status();
-    return !this.destroyed && this.enabled && !media.cleanupUnknown && !ScreenShareOwner.sourceCloseUnconfirmed() &&
-      this.memberCurrent() && (this.foreground() || this.streamEligible());
+    return !this.destroyed && this.stopping === null && this.receptionRequested() && !media.cleanupUnknown &&
+      !ScreenShareOwner.sourceCloseUnconfirmed() && this.memberCurrent() &&
+      ((this.foreground() && (this.sourceStandingAllowed ? this.standingReady() : this.manualReceiving)) || this.streamEligible());
   }
   private sourceLive(): boolean {
     return this.sourceInstalled && this.connected && this.presenceExpires * 1000 > Date.now() &&
       this.credentialExpires * 1000 > Date.now() && this.eligible();
   }
 
-  // An explicit owner action enables request reception only. It is never a
-  // stored/global permit for screen capture; every request needs decide().
+  private startPolling(): void {
+    if (this.pulseTimer === -1) { this.pulseTimer = setInterval((): void => { this.refreshReceiver(); }, 10000); }
+    if (this.tickTimer === -1) { this.tickTimer = setInterval((): void => { this.tick(); }, 5000); }
+  }
+
+  private async refreshReceiver(): Promise<void> { await this.pulse(); this.tick(); }
+
+  // An explicit gesture resumes a locally paused receiver or enables legacy
+  // manual reception. Standing consent is supplied solely by the original Source.
   async receive(): Promise<void> {
     requireValue(this.foreground() && !this.destroyed && this.pendingApproval === null &&
       this.admissionApproval === null && this.executingApproval === null && this.stopping === null,
     'screen_share_owner_foreground_and_quiescent_runtime_required');
-    this.enabled = true;
     this.observedUnknown.clear();
     try {
-      await this.configure(); this.state = 'connecting'; this.error = '';
-      if (this.pulseTimer === -1) { this.pulseTimer = setInterval((): void => { this.pulse(); }, 10000); }
-      if (this.tickTimer === -1) { this.tickTimer = setInterval((): void => { this.tick(); }, 5000); }
-      await this.pulse(); this.tick();
+      await this.configure();
+      if (this.receptionPaused) { await this.persist('reception_paused', 'false'); this.receptionPaused = false; }
+      this.manualReceiving = !this.sourceStandingAllowed;
+      this.state = 'connecting'; this.error = '';
+      this.startPolling(); await this.refreshReceiver();
     } catch (_) { this.error = 'screen_share_configuration_or_source_unconfirmed'; this.state = 'unconfigured'; }
   }
 
@@ -330,25 +374,42 @@ export class ScreenShareRuntime implements WorkHost {
       view.network !== undefined && Number.isFinite(view.network.expires_at), 'screen_share_source_adapter_not_installed');
     if (this.capabilityEpoch > 0 && this.capabilityEpoch !== adapter.epoch) { this.revoke('screen_share_capability_epoch_changed'); }
     this.sourceLaunchEnabled = adapter.screen_share_launch_enabled === true;
+    const newStandingAllowed = adapter.screen_share_standing_allowed === true;
+    if (this.sourceStandingAllowed !== newStandingAllowed &&
+      (this.pendingApproval !== null || this.admissionApproval !== null || this.executingApproval !== null)) {
+      this.revoke('screen_share_standing_permission_changed');
+    }
+    this.sourceStandingAllowed = newStandingAllowed;
+    if (newStandingAllowed) { this.manualReceiving = false; }
     const approval = this.executingApproval ?? this.admissionApproval;
     if (approval?.target !== undefined && !this.sourceLaunchEnabled) { this.revoke('screen_share_launch_adapter_disabled'); }
     this.sourceInstalled = true; this.capabilityEpoch = adapter.epoch;
     this.presenceExpires = view.network.expires_at;
-    this.state = view.network.state === 'online' ? 'receiving' : 'offline';
+    this.state = view.network.state === 'online' && this.receptionRequested() ? 'receiving' : 'offline';
   }
 
   private async pulse(): Promise<void> {
     if (this.pulsing || this.engine === null || this.primary === null || this.destroyed) { return; }
     this.pulsing = true;
     try {
+      if (!this.receptionPaused && (this.foreground() || this.executingApproval?.standing === true)) {
+        await this.observeScreenState();
+      }
+      if (!this.manualReceiving && !this.receptionPaused && this.foreground() && this.screenState === 'unlocked' &&
+        (!this.sourceInstalled || !this.sourceStandingAllowed)) {
+        // Discover the owner-installed adapter without advertising an executable capability.
+        this.observe(await this.engine.discover());
+      }
       // Independent from execute()/tick() busy state. Only actual foreground or
       // live media+scope+OS ticket can renew this component's control presence.
       const online = this.eligible();
       if (!online && (this.pendingApproval !== null || this.admissionApproval !== null || this.executingApproval !== null)) {
-        this.revoke(!this.enabled ? 'screen_share_owner_stopped' : 'screen_share_background_ticket_required');
+        this.revoke(!this.receptionRequested() ? 'screen_share_owner_stopped' :
+          this.sourceStandingAllowed && this.screenState !== 'unlocked' ? 'screen_share_unlocked_window_required' :
+          'screen_share_background_ticket_required');
       }
       const capabilities: string[] = online ? [this.nodeId + ':ui-control-v1'] : [];
-      if (!online && this.engine.snapshot.pending_control !== null && this.engine.snapshot.pending_control.online) {
+      if ((!online || !this.connected) && this.engine.snapshot.pending_control !== null && this.engine.snapshot.pending_control.online) {
         // Control presence is not a business effect. Abandon its stale ONLINE
         // intent instead of replaying it after the OS window has disappeared.
         const oldControl = this.engine.snapshot.pending_control;
@@ -360,6 +421,7 @@ export class ScreenShareRuntime implements WorkHost {
       const response = !online ? await this.engine.control(false, []) : this.connected ?
         await this.engine.control(true, capabilities) : await this.engine.connect(capabilities);
       this.observe(response); this.connected = online;
+      if (this.error === 'screen_share_source_presence_unconfirmed') { this.error = ''; }
       if (!online) { this.presenceAttempted = false; }
       if (!this.eligible() && online) {
         this.revoke('screen_share_foreground_or_scope_lost');
@@ -368,13 +430,14 @@ export class ScreenShareRuntime implements WorkHost {
       }
     } catch (_) {
       this.error = 'screen_share_source_presence_unconfirmed'; this.state = 'unconfigured';
-      this.sourceInstalled = false; this.sourceLaunchEnabled = false; this.connected = false;
+      this.sourceInstalled = false; this.sourceLaunchEnabled = false;
+      this.sourceStandingAllowed = false; this.connected = false;
       this.revoke('screen_share_source_presence_unconfirmed');
     } finally { this.pulsing = false; }
   }
 
   private async tick(): Promise<void> {
-    if (this.ticking || this.reconcilingMetadata || !this.foreground() || !this.enabled || this.engine === null || !this.sourceLive()) { return; }
+    if (this.ticking || this.reconcilingMetadata || !this.foreground() || this.engine === null || !this.sourceLive()) { return; }
     this.ticking = true;
     try {
       // Cold records are observed/reported through the existing engine only;
@@ -397,12 +460,16 @@ export class ScreenShareRuntime implements WorkHost {
           if (dispatch.selection?.action !== 'action' || !this.sourceLaunchEnabled) { continue; }
           // Other UI action recipes belong to a different runtime.
           try { await this.decode(dispatch); } catch (_) { continue; }
+          if (this.sourceStandingAllowed) {
+            this.error = 'screen_share_launch_input_monitor_unavailable'; continue;
+          }
         }
+        this.error = '';
         try {
           const result = await this.engine.run(dispatch);
           const approval = this.approvalFor(dispatch);
           if (approval !== undefined && approval.state === 'denied') { this.error = 'screen_share_owner_denied'; }
-          else if (result.state === 'unknown' && approval?.launchStatus !== 'system_rejected') {
+          else if (result.state === 'unknown' && this.error === '' && approval?.launchStatus !== 'system_rejected') {
             this.error = 'screen_share_original_stream_outcome_unknown';
           }
         }
@@ -413,7 +480,7 @@ export class ScreenShareRuntime implements WorkHost {
     finally {
       this.ticking = false;
       if (this.executingApproval === null && this.pendingApproval === null) {
-        this.state = !this.enabled ? 'stopped' : this.sourceInstalled ? 'receiving' : 'unconfigured';
+        this.state = this.receptionPaused ? 'stopped' : this.sourceLive() ? 'receiving' : 'offline';
       }
     }
   }
@@ -440,8 +507,11 @@ export class ScreenShareRuntime implements WorkHost {
     requireValue(this.foreground() && this.sourceLive() && this.pendingApproval === null && this.executingApproval === null,
       'screen_share_owner_and_live_source_required');
     const body = await this.decode(dispatch);
+    const standing = this.sourceStandingAllowed;
+    if (standing) { await this.observeScreenState(); }
     requireValue(this.foreground() && this.sourceLive() && this.approvals.length < 256 &&
-      (body.target === undefined || this.sourceLaunchEnabled) &&
+      (standing ? this.standingReady() && body.target === undefined : !this.sourceStandingAllowed &&
+        (body.target === undefined || this.sourceLaunchEnabled)) &&
       this.approvalFor(dispatch) === undefined, 'screen_share_original_approval_required');
     const purpose = dispatch.selection?.scope as PurposeScope;
     const approval: LocalApproval = { format: 'amita-local-screen-share-approval/1',
@@ -454,7 +524,8 @@ export class ScreenShareRuntime implements WorkHost {
         '供原任务只读查看当前屏幕；不会代为点击或输入',
       expiresAt: Math.floor(Math.min(Date.now() + 30000, (dispatch.deadline as number) * 1000 - 10000)),
       allocationDeadline: Math.floor((dispatch.deadline as number) * 1000), scopeExpiresAt: 0,
-      approvedAt: 0, permissionContext: '', streamSessionId: '', receiptId: '', invocationNonce: '', authorityEpoch: 0 };
+      approvedAt: 0, permissionContext: '', streamSessionId: '', receiptId: '', invocationNonce: '', authorityEpoch: 0,
+      standing: standing };
     if (body.target !== undefined) {
       approval.target = body.target;
       approval.purpose = '共享屏幕，待画面及后台共享就绪后尝试打开以下应用';
@@ -464,12 +535,23 @@ export class ScreenShareRuntime implements WorkHost {
     await this.persistApprovals();
     requireValue(approval.state === 'pending' && this.foreground() && this.sourceLive() && this.prepared(approval),
       'screen_share_pending_scope_lost');
-    this.state = 'awaiting_owner';
-    const approved = await new Promise<boolean>((resolve): void => {
+    this.state = standing ? 'authorizing_original_capture' : 'awaiting_owner';
+    const decision = new Promise<boolean>((resolve): void => {
       this.resolveApproval = resolve;
       this.approvalTimer = setTimeout((): void => { this.revoke('screen_share_local_approval_expired'); },
         Math.max(1, approval.expiresAt - Date.now()));
     });
+    if (standing) {
+      const exact = this.pendingBinding();
+      try {
+        requireValue(exact !== null, 'screen_share_pending_scope_lost');
+        await this.decideBound(exact as ScreenSharePending, true, true);
+      } catch (_) {
+        this.revoke(this.screenState === 'unlocked' ? 'screen_share_pending_scope_lost' :
+          'screen_share_unlocked_window_required');
+      }
+    }
+    const approved = await decision;
     requireValue(approved && this.allowed(dispatch), 'screen_share_owner_rejected_expired_or_stale');
   }
 
@@ -480,6 +562,7 @@ export class ScreenShareRuntime implements WorkHost {
   allowed(dispatch: ProviderDispatch, permissionContext?: string): boolean {
     const approval = this.approvalFor(dispatch);
     return approval !== undefined && ['approved', 'consumed'].includes(approval.state) && this.originalBound(approval, dispatch) &&
+      (approval.standing === true ? this.standingReady() : !this.sourceStandingAllowed) &&
       (approval.target === undefined || this.sourceLaunchEnabled) &&
       approval.permissionContext.length > 0 && (permissionContext === undefined || permissionContext === approval.permissionContext) &&
       approval.scopeExpiresAt > Date.now() && approval.capabilityEpoch === this.capabilityEpoch &&
@@ -487,10 +570,16 @@ export class ScreenShareRuntime implements WorkHost {
   }
 
   async decide(value: ScreenSharePending, approve: boolean): Promise<void> {
+    await this.decideBound(value, approve, false);
+  }
+
+  private async decideBound(value: ScreenSharePending, approve: boolean, standing: boolean): Promise<void> {
     const approval = this.pendingApproval;
     if (approval === null) { throw new Error('screen_share_pending_local_decision_mismatch'); }
     requireValue(!this.deciding && this.resolveApproval !== null && approval !== null && approval.state === 'pending' && this.foreground() &&
       this.sourceLive() && this.prepared(approval) && approval.expiresAt > Date.now() &&
+      (standing ? approval.standing === true && this.standingReady() && approval.target === undefined :
+        approval.standing !== true && !this.sourceStandingAllowed) &&
       value.approvalId === approval.approvalId && value.nonce === approval.nonce && value.revision === approval.revision &&
       value.operationId === approval.operationId && value.taskId === approval.taskId && value.taskEpoch === approval.taskEpoch &&
       value.inputHash === approval.inputHash && value.expiresAt === approval.expiresAt &&
@@ -500,8 +589,10 @@ export class ScreenShareRuntime implements WorkHost {
     try {
       approval.state = approve ? 'approving' : 'denied';
       await this.persistApprovals();
+      if (standing) { await this.observeScreenState(); }
       requireValue(approval.state === (approve ? 'approving' : 'denied') && this.foreground() &&
-        this.sourceLive() && this.prepared(approval) && approval.expiresAt > Date.now(), 'screen_share_decision_interrupted');
+        this.sourceLive() && this.prepared(approval) && approval.expiresAt > Date.now() &&
+        (!standing || this.standingReady()), 'screen_share_decision_interrupted');
       if (approve) {
         approval.approvedAt = Date.now();
         approval.scopeExpiresAt = Math.floor(Math.min(Date.now() + approval.requestedDurationMs,
@@ -536,7 +627,8 @@ export class ScreenShareRuntime implements WorkHost {
       approval.allocationDeadline > Date.now() && this.sourceInstalled && this.connected &&
       (approval.target === undefined || this.sourceLaunchEnabled) &&
       this.presenceExpires * 1000 > Date.now() && this.credentialExpires * 1000 > Date.now() &&
-      this.enabled && !this.destroyed && this.memberCurrent();
+      this.receptionRequested() && !this.destroyed && this.memberCurrent() &&
+      (approval.standing === true ? this.standingReady() : !this.sourceStandingAllowed);
   }
 
   private async launchApp(approval: LocalApproval, dispatch: ProviderDispatch, scope: ScreenShareScope): Promise<void> {
@@ -599,6 +691,7 @@ export class ScreenShareRuntime implements WorkHost {
     this.state = 'starting_capture';
     try {
       await this.persistApprovals();
+      if (approval.standing === true) { await this.observeScreenState(); }
       requireValue(this.foreground() && this.scopeValid(scope), 'screen_share_original_scope_lost');
       await ScreenShareOwner.startManaged(this.primary as WorkConfig, this.identity.control_session_id,
         row, scope, authorization, gate);
@@ -639,6 +732,8 @@ export class ScreenShareRuntime implements WorkHost {
       approval.state = 'closed'; await this.persistApprovals();
       return await controlBlob(summary);
     } catch (_) {
+      const media = ScreenShareOwner.status();
+      if (this.error === '' && media.error !== '') { this.error = safeCode(media.error); }
       approval.state = 'unknown';
       try { await this.persistApprovals(); }
       finally { try { await ScreenShareOwner.stop(); } catch (_) {} }
@@ -755,29 +850,37 @@ export class ScreenShareRuntime implements WorkHost {
 
   foregroundChanged(): void {
     ScreenShareOwner.foregroundChanged();
-    if (!this.foreground() && !this.streamEligible()) { this.revoke('screen_share_background_ticket_required'); }
-    this.pulse();
-    if (this.foreground()) {
-      this.observedUnknown.clear();
-      this.reconcileMetadata().catch((): void => { this.error = 'screen_share_original_metadata_receipt_unconfirmed'; });
-      this.tick();
+    if (!this.foreground()) {
+      if (!this.streamEligible() && (this.pendingApproval !== null || this.admissionApproval !== null ||
+        this.executingApproval !== null)) { this.revoke('screen_share_background_ticket_required'); }
+      this.pulse(); return;
     }
+    this.observedUnknown.clear();
+    if (!this.receptionPaused) { this.startPolling(); }
+    this.reconcileMetadata().catch((): void => { this.error = 'screen_share_original_metadata_receipt_unconfirmed'; })
+      .then((): Promise<void> => this.refreshReceiver());
   }
 
-  stop(): Promise<void> {
+  stop(pauseReception: boolean = true): Promise<void> {
     if (this.stopping !== null) { return this.stopping; }
-    this.enabled = false; this.revoke('screen_share_owner_stopped');
+    this.manualReceiving = false;
+    if (pauseReception) { this.receptionPaused = true; }
+    this.revoke('screen_share_owner_stopped');
     clearInterval(this.pulseTimer); clearInterval(this.tickTimer);
     this.pulseTimer = -1; this.tickTimer = -1;
     this.stopping = (async (): Promise<void> => {
-      try { await ScreenShareOwner.stop(); }
-      finally { await this.pulse(); this.stopping = null; }
+      try {
+        if (pauseReception) { await this.persist('reception_paused', 'true'); }
+      } finally {
+        try { await ScreenShareOwner.stop(); }
+        finally { await this.pulse(); this.stopping = null; }
+      }
     })();
     return this.stopping;
   }
 
   async destroy(): Promise<void> {
-    try { await this.stop(); }
+    try { await this.stop(false); }
     finally {
       this.destroyed = true; clearInterval(this.pulseTimer); clearInterval(this.tickTimer);
       this.pulseTimer = -1; this.tickTimer = -1;
@@ -786,6 +889,10 @@ export class ScreenShareRuntime implements WorkHost {
   }
 
   pending(): ScreenSharePending | null {
+    return this.pendingApproval?.standing === true ? null : this.pendingBinding();
+  }
+
+  private pendingBinding(): ScreenSharePending | null {
     const value = this.pendingApproval;
     if (value === null || value.state !== 'pending' || this.resolveApproval === null) { return null; }
     const pending: ScreenSharePending = { approvalId: value.approvalId, nonce: value.nonce, revision: value.revision,
@@ -802,8 +909,11 @@ export class ScreenShareRuntime implements WorkHost {
     const value = new ScreenShareRuntimeStatus();
     const media = ScreenShareOwner.status();
     value.state = this.state; value.error = this.error; value.nodeId = this.nodeId;
-    value.controlSessionId = this.identity.control_session_id; value.receiving = this.enabled;
+    value.controlSessionId = this.identity.control_session_id; value.receiving = this.sourceLive();
     value.sourceInstalled = this.sourceInstalled; value.capabilityEpoch = this.capabilityEpoch;
+    value.standingAllowed = this.sourceStandingAllowed; value.receptionPaused = this.receptionPaused;
+    value.screenState = this.screenState;
+    value.captureConsentPending = this.executingApproval !== null && media.state === 'awaiting_capture_consent';
     value.presenceExpiresAt = this.presenceExpires * 1000; value.foreground = this.foreground();
     value.captureActive = media.captureActive; value.backgroundActive = media.backgroundActive;
     value.cleanupUnknown = media.cleanupUnknown; value.sourceCloseUnknown = ScreenShareOwner.sourceCloseUnconfirmed();

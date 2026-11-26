@@ -32,8 +32,10 @@ The app persists a DECLARED component identity in
 `<original-node-id>:screen-share-v1`, capability is
 `<original-node-id>:ui-control-v1`. This identity is not a service callback or
 proof of capture. The Source owner must explicitly install/enable that binding
-with `screen_share_enabled: true`; the runtime defaults to unconfigured and
-accepts no remote generic approval flag.
+with `screen_share_enabled: true`. While the system confirms an unlocked
+foreground, the receiver checks the authenticated installed adapter through
+`mesh_discover` before advertising an available capability. The Source can
+return installed adapter information before the component has any presence.
 
 The authenticated original Source session view must contain:
 
@@ -45,7 +47,8 @@ The authenticated original Source session view must contain:
     "screen_share_enabled": true,
     "capability_id": "<original-node-id>:ui-control-v1",
     "epoch": 1,
-    "execution_verification": "declared_only"
+    "execution_verification": "declared_only",
+    "screen_share_standing_allowed": true
   }
 }
 ```
@@ -57,6 +60,13 @@ lease. Root supplies the agreed positive-epoch WorkProtocol change and the
 actual ACK hash in `ScreenShareOwner.status().lastAcknowledgedSha256`. Missing
 fields or an incorrect lifecycle/epoch fail closed. No lifecycle value here
 asserts an AccessibilityExtension connection or full computer-use capability.
+
+`screen_share_standing_allowed: true` enables automatic reception and consumes
+the durable exact approval internally for `inspect`. HarmonyOS still supplies
+the AVScreenCapture consent dialog. With the flag absent, the manual flow
+remains available. Standing reception can be paused locally across app
+restarts. The native launch path cannot operate under standing authorization
+until a physical-input monitor can protect that action.
 
 ## Original operation and local authorization
 
@@ -75,11 +85,11 @@ The existing `WorkEngine` owns every prepared/admit/start/attempt/result and
 settlement transition. Its private WorkSnapshot contains the original
 WorkRecords; the new preferences store contains only that execution journal,
 component identity and per-request local approvals, not a copy of the Source
-task ledger. Approval becomes visible only after the original prepared record
-and pending local binding are durable. Its unique private approvalId/nonce,
-input hash, task/epoch, capability epoch, revision and deadline bind the exact
-owner Start/Reject action. No nonce is placed on the Source wire or in public
-status. Source admission and invocation occur only after this approval write.
+task ledger. The original prepared record and exact pending binding are durable
+before the binding is presented to the owner or consumed under standing
+authorization. The private approvalId/nonce, input hash, task/epoch, capability
+epoch, revision and deadline identify the exact request. Source admission and
+invocation follow the approval write. The nonce stays on the phone.
 Foreground loss before the first genuine OS background ticket revokes pending,
 approving and approved-but-not-yet-invoked requests.
 

@@ -27,8 +27,9 @@ async function until(predicate) {
 // Execute the actual shipped runtime and original WorkEngine. Only platform
 // preferences/Asset/HTTPS/media-owner boundaries are synthetic. No SDK, phone,
 // screen, real node, Source DB, network or background service is accessed.
-async function fixture({ target, launchEnabled = target !== undefined } = {}) {
+async function fixture({ target, launchEnabled = target !== undefined, standing, locked = false } = {}) {
   let now = 1000000, foreground = true, serial = 0, nextTimer = 0, managedStarts = 0, sourceCloses = 0;
+  let online = false;
   let stopPromise = null, acceptRelease = null, holdAccept = false, closeRelease = null;
   let closingAllowed = false;
   const stores = new Map(), writes = [], requests = [], timers = new Map(), launches = [];
@@ -103,7 +104,7 @@ async function fixture({ target, launchEnabled = target !== undefined } = {}) {
     native_tools_restricted: false, session: { node_id: 'phone', session_id: 'phone:screen-share-v1',
       lifecycle: 'screen-share', installed_adapter: { enabled: true, screen_share_enabled: true,
         capability_id: 'phone:ui-control-v1', epoch: 1, execution_verification: 'declared_only',
-        screen_share_launch_enabled: launchEnabled },
+        screen_share_launch_enabled: launchEnabled, screen_share_standing_allowed: standing },
       network: { state: online ? 'online' : 'offline', expires_at: online ? now / 1000 + 30 : now / 1000,
         presence_ttl_seconds: 30 } } });
   const http = { RequestMethod: { POST: 'POST' }, HttpProtocol: { HTTP1_1: 0 }, HttpDataType: { STRING: 1 },
@@ -112,7 +113,10 @@ async function fixture({ target, launchEnabled = target !== undefined } = {}) {
       assert.equal(options.header.Authorization.startsWith('Bearer SYNTHETIC_ASSET_TOKEN'), true);
       const envelope = JSON.parse(options.extraData); requests.push({ ...envelope, at: now });
       const args = envelope.arguments; let response;
-      if (envelope.action === 'mesh_connect' || envelope.action === 'mesh_node_update') response = view(args.online);
+      if (envelope.action === 'mesh_connect' || envelope.action === 'mesh_node_update') {
+        online = args.online; response = view(online);
+      }
+      else if (envelope.action === 'mesh_discover') response = view(online);
       else if (envelope.action === 'mesh_work_pull') response = { format: 'mesh-interactive-node/1', mesh_id: 'mesh',
         dispatch: remote.state === 'pending' ? [structuredClone(original)] : [] };
       else {
@@ -156,13 +160,16 @@ async function fixture({ target, launchEnabled = target !== undefined } = {}) {
   const code = stripTypeScriptTypes(readFileSync(new URL('./ScreenShareRuntime.ets', import.meta.url), 'utf8')
     .replace(/^import[\s\S]*?;\r?\n/gm, ''), { mode: 'strip' }).replace(/^export /gm, '');
   const exported = Object.keys(work);
-  const load = () => new Function(...exported, 'requireValue', 'preferences', 'deviceInfo', 'http', 'util',
+  const load = () => new Function(...exported, 'requireValue', 'preferences', 'deviceInfo', 'screenLock', 'http', 'util',
     'NodeCredentialStore', 'TrustedRuntimeConfig', 'controlBlob', 'controlDigest', 'ScreenShareOwner',
     'decodeScreenShareInput', 'sameScreenShareScope', 'sameScreenShareTarget', 'validScreenShareLaunchScope',
     'validScreenShareTarget', 'AppStorage', 'Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
     code + '\nreturn ScreenShareRuntime;')(...exported.map(name => work[name]), requireValue,
     { removePreferencesFromCacheSync: () => {}, getPreferencesSync: (_context, options) => prefs(options.name) },
-    { sdkApiVersion: 26 }, http, { TextEncoder: Encoder, TextDecoder: Decoder, Base64Helper: Base64,
+    { sdkApiVersion: 26 }, { isScreenLocked: async () => {
+      if (locked instanceof Error) throw locked;
+      return locked;
+    } }, http, { TextEncoder: Encoder, TextDecoder: Decoder, Base64Helper: Base64,
       generateRandomUUID: () => 'synthetic-' + (++serial) }, Credentials, Trusted, blob, digest, owner,
     decodeScreenShareInput, sameScreenShareScope, sameScreenShareTarget, validScreenShareLaunchScope, validScreenShareTarget,
     { get: key => key === 'meshForeground' ? foreground : undefined }, { now: () => now },
@@ -189,6 +196,8 @@ async function fixture({ target, launchEnabled = target !== undefined } = {}) {
   return { stores, writes, requests, original, owner, advance, launches, now: () => now,
     runtime: () => runtime, records: () => runtime.engine.snapshot.records,
     setForeground: value => { foreground = value; runtime.foregroundChanged(); },
+    setLocked: value => { locked = value; },
+    setStanding: value => { standing = value; },
     start: async () => { await runtime.receive(); await until(() => runtime.pending() !== null); return runtime.pending(); },
     markActualFrameAndTicket: (revision = 1) => { observedRevision = revision;
       media = { ...media, state: 'sharing', captureActive: true, backgroundActive: true,
@@ -204,6 +213,79 @@ async function fixture({ target, launchEnabled = target !== undefined } = {}) {
     reload: async () => { timers.clear(); Runtime = load(); runtime = await Runtime.create(context); return runtime; }
   };
 }
+
+test('unlocked foreground discovers the standing grant and consumes only the durable original read-only approval', async () => {
+  const f = await fixture({ standing: true });
+  f.setForeground(true);
+  await until(() => f.starts() === 1);
+  assert.equal(f.requests[0].action, 'mesh_discover');
+  assert.equal(f.requests.filter(request => request.action === 'mesh_connect').length, 1);
+  assert.equal(f.runtime().pending(), null);
+  assert.equal(f.runtime().status().captureConsentPending, true);
+  assert.equal(f.runtime().status().acknowledgedFrames, 0);
+  const approval = JSON.parse(f.stores.get('amita_screen_share_runtime_v1').get('approvals'))[0];
+  assert.equal(approval.state, 'consumed');
+  assert.equal(approval.standing, true);
+  assert.equal(approval.operationId, f.original.operation_id);
+  assert.equal(approval.inputHash, f.original.selection.workload.input.sha256);
+  assert.equal(JSON.stringify(f.requests).includes(approval.approvalId), false);
+  assert.equal(JSON.stringify(f.requests).includes(approval.nonce), false);
+});
+
+test('locked and unobservable windows never advertise standing reception; unlock resumes it automatically', async () => {
+  const f = await fixture({ standing: true, locked: true });
+  f.setForeground(true); await settle();
+  assert.equal(f.runtime().status().screenState, 'locked');
+  assert.equal(f.requests.length, 0);
+  f.setLocked(new Error('system state unavailable')); await f.advance(10000);
+  assert.equal(f.runtime().status().screenState, 'unavailable');
+  assert.equal(f.requests.length, 0);
+  f.setLocked(false); await f.advance(10000);
+  await until(() => f.starts() === 1);
+});
+
+test('absent or revoked Source standing grant cannot auto-start capture or leave reception online', async () => {
+  const legacy = await fixture();
+  legacy.setForeground(true); await settle();
+  assert.deepEqual(legacy.requests.map(item => item.action), ['mesh_discover']);
+  assert.equal(legacy.runtime().status().receiving, false);
+  assert.equal(legacy.starts(), 0);
+
+  const f = await fixture({ standing: true });
+  f.holdAccept(); f.setForeground(true);
+  await until(f.acceptWaiting);
+  f.setStanding(false); await f.advance(10000);
+  f.releaseAccept();
+  await until(() => f.runtime().status().standingAllowed === false);
+  assert.equal(f.starts(), 0);
+  assert.equal(f.runtime().pending(), null);
+  assert.equal(f.runtime().status().receiving, false);
+  await until(() => f.requests.some(item => item.action === 'mesh_node_update' && !item.arguments.online));
+});
+
+test('the original owner stop remains paused across foreground changes and restarts', async () => {
+  const f = await fixture({ standing: true });
+  f.setForeground(true); await until(() => f.starts() === 1);
+  f.allowClose(); await f.runtime().stop();
+  await f.reload(); f.setForeground(true); await settle();
+  assert.equal(f.runtime().status().receptionPaused, true);
+  assert.equal(f.runtime().status().receiving, false);
+  assert.equal(f.starts(), 1);
+  await f.runtime().receive();
+  assert.equal(f.runtime().status().receptionPaused, false);
+  assert.equal(f.runtime().status().receiving, true);
+  assert.equal(f.starts(), 1);
+});
+
+test('standing mode leaves a launch with no owner input monitor unadmitted', async () => {
+  const f = await fixture({ standing: true, target: { bundle_name: 'example.app', ability_name: 'MainAbility' } });
+  f.setForeground(true);
+  await until(() => f.runtime().status().error === 'screen_share_launch_input_monitor_unavailable');
+  assert.equal(f.runtime().pending(), null);
+  assert.equal(f.starts(), 0);
+  assert.equal(f.launches.length, 0);
+  assert.deepEqual(f.records(), []);
+});
 
 test('durable exact owner approval admits the original WorkEngine; first frame never settles; final close precedes result', async () => {
   const f = await fixture(), pending = await f.start();

@@ -38,13 +38,13 @@ export class ScreenShareOwner {
     context = value;
   }
 
-  // Called only by the real local owner gesture after the original task,
-  // allocation and local approval adapter supplied this exact live binding.
+  // The original task and allocation supply an exact live binding from either
+  // the owner's gesture or the configured standing authorization.
   static start(scope: ScreenShareScope, authorization: ScreenShareAuthorization,
     sink: ScreenShareFrameSink): void {
     if (context === null || AppStorage.get<boolean>('meshForeground') !== true ||
       !authorization.isForeground() || !authorization.valid(scope) || !sink.isLive(scope)) {
-      throw new Error('screen_share_original_owner_gesture_required');
+      throw new Error('screen_share_original_authorized_foreground_required');
     }
     session.start(context as common.UIAbilityContext, scope, authorization, sink);
   }
@@ -68,7 +68,7 @@ export class ScreenShareOwner {
     scope: ScreenShareScope, authorization: ScreenShareAuthorization, gate: PhoneScreenShareGate): Promise<void> {
     if (context === null || managedSink !== null || sourceClosing !== null ||
       AppStorage.get<boolean>('meshForeground') !== true || !authorization.isForeground() ||
-      !authorization.valid(scope)) { throw new Error('screen_share_original_owner_gesture_required'); }
+      !authorization.valid(scope)) { throw new Error('screen_share_original_authorized_foreground_required'); }
     const sink: PhoneScreenShareSink = new PhoneScreenShareSink(primary, controlSessionId, record, scope, gate);
     managedSink = sink; sourceCloseUnknown = false; latestFrame = null; previousFrame = null;
     const bound: ScreenShareFrameSink = {
