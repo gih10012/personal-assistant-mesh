@@ -5,6 +5,7 @@ import { MaintenanceService } from '../update/MaintenanceService';
 import { OwnerSetup } from '../core/SetupProtocol';
 import { UpdateTrust, validateTrust } from '../update/Manifest';
 import { PhoneFeatures } from './PhoneFeatures';
+import { ComputerUsePanel } from '../control/ComputerUsePanel';
 import { ChatHome } from './ChatHome';
 import { PhoneChatClient } from '../chat/PhoneChatClient';
 import { CHAT_MAX_FILES, ChatApproval, ChatAttachment, ChatView, initialChatView } from '../chat/ChatState';
@@ -441,21 +442,26 @@ struct Index {
 
 
   build() {
-    if (this.settingsLevel === 0) {
-      ChatHome({ view: this.chatView, foreground: this.foreground, ready: this.chatReady,
-        notice: this.chatNotice, picking: this.chatPicking, saving: this.chatSaving, deciding: this.chatDeciding,
-        attachments: this.chatAttachments, draft: this.chatDraft,
-        onDraft: (value: string): void => { this.chatDraft = value; },
-        onSettings: (): void => { this.settingsLevel = 1; },
-        onRetry: (): void => { if (this.chat !== null) { this.chat.refresh(); } },
-        onSend: (): void => { this.sendChat(); },
-        onPick: (): void => { this.pickChatAttachments(); },
-        onDiscard: (value: ChatAttachment): void => { this.discardChatAttachment(value); },
-        onExport: (value: ChatAttachment): void => { this.saveChatAttachment(value); },
-        onDecide: (value: ChatApproval, action: string): void => { this.decideChat(value, action); }
-      })
-    } else {
-      this.settings()
-    }
+    Column() {
+      ComputerUsePanel()
+      Stack() {
+        if (this.settingsLevel === 0) {
+          ChatHome({ view: this.chatView, foreground: this.foreground, ready: this.chatReady,
+            notice: this.chatNotice, picking: this.chatPicking, saving: this.chatSaving, deciding: this.chatDeciding,
+            attachments: this.chatAttachments, draft: this.chatDraft,
+            onDraft: (value: string): void => { this.chatDraft = value; },
+            onSettings: (): void => { this.settingsLevel = 1; },
+            onRetry: (): void => { if (this.chat !== null) { this.chat.refresh(); } },
+            onSend: (): void => { this.sendChat(); },
+            onPick: (): void => { this.pickChatAttachments(); },
+            onDiscard: (value: ChatAttachment): void => { this.discardChatAttachment(value); },
+            onExport: (value: ChatAttachment): void => { this.saveChatAttachment(value); },
+            onDecide: (value: ChatApproval, action: string): void => { this.decideChat(value, action); }
+          })
+        } else {
+          this.settings()
+        }
+      }.width('100%').layoutWeight(1)
+    }.width('100%').height('100%')
   }
 }

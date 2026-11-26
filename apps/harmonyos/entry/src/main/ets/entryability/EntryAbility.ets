@@ -2,6 +2,7 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { MaintenanceService } from '../update/MaintenanceService';
 import { PhoneControlBridge } from '../control/PhoneControlBridge';
+import { ComputerUseSurface } from '../control/ComputerUseSurface';
 import { ScreenShareOwner } from '../screenshare/ScreenShareOwner';
 import { ScreenShareRuntime } from '../screenshare/ScreenShareRuntime';
 
@@ -15,10 +16,13 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('meshForeground', false);
     AppStorage.setOrCreate<string>('meshUpdateStatus', '{"state":"initializing"}');
     this.maintenance = new MaintenanceService(this.context);
-    PhoneControlBridge.onNewWant(this.context, want).catch((): void => {});
+    this.handleWant(want).catch((): void => {});
   }
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
-    PhoneControlBridge.onNewWant(this.context, want).catch((): void => {});
+    this.handleWant(want).catch((): void => {});
+  }
+  private async handleWant(want: Want): Promise<void> {
+    if (!await ComputerUseSurface.onNewWant(want)) { await PhoneControlBridge.onNewWant(this.context, want); }
   }
   onWindowStageCreate(stage: window.WindowStage): void { stage.loadContent('pages/Index'); }
   private async attachShareRuntime(): Promise<void> {

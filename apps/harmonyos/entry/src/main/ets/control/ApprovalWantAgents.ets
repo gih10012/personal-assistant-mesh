@@ -55,13 +55,17 @@ async function decisionAgent(ticket: ApprovalTicket, decision: string, offset: n
   for (let i: number = 0; i < ticket.approval_id.length; i++) {
     code = (code * 31 + ticket.approval_id.charCodeAt(i)) % 536870911;
   }
-  const want: Want = { bundleName: 'org.personalassistant.mesh', abilityName: 'EntryAbility',
+  const want: Want = { bundleName: CONTROL_BUNDLE, abilityName: 'EntryAbility',
     action: 'org.personalassistant.mesh.control.' + ticket.approval_id + '.' + decision,
     parameters: { 'amita.control.approval_id': ticket.approval_id, 'amita.control.nonce': ticket.nonce,
       'amita.control.operation_id': ticket.operation_id, 'amita.control.task_id': ticket.task_id,
       'amita.control.revision': ticket.revision, 'amita.control.expires_at': ticket.expires_at,
       'amita.control.decision': decision } };
-  return wantAgent.getWantAgent({ wants: [want], requestCode: code * 3 + offset,
-    operationType: wantAgent.OperationType.START_ABILITY,
-    wantAgentFlags: [wantAgent.WantAgentFlags.ONE_TIME_FLAG, wantAgent.WantAgentFlags.CONSTANT_FLAG] });
+  return buildControlEntryWantAgent(want, code * 3 + offset);
+}
+export function buildControlEntryWantAgent(want: Want, requestCode: number, oneTime: boolean = true): Promise<WantAgent> {
+  const flags: wantAgent.WantAgentFlags[] = [wantAgent.WantAgentFlags.CONSTANT_FLAG];
+  if (oneTime) { flags.push(wantAgent.WantAgentFlags.ONE_TIME_FLAG); }
+  return wantAgent.getWantAgent({ wants: [want], requestCode: requestCode,
+    operationType: wantAgent.OperationType.START_ABILITY, wantAgentFlags: flags });
 }

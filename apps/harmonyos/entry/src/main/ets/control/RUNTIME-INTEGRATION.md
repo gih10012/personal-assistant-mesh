@@ -64,3 +64,20 @@ SDK 真实 onKeyEvent 的明确决定键，没有伪造触摸空闲或绕过系�
 Root 负责共享 WorkProtocol 的可选 preflight/reportAllowed、UI/Entry/module、
 Source adapter 开关、商业 SDK 编译及真机验收。本提交未做这些共享变更；新增
 本机 gate 三项 Node 检查，旧六项未改、未重复跑。平台编译/按键/后台连接仍待验。
+
+## Computer Use 实况窗
+
+只读提供方在原任务的捕获和首帧传送真实就绪后调用
+`ComputerUseSurface.operating(scope, entitledEvent, stop?)`。传入同一
+`operationId`、`taskId` 和毫秒截止时间。已批准的场景使用签名运行配置中的
+`PROGRESS`，缺配置时传空值。进行中状态静默显示，回退到应用内状态。
+
+提供方确认本人操作冲突并暂停原任务后，调用
+`ComputerUseSurface.conflict(scope, conflictId, expiresAt, decide)`。
+`decide` 接收 `continue` 或 `stop`，核对原冲突凭据和截止时间，并在记录决定
+后返回 `true`。收到继续决定后，提供方获知原操作实际恢复时再次调用
+`operating`。任务结束、撤权或退出时在原作用域调用 `close(scope)`。
+
+当实况窗不可用且系统通知已经获准时，只对待决定的冲突发通知。应用内入口
+保留相同决定。平台受理与真机可见性分别验收。华为对 AI 任务和工具类应用的
+进度场景仍按实际用途审核。[实况窗场景说明](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/liveview-introduction/)
