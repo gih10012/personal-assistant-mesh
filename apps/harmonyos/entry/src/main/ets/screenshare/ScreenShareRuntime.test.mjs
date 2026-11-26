@@ -161,7 +161,7 @@ async function fixture({ target, launchEnabled = target !== undefined, standing,
     .replace(/^import[\s\S]*?;\r?\n/gm, ''), { mode: 'strip' }).replace(/^export /gm, '');
   const exported = Object.keys(work);
   const load = () => new Function(...exported, 'requireValue', 'preferences', 'deviceInfo', 'screenLock', 'http', 'util',
-    'NodeCredentialStore', 'TrustedRuntimeConfig', 'controlBlob', 'controlDigest', 'ScreenShareOwner',
+    'NodeCredentialStore', 'TrustedRuntimeConfig', 'controlBlob', 'controlDigest', 'ScreenShareOwner', 'ComputerUseSurface',
     'decodeScreenShareInput', 'sameScreenShareScope', 'sameScreenShareTarget', 'validScreenShareLaunchScope',
     'validScreenShareTarget', 'AppStorage', 'Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
     code + '\nreturn ScreenShareRuntime;')(...exported.map(name => work[name]), requireValue,
@@ -171,6 +171,7 @@ async function fixture({ target, launchEnabled = target !== undefined, standing,
       return locked;
     } }, http, { TextEncoder: Encoder, TextDecoder: Decoder, Base64Helper: Base64,
       generateRandomUUID: () => 'synthetic-' + (++serial) }, Credentials, Trusted, blob, digest, owner,
+    { operating: async () => {}, close: async () => {} },
     decodeScreenShareInput, sameScreenShareScope, sameScreenShareTarget, validScreenShareLaunchScope, validScreenShareTarget,
     { get: key => key === 'meshForeground' ? foreground : undefined }, { now: () => now },
     (callback, delay) => timer(callback, delay), clear, (callback, delay) => timer(callback, delay, true), clear);

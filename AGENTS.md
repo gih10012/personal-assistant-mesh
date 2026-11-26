@@ -1,5 +1,14 @@
 # AMITA working contract
 
+2026-11-26 owner instruction. AMITA runs in YOLO mode for the owner's assigned
+tasks, including autonomous notifications to the bound owner. Do not insert an
+AMITA confirmation step for routine tool use, permissions, or owner-directed
+notifications. Keep actual system permission prompts and use the system entry
+point for the specific missing permission. On phone Computer Use, pause the
+original operation when verified physical owner input conflicts. Offer continue
+or stop in Live View and show the operating capsule there. Keep all task and
+operation identities, the existing no-new-spend scope and the school pause.
+
 2026-11-24 owner policy for parallel agent work. Split independent work into
 separate agents and worktrees. Set both model and reasoning effort explicitly by
 task difficulty and actual access. Start bounded implementation and review with

@@ -10,6 +10,7 @@ import { PhoneResponse, ProviderDispatch, SessionView, WorkConfig, WorkEngine, W
 import { NodeCredential, NodeCredentialStore } from '../security/NodeCredentialStore';
 import { TrustedRuntimeConfig } from '../update/TrustedRuntimeConfig';
 import { controlBlob, controlDigest } from '../control/PhoneControlJSON';
+import { ComputerUseSurface } from '../control/ComputerUseSurface';
 import { ScreenShareOwner } from './ScreenShareOwner';
 import { ScreenShareAuthorization, ScreenShareSessionStatus } from './ScreenShareSession';
 import { ScreenShareInput, ScreenShareScope, ScreenShareTarget, decodeScreenShareInput, sameScreenShareScope,
@@ -115,6 +116,7 @@ export class ScreenShareRuntime implements WorkHost {
   private engine: WorkEngine | null = null;
   private primary: WorkConfig | null = null;
   private originalMember: WorkConfig | null = null;
+  private liveviewEvent: string = '';
   private approvals: LocalApproval[] = [];
   private pendingApproval: LocalApproval | null = null;
   private executingApproval: LocalApproval | null = null;
@@ -267,6 +269,7 @@ export class ScreenShareRuntime implements WorkHost {
     const original = member.config as WorkConfig;
     validateWorkConfig(original, this.nodeId);
     const trusted = await new TrustedRuntimeConfig(this.context).load(original);
+    this.liveviewEvent = trusted === null ? '' : trusted.liveviewEvent;
     const primary = trusted === null ? original : trusted.work;
     validateWorkConfig(primary, this.nodeId);
     requireValue(primary.session_id !== this.identity.control_session_id, 'screen_share_distinct_component_required');
@@ -689,6 +692,7 @@ export class ScreenShareRuntime implements WorkHost {
       serviceLive: (): boolean => this.eligible() && this.scopeValid(scope)
     };
     this.state = 'starting_capture';
+    let surfaceStarted: boolean = false;
     try {
       await this.persistApprovals();
       if (approval.standing === true) { await this.observeScreenState(); }
@@ -705,6 +709,10 @@ export class ScreenShareRuntime implements WorkHost {
         if (approval.target !== undefined && approval.launchStatus === undefined) {
           requireValue(this.foreground(), 'screen_share_launch_readiness_lost');
           if (ScreenShareOwner.liveFrameRevision(scope) > 0) { await this.launchApp(approval, dispatch, scope); }
+        }
+        if (!surfaceStarted && media.captureActive && media.backgroundActive && media.acknowledgedFrames > 0) {
+          surfaceStarted = true;
+          this.presentOperation(scope);
         }
         this.state = media.backgroundActive ? 'sharing' : 'awaiting_capture_or_frame_ack';
         await new Promise<void>((resolve): void => { setTimeout(resolve, 250); });
@@ -739,8 +747,19 @@ export class ScreenShareRuntime implements WorkHost {
       finally { try { await ScreenShareOwner.stop(); } catch (_) {} }
       throw new Error('screen_share_original_stream_outcome_unknown');
     } finally {
+      if (surfaceStarted) { ComputerUseSurface.close(scope).catch((): void => {}); }
       this.executingApproval = null; this.activeScope = null; this.revokedListeners = [];
     }
+  }
+
+  private async presentOperation(scope: ScreenShareScope): Promise<void> {
+    try {
+      await ComputerUseSurface.operating(scope, this.liveviewEvent, async (): Promise<boolean> => {
+        if (this.activeScope === null || !sameScreenShareScope(this.activeScope, scope)) { return false; }
+        await ScreenShareOwner.stop();
+        return true;
+      });
+    } catch (_) { /* The recording lifecycle and the Source receipt stay authoritative. */ }
   }
 
   reportAllowed(dispatch: ProviderDispatch, permissionContext: string): boolean {

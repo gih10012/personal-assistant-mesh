@@ -3,6 +3,7 @@ import { window } from '@kit.ArkUI';
 import { MaintenanceService } from '../update/MaintenanceService';
 import { PhoneControlBridge } from '../control/PhoneControlBridge';
 import { ComputerUseSurface } from '../control/ComputerUseSurface';
+import { ApprovalSurface } from '../control/ApprovalSurface';
 import { ScreenShareOwner } from '../screenshare/ScreenShareOwner';
 import { ScreenShareRuntime } from '../screenshare/ScreenShareRuntime';
 
@@ -13,6 +14,7 @@ export default class EntryAbility extends UIAbility {
   private shareCreating: boolean = false;
   private destroyed: boolean = false;
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    ApprovalSurface.attachNotificationContext(this.context);
     AppStorage.setOrCreate<boolean>('meshForeground', false);
     AppStorage.setOrCreate<string>('meshUpdateStatus', '{"state":"initializing"}');
     this.maintenance = new MaintenanceService(this.context);
@@ -72,6 +74,7 @@ export default class EntryAbility extends UIAbility {
   }
   onDestroy(): void {
     this.onBackground();
+    ApprovalSurface.attachNotificationContext(null);
     this.destroyed = true;
     const runtime: ScreenShareRuntime | null = this.shareRuntime;
     this.shareRuntime = null;

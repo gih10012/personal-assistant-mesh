@@ -1,5 +1,5 @@
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
-import { WantAgent } from '@kit.AbilityKit';
+import { common, WantAgent } from '@kit.AbilityKit';
 import { liveViewManager } from '@kit.LiveViewKit';
 import { notificationManager } from '@kit.NotificationKit';
 // NotificationContent in this real API26 SDK still declares the legacy enum.
@@ -54,6 +54,8 @@ function liveError(error: BusinessError): string {
 
 // Presents the provider's current state. Decisions and deadlines belong to the provider.
 export class ApprovalSurface {
+  private static notificationContext: common.UIAbilityContext | null = null;
+  private static notificationAsked: boolean = false;
   private id: number;
   private sequence: number = 0;
   private event: string;
@@ -64,6 +66,21 @@ export class ApprovalSurface {
       throw new Error('phone_approval_surface_configuration_invalid');
     }
     this.id = id; this.event = entitledEvent;
+  }
+
+  static attachNotificationContext(context: common.UIAbilityContext | null): void {
+    ApprovalSurface.notificationContext = context;
+  }
+
+  private static async notificationEnabled(current: () => boolean): Promise<boolean> {
+    if (await notificationManager.isNotificationEnabled()) { return true; }
+    const context = ApprovalSurface.notificationContext;
+    if (context === null || ApprovalSurface.notificationAsked || !current() ||
+      AppStorage.get<boolean>('meshForeground') !== true) { return false; }
+    ApprovalSurface.notificationAsked = true;
+    try { await notificationManager.requestEnableNotification(context); }
+    catch (_) { return false; }
+    return await notificationManager.isNotificationEnabled();
   }
   private data(card: SurfaceCard): liveViewManager.LiveView {
     const buttons: liveViewManager.ServiceButton[] = card.buttons.map((action: SurfaceAction): liveViewManager.ServiceButton =>
@@ -132,7 +149,7 @@ export class ApprovalSurface {
     } else { result.liveview_error = 'liveview_entitlement_not_configured'; }
     if (!card.notificationFallback || !current() || card.expiresAt <= Date.now()) { return result; }
     try {
-      if (!await notificationManager.isNotificationEnabled()) {
+      if (!await ApprovalSurface.notificationEnabled((): boolean => current() && card.expiresAt > Date.now())) {
         result.notification_error = 'notification_permission_required';
         return result;
       }

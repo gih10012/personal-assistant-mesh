@@ -10,13 +10,14 @@ function load(name, imports) {
   return new Function(...Object.keys(imports), code + '\nreturn ' + name + ';')(...Object.values(imports));
 }
 
-function fixture({ liveviewEnabled = true, notificationEnabled = true } = {}) {
+function fixture({ liveviewEnabled = true, notificationEnabled = true, grantNotifications = false } = {}) {
   let now = 1000;
   let sequence = 0;
   let active = null;
   let ownerView = null;
   const notices = [];
   const calls = [];
+  const context = { name: 'foreground ability' };
   const clock = { now: () => now };
   const liveViewManager = {
     ActionType: { ACTION_TYPE_OPEN_APP_PAGE: 1 },
@@ -43,13 +44,19 @@ function fixture({ liveviewEnabled = true, notificationEnabled = true } = {}) {
     }
   };
   const ApprovalSurface = load('ApprovalSurface', {
-    Date: clock, deviceInfo: { sdkApiVersion: 26 }, liveViewManager,
+    Date: clock, deviceInfo: { sdkApiVersion: 26 }, liveViewManager, AppStorage: { get: () => true },
     legacyNotification: { ContentType: { NOTIFICATION_CONTENT_BASIC_TEXT: 0 } },
     notificationManager: {
       isNotificationEnabled: async () => notificationEnabled,
+      requestEnableNotification: async value => {
+        assert.equal(value, context);
+        calls.push('request-notification-permission');
+        notificationEnabled = grantNotifications;
+      },
       publish: async notice => { notices.push(notice); }, cancel: async () => { calls.push('cancel'); }
     }
   });
+  ApprovalSurface.attachNotificationContext(context);
   const surface = load('ComputerUseSurface', { ApprovalSurface, Date: clock,
     CONTROL_BUNDLE: 'org.personalassistant.mesh', util: { generateRandomUUID: () => 'nonce-' + ++sequence },
     buildControlEntryWantAgent: async want => want, setTimeout: () => 1, clearTimeout: () => {},
@@ -59,6 +66,16 @@ function fixture({ liveviewEnabled = true, notificationEnabled = true } = {}) {
     active: () => active, ownerView: () => ownerView,
     scope: { operationId: 'original-operation', taskId: 'original-task', expiresAt: 60000 } };
 }
+
+test('missing notification permission is requested only when a real conflict needs its fallback', async () => {
+  const f = fixture({ liveviewEnabled: false, notificationEnabled: false, grantNotifications: true });
+  await f.surface.operating(f.scope, 'PROGRESS');
+  assert.equal(f.calls.includes('request-notification-permission'), false);
+  const conflict = await f.surface.conflict(f.scope, 'real-conflict', 10000, async () => true);
+  assert.equal(conflict.surface, 'notification');
+  assert.equal(f.calls.filter(x => x === 'request-notification-permission').length, 1);
+  assert.equal(f.notices.length, 1);
+});
 
 test('read-only activity stays silent and only an observed conflict uses notification fallback', async () => {
   const f = fixture({ liveviewEnabled: false });
