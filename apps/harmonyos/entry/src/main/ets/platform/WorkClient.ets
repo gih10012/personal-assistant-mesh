@@ -20,6 +20,7 @@ interface BootstrapEnrollment {
   request_sha256: string; registration_receipt: RegistrationReceipt;
 }
 interface BootstrapCredential { kind: string; token: string; scope: string[]; expires_at?: number; }
+interface WorkspaceStatusRequest { session_id: string; }
 interface WorkBootstrap {
   format: string; config: WorkConfig; credential: BootstrapCredential; enrollment: BootstrapEnrollment;
 }
@@ -194,7 +195,8 @@ export class WorkClient implements WorkHost {
   private async refreshWorkspace(config: WorkConfig): Promise<void> {
     this.workspaceChecked = Date.now();
     try {
-      const response = await this.exchange('mesh_phone_workspace_status', { session_id: config.session_id });
+      const request: WorkspaceStatusRequest = { session_id: config.session_id };
+      const response = await this.exchange('mesh_phone_workspace_status', request);
       const policy = response.workspace;
       this.native.setWorkspaceEnabled(response.format === 'mesh-interactive-node/1' && response.mesh_id === config.mesh_id &&
         policy !== undefined && policy.format === 'amita-phone-workspace/1' && policy.enabled === true &&
