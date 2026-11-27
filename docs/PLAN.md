@@ -5,7 +5,9 @@
 
 2026-11-28 Chat 后端切换：控制端核实目标网关已启用及当前 OAuth 多数派授权，
 转接收到同一原操作后原子更新全部 OAuth 路由。已发送的请求保留原成员与回执。
-隔离 Worker 已部署该能力。公网生产域名、GitHub 回调及真实入口切换仍待集中办理。
+隔离 Worker 已部署该能力。正式 Worker 入口 `amita-chat.gihggiy.workers.dev` 已预留，
+VPS 已准备新 issuer 的独立状态与私有密钥，沿用原 GitHub 应用、用户绑定及会话后端。
+需在原应用追加新域名的精确回调，再集中启用和迁移 Chat。旧公网入口继续服务。
 [切换契约](../edge/relay/README.md#public-oauth-ingress)
 
 2026-11-28 Chat 公网入口：Cloudflare Free 隔离候选已通过实际公网往返，经本机
