@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import unittest
+from unittest.mock import patch
 
 from assistant_mesh.phone_authority import PhoneAuthority
 from assistant_mesh.phone_workspace import FORMAT, STATUS, SUFFIX, VERIFIER, WRITE
@@ -19,8 +20,9 @@ class PhoneWorkspaceTest(unittest.TestCase):
         owned(policy, {'format': FORMAT, 'node_id': node['node_id'], 'session_id': node['session_id']})
         handset.api.session_nodes = LocalSessionNodes(handset.service.sessions.backend, {
             'existing-chat': {'capabilities': ['agent'], 'visible_nodes': {}}})
-        handset.service = PhoneAuthority(handset.api, handset.config_path)
         f = handset.original
+        with patch.object(f.registry, 'advertise', side_effect=TypeError('frozen registry has no health parameter')):
+            handset.service = PhoneAuthority(handset.api, handset.config_path)
         cap = node['node_id'] + SUFFIX
         self.assertTrue(handset.call(STATUS)['workspace']['enabled'])
         self.assertFalse(f.registry.describe(cap)['available'])

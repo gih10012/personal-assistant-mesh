@@ -73,19 +73,27 @@ class PhoneWorkspace:
         store, resources = self.authority.store, self.authority.api.resources
         identity, actor = self.identity(node), 'node:' + node['node_id']
         with store.transaction() as db:
+            now = store.clock()
             row = db.execute('SELECT * FROM capabilities WHERE id=?', (identity,)).fetchone()
-        if row is None:
-            resources.advertise(actor, identity, KIND, spec=SPEC, health='unavailable')
-        else:
-            self.validate_registry(row, node)
-        self.presence(node, online=False)
+            if row is None:
+                # The frozen receiver's Registry has no advertise(health=...).
+                # Use the existing owner installed-adapter insertion pattern.
+                db.execute('INSERT INTO capabilities VALUES(?,?,?,?,?,?,1,?,?,0,?,?)',
+                    (identity, actor, KIND, '', json.dumps(SPEC, sort_keys=True, separators=(',', ':')),
+                     0, 'unavailable', now, now, now))
+                resources._audit(db, actor, 'advertise', identity,
+                                 {'epoch': 1, 'kind': KIND, 'installation': 'owner_workspace_declared'})
+            else:
+                self.validate_registry(row, node)
+                db.execute("UPDATE capabilities SET health=CASE WHEN health='failed' THEN health ELSE 'unavailable' END,"
+                           'deadline=?,updated=? WHERE id=? AND revoked=0', (now, now, identity))
 
     def validate_registry(self, row, node):
         if (row['principal'] != 'node:' + node['node_id'] or row['kind'] != KIND
                 or row['epoch'] != 1 or json.loads(row['spec']) != SPEC):
             raise PermissionError('phone_workspace_original_capability_required')
 
-    def presence(self, node, online=True):
+    def presence(self, node):
         if not self.matches(node):
             return
         store = self.authority.store
@@ -96,7 +104,7 @@ class PhoneWorkspace:
             if row['revoked'] or row['health'] == 'failed':
                 return
             expires = now
-            if online and self.available(node):
+            if self.available(node):
                 session = self.authority._presence(db, node)
                 view = self.authority.sessions._session_view(session)
                 if identity in view['managed_capabilities']:
