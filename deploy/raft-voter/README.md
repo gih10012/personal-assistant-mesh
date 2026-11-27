@@ -117,6 +117,29 @@ A local read may lag the quorum. Business consumers must keep their original
 execution guards. All status responses continue to report `business_fencing:
 false` and `ha_qualified: false`.
 
+### Prepare the target SQLite candidate
+
+On the target, use an authenticated Source witness for the sealed journal head.
+Compare it with the target's passive replica witness and save the six matching
+fields from `assistant_mesh.business_checkpoint.compare_checkpoints` as private
+JSON. Use a locally trusted empty template from the matching application
+version with the declared tables and their indexes. Prepare the candidate in a
+private directory with a fresh file name:
+
+```sh
+python3 -m assistant_mesh.business_recovery \
+  --replica passive.db --schema-template empty-schema.db \
+  --checkpoint sealed-checkpoint.json --destination private/candidate.db
+```
+
+The command imports typed rows at the exact sealed position and recomputes
+their digest from the new SQLite file. It publishes read-only via atomic
+no-replace creation. Scoped `meta` keys, original task IDs, unknowns and
+declared native history chunks keep their original values. The receipt reports
+the SQL schema digest separately. Activation still requires the applied writer
+grant and verification of external dependencies, runtime configuration and
+retained effects. Keep this candidate outside configured authority paths.
+
 The focused local acceptance uses `node --test owner-smoke.mjs` in the assembled
 candidate. In a source checkout set `AMITA_RAFT_ARTIFACT` to the original
 download directory. The test uses the pinned WASM, real local fsync/SQLite

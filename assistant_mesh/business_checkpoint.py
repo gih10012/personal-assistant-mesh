@@ -13,6 +13,7 @@ import re
 import sqlite3
 
 from .business_journal import FORMAT, canonical, cell, digest, quote, row_key
+from .business_replica import Replica
 
 
 class CheckpointMismatch(ValueError):
@@ -82,9 +83,8 @@ def _typed_witness(kind, position, manifest, table_rows):
     return CheckpointWitness(kind, position, sha256.hexdigest(), tuple(counts))
 
 
-def _source_rows(db, journal, manifest, table, info):
+def _sqlite_rows(db, table, info, condition='1'):
     columns = ','.join(quote(column['name']) for column in info['columns'])
-    condition = journal._filter(table, quote(table), db, manifest['meta_keys'])
     for row in db.execute('SELECT ' + columns + ' FROM ' + quote(table) + ' WHERE ' + condition):
         values = [cell(value) for value in row]
         yield row_key(info, values), values
@@ -102,8 +102,8 @@ def source_checkpoint(journal, expected):
             if (not 0 <= state['generation_start'] <= expected.head
                     or not 0 <= state['retained_after'] <= expected.head):
                 raise CheckpointMismatch('business_checkpoint_source_generation_conflict')
-            return _typed_witness('source', expected, manifest,
-                lambda table, info: _source_rows(db, journal, manifest, table, info))
+            return _typed_witness('source', expected, manifest, lambda table, info: _sqlite_rows(
+                db, table, info, journal._filter(table, quote(table), db, manifest['meta_keys'])))
 
 
 def _replica_rows(db, position, table, info):
@@ -124,15 +124,15 @@ def _replica_rows(db, position, table, info):
         yield key, values
 
 
-def replica_checkpoint(replica, expected):
-    """Measure the passive replica's published rows and progress in one read."""
-    with _read_snapshot(replica.path) as db:
+@contextlib.contextmanager
+def _replica_snapshot(path, expected):
+    with _read_snapshot(path) as db:
         if [row[0] for row in db.execute('SELECT format FROM replica_identity')] != [FORMAT]:
             raise CheckpointMismatch('business_checkpoint_replica_format_conflict')
-        source = replica._source(db, expected.authority, expected.incarnation)
+        source = Replica._source(db, expected.authority, expected.incarnation)
         if source is None:
             raise CheckpointMismatch('business_checkpoint_replica_baseline_required')
-        state = replica._state_value(source)
+        state = Replica._state_value(source)
         manifest = _checked_manifest(state, expected)
         if state['cursor'] != expected.head:
             raise CheckpointMismatch('business_checkpoint_replica_not_caught_up')
@@ -148,6 +148,12 @@ def replica_checkpoint(replica, expected):
                               (expected.authority, expected.incarnation)):
             if row[0] not in manifest['tables']:
                 raise CheckpointMismatch('business_checkpoint_replica_uncovered_table')
+        yield db, manifest
+
+
+def replica_checkpoint(replica, expected):
+    """Measure the passive replica's published rows and progress in one read."""
+    with _replica_snapshot(replica.path, expected) as (db, manifest):
         return _typed_witness('replica', expected, manifest,
             lambda table, info: _replica_rows(db, expected, table, info))
 

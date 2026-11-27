@@ -1,5 +1,7 @@
-"""Four bounded SQLite/dispatch fixtures, no live authorities or model calls."""
+"""Bounded SQLite and dispatch fixtures using disposable authorities."""
+import contextlib
 import copy
+import io
 import json
 import sqlite3
 from pathlib import Path
@@ -71,6 +73,66 @@ class BusinessReplicationTests(unittest.TestCase):
         status = self.journal.status()
         state = self.replica.state('source-authority', status['incarnation'])
         return self.journal.export(state['cursor'], status['incarnation'], status['generation'])
+
+    def test_recover_only_verified_rows_from_the_sealed_source(self):
+        from assistant_mesh.business_checkpoint import (
+            CheckpointMismatch, CheckpointPosition, compare_checkpoints, replica_checkpoint, source_checkpoint,
+        )
+        from assistant_mesh.business_recovery import main, prepare_recovery
+        from assistant_mesh.business_writer_seal import REQUEST, seal_writer
+
+        self.baseline()
+        template = Store(self.root / 'clean-schema.db', recover_inflight=False)
+        with template.transaction() as db:
+            db.execute('CREATE TABLE business_dependencies(parent TEXT NOT NULL,child TEXT NOT NULL,'
+                       'receipt BLOB,revoked INTEGER,PRIMARY KEY(parent,child))')
+            db.execute("INSERT INTO meta VALUES('owner_context','template secret')")
+        with self.store.transaction() as db:
+            db.execute("UPDATE tasks SET result='last admitted before seal' WHERE id='original'")
+        status = self.journal.status()
+        seal = seal_writer(self.store.path, dict(format=REQUEST, operation_id='original-handoff',
+            source_holder='source', authority=status['authority'], incarnation=status['incarnation'],
+            generation=status['generation'], manifest_sha256=status['manifest']['sha256'],
+            meta_keys=status['manifest']['meta_keys']))
+        position = CheckpointPosition(seal['authority'], seal['incarnation'], seal['generation'],
+                                      seal['manifest_sha256'], seal['sealed_journal_head'])
+        source = source_checkpoint(self.journal, position)
+        checkpoint = dict(authority=position.authority, incarnation=position.incarnation,
+            generation=position.generation, manifest_sha256=position.manifest_sha256,
+            sealed_journal_head=position.head, typed_rows_sha256=source.typed_rows_sha256)
+        candidate = self.root / 'recovered.db'
+        with self.assertRaisesRegex(CheckpointMismatch, 'position_conflict'):
+            prepare_recovery(self.replica.path, template.path, candidate, checkpoint)
+        self.assertFalse(candidate.exists())
+        self.replica.apply(self.changes(), position.authority)
+        self.assertEqual(checkpoint, compare_checkpoints(source, replica_checkpoint(self.replica, position)))
+        with self.assertRaisesRegex(CheckpointMismatch, 'typed_rows_conflict'):
+            prepare_recovery(self.replica.path, template.path, candidate, dict(checkpoint, typed_rows_sha256='0' * 64))
+        self.assertFalse(candidate.exists())
+
+        checkpoint_file = self.root / 'sealed-checkpoint.json'
+        checkpoint_file.write_text(canonical(checkpoint))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(0, main(['--replica', str(self.replica.path), '--schema-template', template.path,
+                                     '--checkpoint', str(checkpoint_file), '--destination', str(candidate)]))
+        evidence = json.loads(output.getvalue())
+        self.assertEqual(checkpoint, evidence['checkpoint'])
+        self.assertFalse(evidence['execution_authorized'])
+        self.assertEqual(0o400, candidate.stat().st_mode & 0o777)
+        with contextlib.closing(sqlite3.connect(candidate.as_uri() + '?mode=ro', uri=True)) as db:
+            result, status, unknown = db.execute('SELECT result,status,checkpoint FROM tasks '
+                                                   "WHERE id='original'").fetchone()
+            self.assertEqual(('last admitted before seal', 'needs_review', self.unknown),
+                             (result, status, json.loads(unknown)))
+            self.assertEqual(self.blob, db.execute('SELECT body FROM session_chunks').fetchone()[0])
+            self.assertEqual([('business_goal',)], db.execute('SELECT key FROM meta').fetchall())
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='outbox'").fetchone())
+        with self.assertRaisesRegex(FileExistsError, 'destination_exists'):
+            prepare_recovery(self.replica.path, template.path, candidate, checkpoint)
+        with self.assertRaisesRegex(sqlite3.IntegrityError, 'business_writer_sealed'):
+            with self.store.transaction() as db:
+                db.execute("UPDATE tasks SET result='late source write' WHERE id='original'")
 
     def test_business_writes_and_changes_roll_back_together_and_replica_refuses_store(self):
         before = self.journal.status()['head']
