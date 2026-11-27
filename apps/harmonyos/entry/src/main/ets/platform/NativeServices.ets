@@ -5,6 +5,7 @@ import { util } from '@kit.ArkTS';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { http } from '@kit.NetworkKit';
+import workspace from 'libharmony_agent_workspace.so';
 import {
   AdaptationReport, Blob, Challenge, DeviceState, Enrollment, Hello, JournalRecord, MAX_BYTES,
   RelayClientConfig, RelayRecord, RelayResponse, ResultEnvelope, acceptRelayChallenge,
@@ -14,7 +15,7 @@ import {
   validateChallenge, validateEnrollment, validateHello, validateJoinUrl, validateRelayClientConfig,
   validateRelayResponse, validateRelayUrl, validateResultEnvelope
 } from '../core/Protocol';
-import { ProviderDispatch, WorkConfig, validateWorkDispatch } from '../core/WorkProtocol';
+import { ProviderDispatch, WorkConfig, Workload, validateWorkDispatch, workspaceAction } from '../core/WorkProtocol';
 import { MAX_SETUP_BYTES, OwnerSetup, parseOwnerSetup } from '../core/SetupProtocol';
 
 export class NodeSnapshot {
@@ -34,6 +35,7 @@ export class NativeServices {
   private busy: boolean = false;
   private foreground: boolean = true;
   private filePermission: string = '';
+  private workspaceEnabled: boolean = false;
   sharingEnabled: boolean = false; // App restarts require explicit local permission again.
 
   constructor(context: common.UIAbilityContext) {
@@ -73,8 +75,9 @@ export class NativeServices {
   }
   setForeground(value: boolean): void {
     this.foreground = value;
-    if (!value) { this.sharingEnabled = false; this.selectedUri = ''; this.filePermission = ''; }
+    if (!value) { this.sharingEnabled = false; this.selectedUri = ''; this.filePermission = ''; this.workspaceEnabled = false; }
   }
+  setWorkspaceEnabled(value: boolean): void { this.workspaceEnabled = value && this.foreground; }
   setSharing(value: boolean): void {
     this.sharingEnabled = value && this.foreground;
     // A withdrawn grant never authorizes a buffered old file result later.
@@ -85,15 +88,21 @@ export class NativeServices {
   }
   hasSelectedGrant(): boolean { return this.foreground && this.sharingEnabled && this.selectedUri.length > 0; }
   workCapabilities(): string[] {
-    if (!this.foreground || !this.sharingEnabled) { return []; }
-    const values: string[] = [this.snapshot.node_id + ':bytes-v1'];
+    if (!this.foreground) { return []; }
+    const values: string[] = this.sharingEnabled ? [this.snapshot.node_id + ':bytes-v1'] : [];
     if (this.hasSelectedGrant()) { values.push(this.snapshot.node_id + ':selected-file-v1'); }
+    if (this.workspaceEnabled && this.enrollment !== null) { values.push(this.snapshot.node_id + ':workspace-files-v1'); }
     return values;
   }
   workPermission(dispatch: ProviderDispatch): string {
+    if (workspaceAction(dispatch.selection?.action ?? '')) { return this.workspaceEnabled ? 'owner-workspace-v1' : ''; }
     return dispatch.selection?.action === 'file.read.selected' ? this.filePermission : '';
   }
   workAllowed(dispatch: ProviderDispatch, permissionContext?: string): boolean {
+    if (workspaceAction(dispatch.selection?.action ?? '')) {
+      return this.foreground && !this.busy && this.workspaceEnabled && this.enrollment !== null &&
+        (permissionContext === undefined || permissionContext === 'owner-workspace-v1');
+    }
     if (!this.foreground || !this.sharingEnabled || this.busy) { return false; }
     if (dispatch.selection?.action === 'file.read.selected') {
       return this.hasSelectedGrant() && this.filePermission.length > 0 &&
@@ -118,7 +127,9 @@ export class NativeServices {
     try {
       const codec: util.Base64Helper = new util.Base64Helper();
       let output: Uint8Array = new Uint8Array(0);
-      if (dispatch.selection?.action === 'file.read.selected') {
+      if (workspaceAction(dispatch.selection?.action ?? '')) {
+        output = await this.executeWorkspace(dispatch);
+      } else if (dispatch.selection?.action === 'file.read.selected') {
         requireValue(permission === this.filePermission, 'mesh_work_file_grant_changed');
         output = this.readSelectedComplete(dispatch.selection.workload.max_bytes as number);
       } else {
@@ -133,6 +144,25 @@ export class NativeServices {
       }
       return { bytes: output.length, sha256: await this.digest(output), base64: codec.encodeToStringSync(output) };
     } finally { this.busy = false; }
+  }
+  private async executeWorkspace(dispatch: ProviderDispatch): Promise<Uint8Array> {
+    const recipe = dispatch.selection?.workload as Workload;
+    const path = recipe.path as string;
+    const root = this.context.filesDir + '/agent-workspace';
+    if (!fileIo.accessSync(root)) { fileIo.mkdirSync(root); }
+    if (dispatch.selection?.action === 'file.read.workspace') {
+      const data = new Uint8Array(workspace.readFile(root, path));
+      requireValue(data.length <= (recipe.max_bytes as number), 'mesh_work_workspace_read_budget_exceeded');
+      return data;
+    }
+    const blob = recipe.input as Blob;
+    const codec = new util.Base64Helper();
+    const input = codec.decodeSync(blob.base64);
+    requireValue(input.length === blob.bytes && codec.encodeToStringSync(input) === blob.base64 &&
+      await this.digest(input) === blob.sha256, 'mesh_work_workspace_input_changed');
+    requireValue(this.foreground && this.workspaceEnabled, 'mesh_work_workspace_binding_revoked');
+    workspace.writeFile(root, path, input.slice().buffer);
+    return new util.TextEncoder().encodeInto(JSON.stringify({ path: path, bytes: blob.bytes, sha256: blob.sha256 }));
   }
   async bindEnrollment(raw: string): Promise<void> {
     requireValue(!this.busy && this.foreground && raw.length <= 65536, 'mesh_owner_binding_unavailable');

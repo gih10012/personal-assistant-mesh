@@ -8,7 +8,8 @@ export interface WorkConfig {
   format: string; resource_url: string; node_id: string; session_id: string;
   mesh_id: string; authority_id: string;
 }
-export interface Workload { input?: Blob; repeat?: number; max_bytes?: number; }
+export interface Workload { input?: Blob; repeat?: number; max_bytes?: number; path?: string; }
+interface WorkspaceScope { task_id: string; task_epoch: number; path: string; }
 export interface WorkSelection {
   capability_id: string; epoch: number; action: string; scope: Object;
   workload: Workload; observations?: Object[];
@@ -32,9 +33,11 @@ export interface SettlementEvidence {
 }
 export interface SessionNetwork { state: string; expires_at: number; presence_ttl_seconds: number; }
 export interface SessionView { node_id: string; session_id: string; network: SessionNetwork; }
+export interface WorkspaceStatus { format: string; enabled: boolean; capability_id: string; epoch: number; }
 export interface PhoneResponse {
   format: string; mesh_id: string; session?: SessionView;
   dispatch?: ProviderDispatch[]; provider?: Object;
+  workspace?: WorkspaceStatus;
   execution_verified?: boolean; native_tools_restricted?: boolean;
 }
 export interface ProviderArguments {
@@ -120,6 +123,14 @@ export function validateWorkBlob(value: Blob): void {
     typeof value.sha256 === 'string' && /^[0-9a-f]{64}$/.test(value.sha256) &&
     typeof value.base64 === 'string' && value.base64.length <= 87384, 'mesh_work_blob_invalid');
 }
+export function workspaceAction(action: string): boolean {
+  return action === 'file.read.workspace' || action === 'file.write.workspace';
+}
+function validWorkspacePath(path: string): boolean {
+  return typeof path === 'string' && path.length > 0 && path.length <= 255 &&
+    !/[\u0000-\u001f\u007f\\]/.test(path) &&
+    path.split('/').every((part: string): boolean => part !== '' && part !== '.' && part !== '..');
+}
 export function validateWorkDispatch(value: ProviderDispatch, nodeId: string, pending: boolean = true): void {
   requireValue(value !== null && typeof value === 'object', 'mesh_work_dispatch_invalid');
   name(value.operation_id); name(value.capability_id); name(value.provider);
@@ -131,13 +142,28 @@ export function validateWorkDispatch(value: ProviderDispatch, nodeId: string, pe
     'mesh_work_selection_mismatch');
   epoch(selected.epoch);
   const control: boolean = selected.action === 'inspect' || selected.action === 'action';
+  const workspace: boolean = workspaceAction(selected.action);
   const suffix: string = control ? ':ui-control-v1' :
-    selected.action === 'challenge.bytes.repeat' ? ':bytes-v1' : ':selected-file-v1';
-  requireValue((selected.action === 'challenge.bytes.repeat' || selected.action === 'file.read.selected' || control) &&
+    workspace ? ':workspace-files-v1' : selected.action === 'challenge.bytes.repeat' ? ':bytes-v1' : ':selected-file-v1';
+  requireValue((selected.action === 'challenge.bytes.repeat' || selected.action === 'file.read.selected' || control || workspace) &&
     value.capability_id === nodeId + suffix && (control || selected.epoch === 1), 'mesh_work_adapter_contract_mismatch');
   requireValue(selected.scope !== null && selected.scope !== undefined && selected.workload !== null &&
     typeof selected.workload === 'object', 'mesh_work_scope_required');
-  if (control) {
+  if (workspace) {
+    const scope = selected.scope as WorkspaceScope;
+    requireValue(validWorkspacePath(selected.workload.path as string) && Object.keys(scope).sort().join('|') === 'path|task_epoch|task_id' &&
+      scope.task_id === value.task_id && scope.task_epoch === value.task_epoch && scope.path === selected.workload.path,
+      'mesh_work_workspace_path_scope_invalid');
+    if (selected.action === 'file.read.workspace') {
+      requireValue(Object.keys(selected.workload).sort().join('|') === 'max_bytes|path' &&
+        Number.isSafeInteger(selected.workload.max_bytes) && (selected.workload.max_bytes as number) >= 0 &&
+        (selected.workload.max_bytes as number) <= MAX_BYTES, 'mesh_work_workspace_read_budget_invalid');
+    } else {
+      requireValue(Object.keys(selected.workload).sort().join('|') === 'input|path', 'mesh_work_workspace_write_invalid');
+      validateWorkBlob(selected.workload.input as Blob);
+      requireValue((selected.workload.input as Blob).bytes <= 4096, 'mesh_work_workspace_write_budget_invalid');
+    }
+  } else if (control) {
     requireValue(Object.keys(selected.workload).join('|') === 'input', 'mesh_work_control_recipe_shape_invalid');
     validateWorkBlob(selected.workload.input as Blob);
   } else if (selected.action === 'challenge.bytes.repeat') {

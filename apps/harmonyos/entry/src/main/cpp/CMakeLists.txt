@@ -12,3 +12,9 @@ target_link_libraries(amita_screenshare PUBLIC
     libnative_display_manager.so
     libpixelmap.so
     libimage_packer.so)
+
+# Workspace implementation pinned to harmony-agent-kernel e889325.
+add_library(harmony_agent_workspace SHARED kernel/workspace.cpp kernel/workspace_napi.cpp)
+target_include_directories(harmony_agent_workspace PRIVATE kernel/include)
+target_compile_features(harmony_agent_workspace PRIVATE cxx_std_17)
+target_link_libraries(harmony_agent_workspace PRIVATE libace_napi.z.so)

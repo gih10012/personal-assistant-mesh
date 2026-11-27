@@ -4,6 +4,7 @@
   "main": "",
   "description": "Native phone node",
   "dependencies": {
-    "libamita_screenshare.so": "file:./src/main/cpp/types/libamita_screenshare"
+    "libamita_screenshare.so": "file:./src/main/cpp/types/libamita_screenshare",
+    "libharmony_agent_workspace.so": "file:./src/main/cpp/types/libharmony_agent_workspace"
   }
 }

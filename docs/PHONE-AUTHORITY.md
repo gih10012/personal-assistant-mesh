@@ -63,6 +63,30 @@ python3 -m assistant_mesh.cli --config /PRIVATE/worker.json notify-phone --reque
 python3 -m assistant_mesh.cli --config /PRIVATE/worker.json notify-phone-status --request-id ORIGINAL_ID
 ```
 
+## App-owned agent workspace
+
+The workspace adapter uses the original enrolled phone and session. In the
+owner-only directory beside `authority.json`, write `workspace-owner.json`
+with `format: amita-phone-workspace/1`, the original `node_id`, and original
+primary `session_id`. The original ready hook loads this binding and registers
+`<node_id>:workspace-files-v1`. A verified phone connection and a current
+announcement of that capability make it available.
+
+The owner binds the capability to the existing managed resource pool and
+authorizes the original caller and relative path. The Worker obtains a current
+observation through `POST /v1/phone/workspace/observation` using `task_id`,
+`task_epoch`, and the exact capability selection. Its matching `scope` has
+`task_id`, `task_epoch`, and `path`. Use `file.read.workspace` with workload
+`path` and `max_bytes` up to 65536. Use `file.write.workspace` with workload
+`path` and an `input` blob up to 4096 bytes. These are the current inline
+allocation limits. The app uses `filesDir/agent-workspace`. The native module
+validates relative paths and commits regular file writes atomically.
+
+Observe, reserve, accept, start, and settle all use the original task and
+operation identity. Removing the owner binding stops admission. A missing
+write result remains on the original operation for reconciliation. The kernel
+source is pinned to `e889325` in [harmony-agent-kernel](https://github.com/gih10012/harmony-agent-kernel).
+
 ## Real enrollment window
 
 1. The phone generates and preserves its own real node_id. Bind a real original

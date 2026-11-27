@@ -59,6 +59,7 @@ export class WorkClient implements WorkHost {
   private state: WorkStatus = new WorkStatus();
   private context: common.Context;
   private runtimeChecked: number = 0;
+  private workspaceChecked: number = 0;
 
   constructor(context: common.UIAbilityContext, native: NativeServices, notify: (status: string) => void) {
     this.context = context;
@@ -154,6 +155,7 @@ export class WorkClient implements WorkHost {
     await this.tick();
   }
   setForeground(value: boolean): void {
+    if (value !== this.foreground) { this.workspaceChecked = 0; }
     this.foreground = value; this.native.setForeground(value);
     if (!value) { this.state.connection = 'suspended'; }
     this.publish(); this.tick();
@@ -189,6 +191,16 @@ export class WorkClient implements WorkHost {
     this.state.presence_expires_at = response.session.network.expires_at;
     this.state.connection = response.session.network.state;
   }
+  private async refreshWorkspace(config: WorkConfig): Promise<void> {
+    this.workspaceChecked = Date.now();
+    try {
+      const response = await this.exchange('mesh_phone_workspace_status', { session_id: config.session_id });
+      const policy = response.workspace;
+      this.native.setWorkspaceEnabled(response.format === 'mesh-interactive-node/1' && response.mesh_id === config.mesh_id &&
+        policy !== undefined && policy.format === 'amita-phone-workspace/1' && policy.enabled === true &&
+        policy.capability_id === config.node_id + ':workspace-files-v1' && policy.epoch === 1);
+    } catch (_) { this.native.setWorkspaceEnabled(false); }
+  }
   async tick(): Promise<void> {
     if (this.busy || this.engine === null || this.engine.snapshot.config === null) { return; }
     this.busy = true;
@@ -211,6 +223,9 @@ export class WorkClient implements WorkHost {
         if (this.connected || engine.snapshot.pending_control !== null) { this.observe(await engine.control(false, [])); }
         this.connected = false; this.state.connection = 'suspended'; return;
       }
+      if (Date.now() - this.workspaceChecked >= 30000) {
+        await this.refreshWorkspace(engine.snapshot.config as WorkConfig);
+      }
       const capabilities: string[] = this.native.workCapabilities();
       this.observe(this.connected ? await engine.control(true, capabilities) : await engine.connect(capabilities));
       this.connected = true; this.announced = capabilities.join('|');
@@ -232,6 +247,7 @@ export class WorkClient implements WorkHost {
       this.state.error = '';
     } catch (error) {
       this.connected = false; this.state.connection = this.foreground ? 'unreachable' : 'suspended';
+      this.native.setWorkspaceEnabled(false); this.workspaceChecked = 0;
       this.state.error = 'mesh_work_connection_or_receipt_unconfirmed';
     } finally {
       this.busy = false; this.publish();

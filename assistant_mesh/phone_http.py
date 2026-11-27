@@ -88,8 +88,14 @@ def start(api, config_path, *, origin, port, relays=(), updates=None,
     service = PhoneAuthority(api, config_path, relays=relays, updates=updates)
     previous = api.dispatch
     from .phone_push import ROUTE as PUSH_ROUTE
+    from .phone_workspace import OBSERVATION as WORKSPACE_OBSERVATION, VERIFIER as WORKSPACE_VERIFIER
 
     def dispatch(method, path, payload, peer):
+        if path.split('?', 1)[0] == WORKSPACE_OBSERVATION:
+            if method != 'POST' or path != WORKSPACE_OBSERVATION or peer.get('role') != 'worker':
+                raise PermissionError('phone_workspace_observation_not_authorized')
+            from .phone_screen_share_reader import _actor
+            return service.workspace.observe(_actor(peer), payload)
         if path.split('?', 1)[0] in (PUSH_ROUTE, PUSH_ROUTE + '/status'):
             return service.owner_push.dispatch(method, path, payload, peer)
         if path.split('?', 1)[0] == '/v1/phone/result':
@@ -108,6 +114,7 @@ def start(api, config_path, *, origin, port, relays=(), updates=None,
         install_dispatch(api, service, origin)
         from .phone_screen_share_reader import install_dispatch as install_screen_reader
         install_screen_reader(api, service)
+        api.resources.trusted_verifiers = frozenset(api.resources.trusted_verifiers) | {WORKSPACE_VERIFIER}
         from .worker_claim_receipts import install_dispatch as install_claims
         install_claims(api)
         from .claw_delivery import install_on_original_channel

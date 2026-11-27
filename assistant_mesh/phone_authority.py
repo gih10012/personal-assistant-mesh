@@ -111,10 +111,13 @@ class PhoneAuthority:
             self.relays.append((EnrollmentRelay(bootstrap, path, live_task_validator=gate,
                                                  clock=self.store.clock), gate))
         self.installed = self._config()
+        from .phone_workspace import PhoneWorkspace
+        self.workspace = PhoneWorkspace(self)
         self._install_bindings(self.installed)
         self.control = PhoneControl(self)
         for node in self.installed['nodes']:
             self.control.install(node)
+            self.workspace.install(node)
         self.screen_share = PhoneScreenShare(self)
         from .phone_push import OwnerPush
         self.owner_push = OwnerPush(self)
@@ -209,7 +212,7 @@ class PhoneAuthority:
             self.validate_policy(subject, node['session_id'], node['capabilities'], node.get('visible_nodes', {}),
                                  observe=installed_before and subject not in old_nodes)
             binding = {'session_id': node['session_id'], 'node_id': node['node_id']}
-            policy = {'capabilities': sorted(set(node['capabilities'])),
+            policy = {'capabilities': sorted(set(self.workspace.capabilities(node, installed=True))),
                       'visible_nodes': {k: v['display_name'] for k, v in node.get('visible_nodes', {}).items()},
                       'execute_own_requests': False}
             if subject in subjects and (not installed_before or subject not in old_nodes or
@@ -399,6 +402,10 @@ class PhoneAuthority:
         from .phone_push import BIND as PUSH_BIND, STATUS as PUSH_STATUS
         if envelope['action'] in (PUSH_BIND, PUSH_STATUS):
             return self.owner_push.phone_request(node, envelope['action'], envelope['arguments'])
+        from .phone_workspace import STATUS as WORKSPACE_STATUS
+        if envelope['action'] == WORKSPACE_STATUS:
+            return {'format': FORMAT, 'mesh_id': self.sessions.mesh_id,
+                    'workspace': self.workspace.read_status(node, envelope['arguments'])}
         if isinstance(envelope['action'], str) and envelope['action'].startswith('mesh_chat_'):
             from .phone_chat import PhoneChat, ACTIONS
             if envelope['action'] not in ACTIONS:
@@ -420,6 +427,12 @@ class PhoneAuthority:
         if action is None or not isinstance(value, dict):
             raise PermissionError('phone_session_binding_required')
         node = self.control.select(node, value.get('session_id'))
+        if not node.get('_control_service'):
+            original = node
+            node = dict(node, capabilities=self.workspace.capabilities(original, installed=True))
+            if action in ('connect', 'node_update') and set(value.get('capabilities', [])) - set(
+                    self.workspace.capabilities(original)):
+                raise PermissionError('phone_session_capability_scope_required')
         with self.lock:
             if action in ('connect', 'node_update', 'discover'):
                 if node.get('_control_service'):
@@ -436,6 +449,7 @@ class PhoneAuthority:
                 result = self.sessions.request(self._binding(node), action, value)
                 if action in ('connect', 'node_update'):
                     self._capability_presence(node)
+                    self.workspace.presence(node)
                 if action == 'discover':
                     visible = {self.sessions._public_node_id(k): v for k, v in node.get('visible_nodes', {}).items()}
                     for item in result['nodes']:
@@ -459,14 +473,13 @@ class PhoneAuthority:
                     for dispatch in pending['dispatch']:
                         if dispatch['capability_id'] not in caps:
                             continue
-                        if node.get('_control_service'):
-                            try:
-                                self._validate_control_dispatch(db, node, dispatch['operation_id'], dispatch['capability_id'])
-                            except (ValueError, PermissionError):
-                                rejected.append({'operation_id': dispatch['operation_id'],
-                                                 'capability_id': dispatch['capability_id'],
-                                                 'reason': 'installed_control_contract_required'})
-                                continue
+                        try:
+                            self._validate_installed_dispatch(db, node, dispatch['operation_id'], dispatch['capability_id'])
+                        except (ValueError, PermissionError):
+                            rejected.append({'operation_id': dispatch['operation_id'],
+                                             'capability_id': dispatch['capability_id'],
+                                             'reason': 'installed_control_contract_required'})
+                            continue
                         eligible.append(dispatch)
                 return {'format': FORMAT, 'mesh_id': self.sessions.mesh_id, 'work': None,
                         'pull_id': value['pull_id'], 'dispatch': eligible,
@@ -530,6 +543,14 @@ class PhoneAuthority:
         self.control.validate_selection(node, selection, db=db, actor=allocation['actor'],
                                         task_id=allocation['task_id'], task_epoch=allocation['task_epoch'])
 
+    def _validate_installed_dispatch(self, db, node, operation_id, capability_id):
+        if node.get('_control_service'):
+            self._validate_control_dispatch(db, node, operation_id, capability_id)
+        elif capability_id == self.workspace.identity(node):
+            allocation = self.api.allocations._allocation(db, operation_id)
+            selection = next(s for s in json.loads(allocation['plan'])['selections'] if s['capability_id'] == capability_id)
+            self.workspace.validate_dispatch(db, node, allocation, selection)
+
     def _provider(self, node, provider):
         if not isinstance(provider, dict) or set(provider) != {'action', 'arguments'}:
             raise ValueError('invalid_phone_provider')
@@ -547,8 +568,7 @@ class PhoneAuthority:
             raise PermissionError('phone_session_capability_scope_required')
         def admission(db):
             self._presence(db, node, live=True, capability=args['capability_id'])
-            if node.get('_control_service'):
-                self._validate_control_dispatch(db, node, args['operation_id'], args['capability_id'])
+            self._validate_installed_dispatch(db, node, args['operation_id'], args['capability_id'])
         # An allocation may have multiple providers: never expose another
         # provider's operation through an arbitrary capability ID.
         with self.store.transaction() as db:
