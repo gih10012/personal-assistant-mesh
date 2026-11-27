@@ -141,11 +141,26 @@ A real risk test initially reproduced **two200 responses** for two concurrent
 exchanges of the same authorization code: the component's FileTree `get/delete`
 is not atomic. The adapter now serializes the **unchanged full `/token`
 handler**, including SDK code/PKCE/refresh checks, in this one process; the same
-test then permits only one success. This is not new token logic or a distributed
-lock. Do not run multiple workers/active instances over these files. A future
-distributed deployment needs an independently reviewed atomic backend/strategy;
-do not claim Redis alone magically makes a `get/delete` sequence atomic.
-This limitation does not weaken the separate actual Ingress task transaction.
+test then permits only one success. The ASGI lifespan takes an exclusive local
+lock on the state directory before the SDK can serve requests. A second updated
+instance on the same directory fails startup. Shutdown holds the lock until
+admitted HTTP and SDK operations drain.
+
+### Controlled retirement of an original OAuth writer
+
+The local owner backup controller can retire a closed source with
+`scripts/oauth_owner_backup.py --control-config PATH retire --operation-id ID
+--instance-id INSTANCE`. Use the IDs of the original committed backup, and
+keep its exact bundle. Retirement requires the original live drain lease,
+matching state bytes and service-key references. It publishes a durable
+receipt in the source state directory. The original status or a retry of the
+same retirement returns that receipt. A source restart using that directory
+keeps OAuth admission closed, including when it starts without backup control.
+
+Retirement closes the updated local source. Cross-node exclusion still requires
+covering older launch paths and confirming the OAuth role's authority before
+serving from the staged target. The retirement operation never activates the
+target or moves the public route.
 
 ## Evidence and next real acceptance
 

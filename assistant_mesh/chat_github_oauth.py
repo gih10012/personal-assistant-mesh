@@ -361,11 +361,12 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
-        async with resource_app.router.lifespan_context(resource_app):
+        async with migration.writer_session():
             if backup is not None:
                 await backup.start()
             try:
-                yield
+                async with resource_app.router.lifespan_context(resource_app):
+                    yield
             finally:
                 if backup is not None:
                     await backup.close()

@@ -165,7 +165,8 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         client = OAuthClientInformationFull(client_id=CLIENT, redirect_uris=[CALLBACK],
             grant_types=['authorization_code', 'refresh_token'], token_endpoint_auth_method='none',
             application_type='native', scope='tasks:read tasks:submit')
-        await self.provider.register_client(client)
+        async with self.app.oauth_migration.writer_session():
+            await self.provider.register_client(client)
 
     async def asyncTearDown(self):
         await self.stack.aclose()
@@ -310,14 +311,14 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         self.assertIn(wrong.status_code, (400, 401), wrong.text)
         self.assertEqual('invalid_grant', wrong.json()['error'])
 
-    @component_lifespan
     async def test_restart_reuses_encrypted_state_and_real_signed_token_not_ephemeral_keys(self):
-        tokens = await self.tokens()
+        async with self.app.router.lifespan_context(self.app):
+            tokens = await self.tokens()
         provider, server, app = self.make_app()
         client = await self.stack.enter_async_context(self.real_client(
             transport=httpx2.ASGITransport(app=app), base_url=ORIGIN))
-        self.assertIsNotNone(await provider.get_client(CLIENT))
         async with app.router.lifespan_context(app):
+            self.assertIsNotNone(await provider.get_client(CLIENT))
             result = await self.rpc(tokens['access_token'], 'tools/list', http=client)
         self.assertEqual(200, result.status_code, result.text)
         raw = b'\n'.join(path.read_bytes() for path in Path(self.config['state']['directory']).rglob('*') if path.is_file())
@@ -330,7 +331,7 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
         self.refresh_expired = True
         response = await self.http.post('/token', data={'grant_type': 'refresh_token', 'client_id': CLIENT,
             'refresh_token': tokens['refresh_token'], 'scope': 'tasks:read', 'resource': ORIGIN + '/mcp'})
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(401, response.status_code)  # Pinned FastMCP handler maps invalid_grant to 401.
         self.assertEqual('invalid_grant', response.json()['error'])
         self.assertNotIn('private upstream error', response.text)
 
@@ -460,7 +461,6 @@ class ActualOAuthTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittest.Tes
             'refresh_token': refresh, 'scope': 'tasks:read', 'resource': 'https://foreign.test/mcp'})
         self.assertEqual(400, rejected.status_code)
 
-    @component_lifespan
     async def test_pinned_cimd_document_uses_actual_component_flow_without_dcr_or_github_scope(self):
         self.oauth_client_id = 'https://chatgpt.com/oauth/client.json'
         self.redirect_uri = 'https://chatgpt.com/connector_platform_oauth_redirect'

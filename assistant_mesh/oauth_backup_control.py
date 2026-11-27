@@ -14,12 +14,16 @@ import re
 import socket
 import stat
 import struct
+import tempfile
 import time
 
-from .oauth_state_bundle import canonical, decode, export_bundle, safe_path, sha, _read, _sync_tree, _write
+from .oauth_state_boundary import RETIREMENT_MARKER
+from .oauth_state_bundle import (canonical, decode, export_bundle, key_references, safe_path, sha, verify_bundle,
+                                 _read, _scan, _sync_tree, _write)
 
 
 PROTOCOL = 'mesh-oauth-owner-backup/1'
+RETIREMENT = 'amita-oauth-source-retirement/1'
 MAX_REQUEST = 4096
 
 
@@ -171,6 +175,15 @@ class OwnerBackupControl:
                 result.update(read_record(directory / name))
         if result['state'] in ('backup_pending', 'resume_pending') and operation != self.active:
             result.update(state='interrupted_original_instance_closed', source_admission='closed')
+        if self.boundary.retired:
+            retirement = read_record(self.boundary.state_root / RETIREMENT_MARKER)
+            checksum = sha(canonical({k: v for k, v in retirement.items() if k != 'sha256'}).encode())
+            if retirement.get('format') != RETIREMENT or retirement.get('sha256') != checksum:
+                raise ValueError('oauth_writer_retirement_record_invalid')
+            if (retirement.get('operation_id'), retirement.get('instance_id')) == (operation, instance):
+                if retirement.get('bundle_sha256') != result.get('bundle_sha256'):
+                    raise ValueError('oauth_writer_retirement_backup_conflict')
+                result.update(state='writer_retired', source_admission='closed', retirement=retirement)
         result['current_instance_id'] = self.boundary.identity
         result['current_source_phase'] = self.boundary.phase
         return result
@@ -180,15 +193,22 @@ class OwnerBackupControl:
             raise ValueError('oauth_backup_protocol_required')
         if request == {'protocol': PROTOCOL, 'action': 'info'}:
             return {'protocol': PROTOCOL, 'instance_id': self.boundary.identity, 'source_phase': self.boundary.phase,
-                    'restart_closed': self.restart_closed, 'purpose': 'backup_not_handoff', 'activation_authorized': False}
+                    'restart_closed': self.restart_closed, 'source_retired': self.boundary.retired,
+                    'purpose': 'backup_not_handoff', 'activation_authorized': False}
         if set(request) != {'protocol', 'action', 'operation_id', 'instance_id'}:
             raise ValueError('oauth_backup_exact_request_fields_required')
         action, operation, instance = request['action'], identity(request['operation_id']), identity(request['instance_id'])
-        if action not in ('backup', 'status', 'resume'):
+        if action not in ('backup', 'status', 'resume', 'retire'):
             raise ValueError('oauth_backup_action_not_authorized')
         directory = self.operations / operation
         if action == 'status':
             return self.status(operation, instance)
+        if self.boundary.retired:
+            if action == 'retire':
+                original = self.status(operation, instance)
+                if original['state'] == 'writer_retired':
+                    return original
+            raise ValueError('oauth_writer_retired')
         if instance != self.boundary.identity or self.restart_closed:
             raise ValueError('oauth_backup_original_live_instance_required')
         if action == 'backup':
@@ -210,10 +230,10 @@ class OwnerBackupControl:
             task = asyncio.create_task(self._backup(operation))
             self.tasks.add(task); task.add_done_callback(self.tasks.discard)
             return dict(intent, source_admission='closing')
-        # Resume is explicit, only after a durably committed backup and on the
-        # same actual instance/opaque lease. No caller-supplied proof is read.
+        # Both transitions require the original durably committed backup and
+        # opaque lease. The caller can supply neither evidence nor paths.
         current = self.status(operation, instance)
-        if current['state'] == 'source_resumed_backup_only':
+        if action == 'resume' and current['state'] == 'source_resumed_backup_only':
             return current
         if (current['state'] != 'backup_committed_source_closed' or operation not in self.leases
                 or self.active is not None or not self.closed.exists()):
@@ -222,9 +242,11 @@ class OwnerBackupControl:
         capture = read_record(directory / 'result.json')
         # Verify the committed bundle's exact canonical self hash and original
         # inactive semantics; this cannot authorize activating any target.
-        from .oauth_state_bundle import verify_bundle
-        verify_bundle(directory / 'bundle' / 'oauth-state-bundle.json', self.document,
-                      expected_sha256=capture['bundle_sha256'], allow_loopback_for_tests=self.allow_loopback)
+        bundle, _, _ = verify_bundle(directory / 'bundle' / 'oauth-state-bundle.json', self.document,
+                                     expected_sha256=capture['bundle_sha256'], allow_loopback_for_tests=self.allow_loopback)
+        if action == 'retire':
+            self._retire(operation, instance, lease, bundle)
+            return self.status(operation, instance)
         record(directory / 'resume-intent.json', {'state': 'resume_pending', 'instance_id': instance})
         try:
             await self.boundary.resume_backup(lease)
@@ -239,6 +261,31 @@ class OwnerBackupControl:
                 record(self.closed, {'operation_id': operation, 'instance_id': instance, 'state': 'resume_failed_closed'})
             raise
         return self.status(operation, instance)
+
+    def _retire(self, operation, instance, lease, bundle):
+        root = self.boundary.state_root
+        lease.evidence(root, self.boundary.binding, key_references(self.document))
+        files, directories, _ = _scan(root)
+        tree_hash = sha(canonical({key: sha(raw) for key, raw in files.items()}).encode())
+        if directories != bundle['directories'] or tree_hash != bundle['source_stability']['tree_sha256']:
+            raise ValueError('oauth_writer_retirement_state_changed')
+        receipt = dict(format=RETIREMENT, operation_id=operation, instance_id=instance,
+                       bundle_sha256=bundle['sha256'], binding_sha256=bundle['binding_sha256'],
+                       tree_sha256=tree_hash, retired_at=time.time(), local_restart_closed=True,
+                       cross_node_writer_fenced=False, activation_authorized=False)
+        receipt['sha256'] = sha(canonical(receipt).encode())
+        # Publication is atomic and tied to this state directory, independent
+        # of the configured maintenance socket or later service command line.
+        with tempfile.NamedTemporaryFile(prefix='.oauth-retire-', suffix='.tmp', dir=root) as staged:
+            staged.write((canonical(receipt) + '\n').encode())
+            staged.flush(); os.fsync(staged.fileno())
+            os.link(staged.name, root / RETIREMENT_MARKER)
+        directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        self.leases.pop(operation, None)
 
     async def _backup(self, operation):
         directory = self.operations / operation

@@ -46,7 +46,7 @@ def request(config, action, operation=None, instance=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--control-config', required=True, help='existing private deployment-owned backup control JSON')
-    parser.add_argument('action', choices=('info', 'backup', 'status', 'resume'))
+    parser.add_argument('action', choices=('info', 'backup', 'status', 'resume', 'retire'))
     parser.add_argument('--operation-id')
     parser.add_argument('--instance-id')
     args = parser.parse_args(argv)

@@ -5,12 +5,15 @@ caller-provided stopped flag is accepted. Shielded operations remain tracked
 after cancellation/disconnect until their actual async I/O has finished.
 """
 import asyncio
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
+import fcntl
 import functools
 import hashlib
 import importlib
 from importlib.metadata import version
 import inspect
+import os
 from pathlib import Path
 import secrets
 
@@ -35,6 +38,7 @@ SDK_PINS = {
     'key_value.aio._utils.sanitize': 'd7ef9b290b7558285892569a1a3cac36caa9892b38be673c002ac07fdf2729ce',
 }
 STAGING_MARKER = '.mesh-oauth-staging-only'
+RETIREMENT_MARKER = '.mesh-oauth-writer-retired'
 
 
 class WriterFrozen(ValueError):
@@ -57,6 +61,7 @@ class FreezeLease:
     def evidence(self, state_root, bound, references):
         boundary = self._boundary
         if (boundary._lease is not self or boundary.phase != 'sealed' or boundary.http or boundary.ops
+                or not boundary.owns_writer()
                 or Path(state_root).absolute() != boundary.state_root
                 or bound != boundary.binding or references != boundary.key_references):
             raise ValueError('oauth_migration_live_freeze_lease_required')
@@ -64,7 +69,7 @@ class FreezeLease:
                 'asgi_active': 0, 'sdk_active': 0, 'completed_operations': boundary.completed,
                 'instrumented_async_methods': boundary.instrumented,
                 'provider_state': boundary.provider_evidence(),
-                'sdk_audit': boundary.audit, 'cross_process_writer_fenced': False,
+                'sdk_audit': boundary.audit, 'local_state_writer_lock_held': True, 'cross_process_writer_fenced': False,
                 'activation_authorized': False}
 
 
@@ -74,7 +79,7 @@ class MigrationBoundary:
         config, self.binding = binding(document, allow_loopback_for_tests)
         self._document = config
         self.state_root = Path(config['state']['directory']).absolute()
-        if (self.state_root / STAGING_MARKER).exists():
+        if os.path.lexists(self.state_root / STAGING_MARKER):
             raise ValueError('oauth_migration_staging_not_activated')
         self.audit = audit_sdk()
         self.key_references = key_references(config)
@@ -86,6 +91,61 @@ class MigrationBoundary:
         self._op_context = ContextVar('oauth_sdk_' + self.identity, default=None)
         self.instrumented = {}
         self._provider = None
+        self._writer_fd = self._writer_owner = None
+        self._release_pending = False
+
+    @property
+    def retired(self):
+        return os.path.lexists(self.state_root / RETIREMENT_MARKER)
+
+    def owns_writer(self):
+        if self._writer_fd is None or self._writer_owner != os.getpid():
+            return False
+        try:
+            return os.path.samestat(os.fstat(self._writer_fd), self.state_root.lstat())
+        except OSError:
+            return False
+
+    def _release_writer(self):
+        os.close(self._writer_fd)
+        self._writer_fd = self._writer_owner = None
+        self._release_pending = False
+
+    @asynccontextmanager
+    async def writer_session(self):
+        """Keep all cooperating processes off the same FileTree state."""
+        if self._writer_fd is not None:
+            raise ValueError('oauth_local_state_writer_already_owned')
+        descriptor = os.open(self.state_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(descriptor)
+            raise ValueError('oauth_local_state_writer_already_owned') from None
+        except BaseException:
+            os.close(descriptor)
+            raise
+        self._writer_fd, self._writer_owner = descriptor, os.getpid()
+        try:
+            if not self.owns_writer():
+                raise ValueError('oauth_local_state_writer_directory_changed')
+            if os.path.lexists(self.state_root / STAGING_MARKER):
+                raise ValueError('oauth_migration_staging_not_activated')
+            self.phase = 'sealed' if self.retired else 'open'
+            yield
+        finally:
+            # Do not let a replacement process start while a cancelled ASGI
+            # task still owns unfinished SDK writes in this live process.
+            async with self.condition:
+                self.phase = 'draining'
+                try:
+                    await self.condition.wait_for(lambda: not self.http and not self.ops)
+                finally:
+                    self.phase = 'sealed'
+                    self._lease = None
+                    self._release_pending = bool(self.http or self.ops)
+                    if not self._release_pending:
+                        self._release_writer()
 
     def bind_provider(self, provider):
         if self._provider is not None:
@@ -131,6 +191,8 @@ class MigrationBoundary:
         context = self._http_context if kind == 'http' else self._op_context
         owned = self.http if kind == 'http' else self.ops
         current = context.get()
+        if not self.owns_writer() or self.retired:
+            raise WriterFrozen('oauth_migration_writer_frozen')
         if kind != 'http' and current in self.ops and self.ops[current] is asyncio.current_task():
             return await function()  # Awaited nested calls stay inside this tracked operation.
         async with self.condition:
@@ -151,6 +213,8 @@ class MigrationBoundary:
                     async with self.condition:
                         owned.pop(identity, None)
                         self.completed += 1
+                        if self._release_pending and not self.http and not self.ops:
+                            self._release_writer()
                         self.condition.notify_all()
             task = asyncio.create_task(execute())
             owned[identity] = task
@@ -203,6 +267,8 @@ class MigrationBoundary:
     async def freeze(self, timeout=30):
         if not 0 < timeout <= 300:
             raise ValueError('oauth_migration_drain_timeout_invalid')
+        if not self.owns_writer() or self.retired:
+            raise ValueError('oauth_migration_active_local_writer_required')
         async with self.condition:
             if self.phase == 'open':
                 self.phase = 'draining'
@@ -222,6 +288,8 @@ class MigrationBoundary:
         """Trusted same-instance backup only; never a handoff/fencing receipt."""
         from .oauth_state_bundle import key_references
         async with self.condition:
+            if self.retired:
+                raise ValueError('oauth_writer_retired')
             if (not isinstance(lease, FreezeLease) or lease is not self._lease
                     or lease._boundary is not self):
                 raise ValueError('oauth_migration_live_freeze_lease_required')

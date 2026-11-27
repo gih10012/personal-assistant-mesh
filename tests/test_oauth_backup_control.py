@@ -102,6 +102,35 @@ class OwnerBackupControlTests(getattr(unittest, 'IsolatedAsyncioTestCase', unitt
             async with self.real_client(transport=original.httpx2.ASGITransport(app=restarted), base_url=original.ORIGIN) as http:
                 self.assertEqual(503, (await http.get('/.well-known/oauth-authorization-server')).status_code)
 
+    async def test_state_root_has_one_writer_and_retirement_survives_a_plain_restart(self):
+        _, _, other = original.ActualOAuthTests.make_app(self)
+        self.assertEqual(503, (await self.http.get('/.well-known/oauth-authorization-server')).status_code)
+        operation = 'synthetic-original-retirement'
+        async with self.app.router.lifespan_context(self.app):
+            with self.assertRaisesRegex(ValueError, 'local_state_writer_already_owned'):
+                async with other.router.lifespan_context(other):
+                    self.fail('same state admitted a second writer')
+            await self.tokens()
+            instance = (await self.cli('info'))['instance_id']
+            await self.cli('backup', operation, instance)
+            captured = await self.settled(operation, instance)
+            self.assertEqual('backup_committed_source_closed', captured['state'])
+            await self.wire({'protocol': PROTOCOL, 'action': 'retire', 'operation_id': operation,
+                             'instance_id': instance}, lost_ack=True)
+            retired = await self.cli('retire', operation, instance)
+            self.assertEqual('writer_retired', retired['state'])
+            self.assertEqual(captured['bundle_sha256'], retired['retirement']['bundle_sha256'])
+            self.assertFalse(retired['retirement']['activation_authorized'])
+            self.assertEqual('oauth_writer_retired', (await self.cli('resume', operation, instance))['error'])
+        async with other.router.lifespan_context(other):
+            async with self.real_client(transport=original.httpx2.ASGITransport(app=other), base_url=original.ORIGIN) as http:
+                self.assertEqual(503, (await http.get('/.well-known/oauth-authorization-server')).status_code)
+        _, _, restarted = self.make_app()
+        async with restarted.router.lifespan_context(restarted):
+            persisted = await self.cli('status', operation, instance)
+            self.assertEqual('writer_retired', persisted['state'])
+            self.assertEqual(retired['retirement'], persisted['retirement'])
+
     async def test_owner_auth_exact_fields_and_drain_timeout_keep_original_admission_closed(self):
         started, release = asyncio.Event(), asyncio.Event()
         async def stalled(scope, receive, send):

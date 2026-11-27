@@ -123,6 +123,7 @@ class OAuthStateBundleTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittes
             with self.assertRaisesRegex(ValueError, 'trusted_original_writer_fence'):
                 activate_staging(target, source_stopped=True, writer_fence={'verified': True})
 
+    @original.component_lifespan
     async def test_cancelled_asgi_and_detached_sdk_write_are_counted_until_real_io_finishes(self):
         boundary = self.app.oauth_migration
         filetree = self.provider._client_storage.key_value
@@ -169,6 +170,7 @@ class OAuthStateBundleTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittes
         self.assertIn(prefix + 'detached.json', exported['files'])
         self.assertNotIn(prefix + 'late.json', exported['files'])
 
+    @original.component_lifespan
     async def test_boolean_freeze_tampering_binding_key_and_existing_target_are_refused(self):
         with self.assertRaisesRegex(ValueError, 'observed_freeze_lease'):
             export_bundle(self.config, self.directory / 'caller-boolean', lease=True, allow_loopback_for_tests=True)
@@ -202,6 +204,7 @@ class OAuthStateBundleTests(getattr(unittest, 'IsolatedAsyncioTestCase', unittes
             export_bundle(self.config, self.directory / 'foreign-layout', lease=lease, allow_loopback_for_tests=True)
         self.assertFalse((self.directory / 'foreign-layout').exists())
 
+    @original.component_lifespan
     async def test_uncovered_memory_grants_replay_and_held_refresh_lock_cannot_claim_drain(self):
         import anyio
         boundary = self.app.oauth_migration
