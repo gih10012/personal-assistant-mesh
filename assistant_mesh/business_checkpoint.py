@@ -4,6 +4,8 @@ The caller supplies a position from its trusted authority chain. These reads
 cover the declared business ledger. Provider attestations, writer fencing and
 external dependency verification belong to the owner transfer protocol.
 """
+from __future__ import annotations
+
 import contextlib
 from dataclasses import dataclass
 import hashlib
@@ -44,6 +46,12 @@ class CheckpointWitness:
     position: CheckpointPosition
     typed_rows_sha256: str
     table_counts: tuple[tuple[str, int], ...]
+
+    def fields(self):
+        position = self.position
+        return dict(authority=position.authority, incarnation=position.incarnation,
+                    generation=position.generation, manifest_sha256=position.manifest_sha256,
+                    sealed_journal_head=position.head, typed_rows_sha256=self.typed_rows_sha256)
 
 
 @contextlib.contextmanager
@@ -164,7 +172,4 @@ def compare_checkpoints(source, replica):
         raise CheckpointMismatch('business_checkpoint_witness_position_conflict')
     if source.typed_rows_sha256 != replica.typed_rows_sha256 or source.table_counts != replica.table_counts:
         raise CheckpointMismatch('business_checkpoint_typed_rows_conflict')
-    position = source.position
-    return dict(authority=position.authority, incarnation=position.incarnation,
-                generation=position.generation, manifest_sha256=position.manifest_sha256,
-                sealed_journal_head=position.head, typed_rows_sha256=source.typed_rows_sha256)
+    return source.fields()

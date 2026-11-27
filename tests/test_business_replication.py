@@ -3,7 +3,9 @@ import contextlib
 import copy
 import io
 import json
+import shutil
 import sqlite3
+import subprocess
 from pathlib import Path
 import tempfile
 import types
@@ -74,26 +76,34 @@ class BusinessReplicationTests(unittest.TestCase):
         state = self.replica.state('source-authority', status['incarnation'])
         return self.journal.export(state['cursor'], status['incarnation'], status['generation'])
 
-    def test_recover_only_verified_rows_from_the_sealed_source(self):
-        from assistant_mesh.business_checkpoint import (
-            CheckpointMismatch, CheckpointPosition, compare_checkpoints, replica_checkpoint, source_checkpoint,
-        )
-        from assistant_mesh.business_recovery import main, prepare_recovery
+    def seal(self):
         from assistant_mesh.business_writer_seal import REQUEST, seal_writer
 
-        self.baseline()
+        status = self.journal.status()
+        return seal_writer(self.store.path, dict(format=REQUEST, operation_id='original-handoff',
+            source_holder='source', authority=status['authority'], incarnation=status['incarnation'],
+            generation=status['generation'], manifest_sha256=status['manifest']['sha256'],
+            meta_keys=status['manifest']['meta_keys']))
+
+    def template(self):
         template = Store(self.root / 'clean-schema.db', recover_inflight=False)
         with template.transaction() as db:
             db.execute('CREATE TABLE business_dependencies(parent TEXT NOT NULL,child TEXT NOT NULL,'
                        'receipt BLOB,revoked INTEGER,PRIMARY KEY(parent,child))')
             db.execute("INSERT INTO meta VALUES('owner_context','template secret')")
+        return template.path
+
+    def test_recover_only_verified_rows_from_the_sealed_source(self):
+        from assistant_mesh.business_checkpoint import (
+            CheckpointMismatch, CheckpointPosition, compare_checkpoints, replica_checkpoint, source_checkpoint,
+        )
+        from assistant_mesh.business_recovery import main, prepare_recovery
+
+        self.baseline()
+        template = self.template()
         with self.store.transaction() as db:
             db.execute("UPDATE tasks SET result='last admitted before seal' WHERE id='original'")
-        status = self.journal.status()
-        seal = seal_writer(self.store.path, dict(format=REQUEST, operation_id='original-handoff',
-            source_holder='source', authority=status['authority'], incarnation=status['incarnation'],
-            generation=status['generation'], manifest_sha256=status['manifest']['sha256'],
-            meta_keys=status['manifest']['meta_keys']))
+        seal = self.seal()
         position = CheckpointPosition(seal['authority'], seal['incarnation'], seal['generation'],
                                       seal['manifest_sha256'], seal['sealed_journal_head'])
         source = source_checkpoint(self.journal, position)
@@ -102,19 +112,19 @@ class BusinessReplicationTests(unittest.TestCase):
             sealed_journal_head=position.head, typed_rows_sha256=source.typed_rows_sha256)
         candidate = self.root / 'recovered.db'
         with self.assertRaisesRegex(CheckpointMismatch, 'position_conflict'):
-            prepare_recovery(self.replica.path, template.path, candidate, checkpoint)
+            prepare_recovery(self.replica.path, template, candidate, checkpoint)
         self.assertFalse(candidate.exists())
         self.replica.apply(self.changes(), position.authority)
         self.assertEqual(checkpoint, compare_checkpoints(source, replica_checkpoint(self.replica, position)))
         with self.assertRaisesRegex(CheckpointMismatch, 'typed_rows_conflict'):
-            prepare_recovery(self.replica.path, template.path, candidate, dict(checkpoint, typed_rows_sha256='0' * 64))
+            prepare_recovery(self.replica.path, template, candidate, dict(checkpoint, typed_rows_sha256='0' * 64))
         self.assertFalse(candidate.exists())
 
         checkpoint_file = self.root / 'sealed-checkpoint.json'
         checkpoint_file.write_text(canonical(checkpoint))
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(0, main(['--replica', str(self.replica.path), '--schema-template', template.path,
+            self.assertEqual(0, main(['--replica', str(self.replica.path), '--schema-template', template,
                                      '--checkpoint', str(checkpoint_file), '--destination', str(candidate)]))
         evidence = json.loads(output.getvalue())
         self.assertEqual(checkpoint, evidence['checkpoint'])
@@ -129,10 +139,53 @@ class BusinessReplicationTests(unittest.TestCase):
             self.assertEqual([('business_goal',)], db.execute('SELECT key FROM meta').fetchall())
             self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='outbox'").fetchone())
         with self.assertRaisesRegex(FileExistsError, 'destination_exists'):
-            prepare_recovery(self.replica.path, template.path, candidate, checkpoint)
+            prepare_recovery(self.replica.path, template, candidate, checkpoint)
         with self.assertRaisesRegex(sqlite3.IntegrityError, 'business_writer_sealed'):
             with self.store.transaction() as db:
                 db.execute("UPDATE tasks SET result='late source write' WHERE id='original'")
+
+    @unittest.skipUnless(shutil.which('ssh-keygen'), 'OpenSSH is required to sign writer handoffs')
+    def test_writer_proposal_requires_independent_matching_disk_witnesses(self):
+        from assistant_mesh.business_recovery import prepare_recovery
+        from assistant_mesh.business_writer_handoff import assemble_transfer, sign_source, sign_target
+
+        self.baseline()
+        seal = self.seal()
+        template = self.template()
+        plan = dict(operation_id='original-handoff', group='owner-smoke', scope='business-fixture',
+                    source_holder='source', next_owner='laptop',
+                    previous=dict(owner=None, epoch=0, head=dict(index=0, sha256='0' * 64)),
+                    external_dependencies_manifest_sha256=digest({'fixture': 'external dependency records'}),
+                    retained_effects_sha256=digest(self.unknown))
+        source_key, target_key = (self.root / name for name in ('source-key', 'target-key'))
+        for key in (source_key, target_key):
+            subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)], check=True, timeout=15)
+        source_pub, target_pub = (key.with_suffix('.pub') for key in (source_key, target_key))
+        with self.assertRaisesRegex(ValueError, 'original_operation_conflict'):
+            sign_source(dict(plan, operation_id='replacement'), self.store.path, source_key)
+        source = sign_source(plan, self.store.path, source_key)
+        checkpoint = source['body']['evidence']['checkpoint']
+        candidate = self.root / 'candidate.db'
+        prepare_recovery(self.replica.path, template, candidate, checkpoint)
+        target = sign_target(plan, source, source_pub, self.replica.path, template, candidate, target_key)
+        transfer = assemble_transfer(plan, source, target, source_pub, target_pub)
+        expected = transfer['checkpoint']
+        self.assertEqual(seal['sha256'], expected['source_seal_sha256'])
+        self.assertEqual(checkpoint, {k: expected[k] for k in checkpoint})
+        self.assertEqual(['laptop', 'source'], [entry['holder'] for entry in expected['holder_receipts']])
+        self.assertEqual(digest(expected), transfer['checkpoint_sha256'])
+        with self.assertRaisesRegex(ValueError, 'independent_holder_keys_required'):
+            assemble_transfer(plan, source, target, source_pub, source_pub)
+        with self.assertRaisesRegex(ValueError, 'witness_signature_failed'):
+            assemble_transfer(plan, source, target, target_pub, source_pub)
+        with self.assertRaisesRegex(ValueError, 'witness_plan_conflict'):
+            assemble_transfer(dict(plan, scope='other'), source, target, source_pub, target_pub)
+        candidate.chmod(0o600)
+        with contextlib.closing(sqlite3.connect(candidate)) as db, db:
+            db.execute("UPDATE tasks SET result='changed candidate' WHERE id='original'")
+        candidate.chmod(0o400)
+        with self.assertRaisesRegex(ValueError, 'typed_rows_conflict'):
+            sign_target(plan, source, source_pub, self.replica.path, template, candidate, target_key)
 
     def test_business_writes_and_changes_roll_back_together_and_replica_refuses_store(self):
         before = self.journal.status()['head']

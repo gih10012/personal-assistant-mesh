@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import sqlite3
 
+from .business_checkpoint import CheckpointPosition, _sqlite_rows, _typed_witness
 from .business_journal import (DEPENDENCIES, Journal, PREFIX, canonical, digest,
                                policy, quote, schema)
 
@@ -249,6 +250,26 @@ def inspect_writer(path):
         except (ValueError, TypeError, KeyError, sqlite3.Error) as error:
             result['coverage_issues'].append(str(error))
         return result
+    finally:
+        db.close()
+
+
+def sealed_checkpoint(path, operation_id, holder):
+    """Measure the final rows and validate the durable seal in one read snapshot."""
+    db = _connect(path, readonly=True)
+    try:
+        db.execute('BEGIN')
+        _need(_exists(db, STATE), 'required')
+        coverage = _coverage(db)
+        journal, state, manifest, description, _ = coverage
+        request, receipt = _read_seal(db, coverage)
+        _need(request['operation_id'] == operation_id and request['source_holder'] == holder,
+              'original_operation_conflict')
+        position = CheckpointPosition(state['authority'], state['incarnation'], state['generation'],
+                                      manifest['sha256'], description['head'])
+        witness = _typed_witness('source', position, manifest, lambda table, info: _sqlite_rows(
+            db, table, info, journal._filter(table, quote(table), db, manifest['meta_keys'])))
+        return witness.fields(), receipt['sha256']
     finally:
         db.close()
 

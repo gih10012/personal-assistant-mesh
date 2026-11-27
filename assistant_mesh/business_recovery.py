@@ -1,11 +1,13 @@
 """Prepare a private read-only recovery candidate from an exact business checkpoint."""
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import tempfile
 
 from .business_checkpoint import (CheckpointMismatch, CheckpointPosition, _read_snapshot,
@@ -39,11 +41,12 @@ def _schema_statements(template, tables):
 
 
 def _prepare(path, replica_path, template_path, position, expected_hash):
-    with (_replica_snapshot(replica_path, position) as (replica, manifest),
-          _read_snapshot(template_path) as template,
-          contextlib.closing(sqlite3.connect(path)) as target):
+    with _replica_snapshot(replica_path, position) as (replica, manifest), \
+            _read_snapshot(template_path) as template, \
+            contextlib.closing(sqlite3.connect(path)) as target:
         tables = manifest['tables']
         statements = _schema_statements(template, tables)
+        target.row_factory = sqlite3.Row
         target.execute('PRAGMA trusted_schema=OFF')
         target.execute('PRAGMA synchronous=FULL')
         with target:
@@ -55,15 +58,24 @@ def _prepare(path, replica_path, template_path, position, expected_hash):
                 parameters = ','.join('?' for _ in info['columns'])
                 target.executemany('INSERT INTO ' + quote(table) + '(' + columns + ') VALUES(' + parameters + ')',
                     ([uncell(value) for value in row] for _, row in _replica_rows(replica, position, table, info)))
-            if target.execute('PRAGMA foreign_key_check').fetchone() is not None:
-                raise CheckpointMismatch('business_recovery_foreign_key_conflict')
             # Re-read SQLite's own values to catch corruption, affinity changes,
             # dropped selected keys or missing rows in the exact input snapshot.
-            witness = _typed_witness('recovery', position, manifest,
-                lambda table, info: _sqlite_rows(target, table, info))
-            if witness.typed_rows_sha256 != expected_hash:
-                raise CheckpointMismatch('business_recovery_typed_rows_conflict')
-    return dict(table_counts=dict(witness.table_counts), schema_sql_sha256=digest(statements))
+            return _candidate_evidence(target, position, manifest, expected_hash, statements)
+
+
+def _candidate_evidence(db, position, manifest, expected_hash, expected_schema):
+    tables = manifest['tables']
+    objects = db.execute("SELECT type,name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'").fetchall()
+    if ({row[1] for row in objects if row[0] == 'table'} != set(tables)
+            or any(row[0] not in ('table', 'index') for row in objects)
+            or _schema_statements(db, tables) != expected_schema):
+        raise CheckpointMismatch('business_recovery_candidate_schema_conflict')
+    if db.execute('PRAGMA foreign_key_check').fetchone() is not None:
+        raise CheckpointMismatch('business_recovery_foreign_key_conflict')
+    witness = _typed_witness('recovery', position, manifest, lambda table, info: _sqlite_rows(db, table, info))
+    if witness.typed_rows_sha256 != expected_hash:
+        raise CheckpointMismatch('business_recovery_typed_rows_conflict')
+    return dict(table_counts=dict(witness.table_counts), schema_sql_sha256=digest(expected_schema))
 
 
 def prepare_recovery(replica_path, template_path, destination, sealed_checkpoint):
@@ -96,6 +108,31 @@ def prepare_recovery(replica_path, template_path, destination, sealed_checkpoint
             os.close(fd)
     return dict(format='amita-business-recovery-candidate/1', checkpoint=sealed_checkpoint,
                 **evidence, execution_authorized=False, ha_qualified=False)
+
+
+def inspect_recovery(replica_path, template_path, candidate, sealed_checkpoint):
+    """Recompute evidence from an existing candidate without opening a Store."""
+    position = _checkpoint(sealed_checkpoint)
+    candidate = Path(candidate)
+    info = candidate.lstat()
+    if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o400 or info.st_uid != os.getuid()
+            or any(os.path.lexists(str(candidate) + suffix) for suffix in ('-wal', '-shm', '-journal'))):
+        raise CheckpointMismatch('business_recovery_inactive_candidate_required')
+    with _replica_snapshot(replica_path, position) as (_, manifest), \
+            _read_snapshot(template_path) as template, _read_snapshot(candidate) as target:
+        target.execute('PRAGMA trusted_schema=OFF')
+        expected_schema = _schema_statements(template, manifest['tables'])
+        evidence = _candidate_evidence(target, position, manifest, sealed_checkpoint['typed_rows_sha256'],
+                                       expected_schema)
+    sha256 = hashlib.sha256()
+    with candidate.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            sha256.update(chunk)
+        checked = os.fstat(handle.fileno())
+    fingerprint = ('st_dev', 'st_ino', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+    if any(getattr(info, field) != getattr(checked, field) for field in fingerprint):
+        raise CheckpointMismatch('business_recovery_candidate_changed')
+    return dict(checkpoint=sealed_checkpoint, candidate_sha256=sha256.hexdigest(), **evidence)
 
 
 def main(argv=None):

@@ -110,12 +110,15 @@ peer outbox atomically. Reconstruction checks the complete retained applied
 log against the owner state and receipts before continuing. A missing row
 requires recovery of the original store. Existing snapshot limits apply.
 
-These commands commit control data. Private verification of the actual signed
-disk receipts and old writer seal, coverage of retained effects, and the
-business SQLite activation/fencing boundary belong to the subsequent handoff.
-A local read may lag the quorum. Business consumers must keep their original
-execution guards. All status responses continue to report `business_fencing:
-false` and `ha_qualified: false`.
+These commands commit control data. Assemble the proposal from signed disk
+witnesses using the workflow below. A local read may lag the quorum. Business
+consumers must keep their original execution guards. All status responses
+continue to report `business_fencing: false` and `ha_qualified: false`.
+
+The focused local acceptance uses `node --test owner-smoke.mjs` in the assembled
+candidate. In a source checkout set `AMITA_RAFT_ARTIFACT` to the original
+download directory. The test uses the pinned WASM, real local fsync/SQLite
+stores, authenticated management calls and an interrupted apply boundary.
 
 ### Prepare the target SQLite candidate
 
@@ -140,10 +143,34 @@ the SQL schema digest separately. Activation still requires the applied writer
 grant and verification of external dependencies, runtime configuration and
 retained effects. Keep this candidate outside configured authority paths.
 
-The focused local acceptance uses `node --test owner-smoke.mjs` in the assembled
-candidate. In a source checkout set `AMITA_RAFT_ARTIFACT` to the original
-download directory. The test uses the pinned WASM, real local fsync/SQLite
-stores, authenticated management calls and an interrupted apply boundary.
+### Bind the signed disk witnesses to the same transfer
+
+Keep a private plan JSON with the original `operation_id`, `group`, `scope`,
+`source_holder`, `next_owner`, `previous`, `external_dependencies_manifest_sha256`
+and `retained_effects_sha256`. Use the predecessor from the existing Raft owner
+state. Bind the separately verified dependency and effect documents by digest.
+Each holder signs on its own node with its pinned Ed25519 identity key. The
+operator installs the public keys through the trusted node configuration.
+
+1. Run `python3 -m assistant_mesh.business_writer_handoff source --plan plan.json
+   --database old.db --private-key SOURCE_KEY > source.json`. The source reads
+   the original seal and final typed rows in the same SQLite snapshot.
+2. Use `source.json`'s `body.evidence.checkpoint` to prepare the target database
+   as above. Run `python3 -m assistant_mesh.business_writer_handoff target
+   --plan plan.json --source source.json --source-public-key SOURCE_PUB
+   --replica passive.db --template empty-schema.db --candidate private/candidate.db
+   --private-key TARGET_KEY > target.json`. The target verifies the source
+   signature and rereads the candidate rows and schema before signing.
+3. Run `python3 -m assistant_mesh.business_writer_handoff assemble --plan plan.json
+   --source source.json --target target.json --source-public-key SOURCE_PUB
+   --target-public-key TARGET_PUB > proposal.json`. Keep both signed envelopes
+   with the original plan and proposal for later receipt reconciliation. Submit
+   the proposal through the existing owner command interface.
+
+The assembled proposal binds the two disk observations and external evidence
+references. Opening the target for writes still requires verifying the current
+applied Raft grant, the referenced external evidence and existing execution
+guards. A successful assembly leaves both database paths as they were.
 
 ## Candidate assembly
 
