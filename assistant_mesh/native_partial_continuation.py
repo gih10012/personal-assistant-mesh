@@ -493,6 +493,8 @@ def acceptance(store, payload, peer):
             db.execute('INSERT INTO session_chunks VALUES(?,?,?)', (artifact, part['part'], part['body']))
         resumed = dict(state)
         resumed.update(checkpoint)
+        if isolation.writer_handoff_held(resumed):
+            del resumed['writer_handoff']  # Original hold is retained in the accepted task snapshot.
         resumed['side_effect_started'] = False
         failure = resumed.get('runtime_failure')
         if isinstance(failure, dict):

@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 from assistant_mesh import native_partial_continuation as partial
+from assistant_mesh.business_writer_activation import _retain_attempts
 from assistant_mesh.rolling_runtime import LinuxProcess, RuntimeStore
 from assistant_mesh.server import API
 from assistant_mesh.store import Conflict
@@ -152,6 +153,41 @@ class NativePartialContinuationTests(unittest.TestCase):
         self.assertEqual(('completed', 1, self.payload['result']), (status['status'], status['epoch'], status['result']))
         self.assertIsNone(self.store.claim('fixture-node'))
         self.assertEqual(self.before_unrelated, self.row('tasks', 'id', 'unrelated-unknown'))
+
+    def test_writer_handoff_holds_expired_original_attempt_until_native_review(self):
+        self.checkpoint.pop('runtime_failure')
+        self.checkpoint['side_effect_started'] = False
+        prior = json.dumps(self.checkpoint)
+        original = self.claimed['id']
+        with self.store.transaction() as db:
+            db.execute("UPDATE tasks SET status='running',deadline=999,checkpoint=? WHERE id=?", (prior, original))
+            db.execute('UPDATE native_sessions SET state=? WHERE scope=?', (prior, self.before_task['scope']))
+            self.assertEqual(1, _retain_attempts(db, 'fixture-writer-transfer'))
+        retained = self.row('tasks', 'id', original)
+        hold = json.loads(retained['checkpoint'])['writer_handoff']
+        self.assertEqual(('needs_review', 'fixture-node', 1, None),
+                         (retained['status'], retained['node'], retained['epoch'], retained['deadline']))
+        self.assertEqual(('running', 999, hashlib.sha256(prior.encode()).hexdigest()),
+                         (hold['source_status'], hold['source_deadline'], hold['original_checkpoint_sha256']))
+        status = self.store.task_status(original)
+        self.assertEqual('writer_handoff_original_attempt', status['review_reason'])
+        self.store.heartbeat('target-node', ['agent'])
+        self.store.create_task('same native context', ['agent'], task_id='same-context',
+                               context={'session_scope': self.before_task['scope']})
+        self.store.create_task('independent work', ['agent'], task_id='independent',
+                               context={'session_scope': 'fixture:independent'})
+        self.assertEqual('independent', self.store.claim('target-node')['id'])
+        self.assertIsNone(self.store.claim('target-node', task_ids=[original, 'same-context']))
+        with self.assertRaisesRegex(Conflict, 'stale_task_lease'):
+            self.store.update_task(original, 'fixture-node', 1, result='late original callback')
+        self.payload = self.specification()
+        self.stage()
+        self.accept()
+        original_receipt = self.row('native_partial_acceptances', 'acceptance_id', self.payload['binding']['acceptance_id'])
+        self.assertEqual(retained, json.loads(original_receipt['before_task']))
+        resumed = self.store.claim('fixture-node', task_ids=[original])
+        self.assertEqual((original, 2, self.thread), (resumed['id'], resumed['epoch'], resumed['checkpoint']['thread_id']))
+        self.assertNotIn('writer_handoff', resumed['checkpoint'])
 
     def test_only_separate_maintenance_principal_may_inspect_upload_accept_or_read_receipt(self):
         for peer in ({'role': 'operator', 'reviewed': True}, {'role': 'worker', 'node': 'fixture-node'},

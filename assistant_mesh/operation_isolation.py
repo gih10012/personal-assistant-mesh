@@ -10,6 +10,7 @@ import json
 
 FORMAT = 'mesh-operation-isolation/1'
 TABLE = 'operation_isolation_grants'
+WRITER_HANDOFF_HOLD = 'amita-writer-handoff-hold/1'
 
 
 def _json(value):
@@ -50,11 +51,17 @@ def _goal_reserves(store, row):
             and (checkpoint.get('goal') or {}).get('status') == 'active'))
 
 
+def writer_handoff_held(checkpoint):
+    handoff = checkpoint.get('writer_handoff')
+    return isinstance(handoff, dict) and handoff.get('format') == WRITER_HANDOFF_HOLD
+
+
 def native_work_unsettled(checkpoint):
     """A missing effect marker is not proof that an attempted native call failed."""
     failure = checkpoint.get('runtime_failure') or {}
     return bool(checkpoint.get('side_effect_started')
-        or (failure.get('native_start_attempted') is True and failure.get('outcome') == 'unknown'))
+        or (failure.get('native_start_attempted') is True and failure.get('outcome') == 'unknown')
+        or writer_handoff_held(checkpoint))
 
 
 def _occupied(store, row):

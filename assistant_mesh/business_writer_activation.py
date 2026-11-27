@@ -14,6 +14,7 @@ from .business_writer_grant import confirm_grant
 from .business_writer_handoff import _read, assemble_transfer
 from .business_writer_seal import STATE as SEAL_STATE, _integer
 from .config import private_json
+from .operation_isolation import WRITER_HANDOFF_HOLD, native_work_unsettled, writer_handoff_held
 from .store import Store
 
 
@@ -25,7 +26,32 @@ def ledger_path(directory, proposal):
     return Path(directory).absolute() / ('writer-' + digest([proposal['group'], proposal['scope']]) + '.db')
 
 
-def _new_ledger(path, candidate, manifest, position, observed):
+def _retain_attempts(db, operation_id):
+    retained = 0
+    rows = db.execute("SELECT id,status,node,epoch,deadline,paused_status,paused_deadline,checkpoint FROM tasks "
+                      "WHERE status IN ('running','continuing','needs_review') "
+                      "OR (status='paused' AND paused_status IN ('running','continuing','needs_review'))").fetchall()
+    for row in rows:
+        checkpoint = json.loads(row['checkpoint'])
+        if row['status'] in ('paused', 'needs_review') and native_work_unsettled(checkpoint):
+            # This existing guard survives recovery already.
+            continue
+        if not writer_handoff_held(checkpoint):
+            checkpoint['writer_handoff'] = dict(format=WRITER_HANDOFF_HOLD, transfer_id=operation_id,
+                task_id=row['id'], source_epoch=row['epoch'], source_node=row['node'], source_status=row['status'],
+                source_deadline=row['deadline'], source_paused_status=row['paused_status'],
+                source_paused_deadline=row['paused_deadline'],
+                original_checkpoint_sha256=hashlib.sha256(row['checkpoint'].encode('utf8')).hexdigest())
+        # Neither an expired lease nor a copied heartbeat retires the old
+        # worker. Remove its local authority and keep the original attempt.
+        status = 'paused' if row['status'] == 'paused' else 'needs_review'
+        db.execute('UPDATE tasks SET status=?,deadline=NULL,checkpoint=? WHERE id=?',
+                   (status, canonical(checkpoint), row['id']))
+        retained += 1
+    return retained
+
+
+def _new_ledger(path, candidate, manifest, position, observed, operation_id):
     generation = position.generation + 1
     if not _integer(generation) or not _integer(position.head + 1):
         raise ValueError('business_writer_journal_range_exhausted')
@@ -57,10 +83,12 @@ def _new_ledger(path, candidate, manifest, position, observed):
                    (position.incarnation, generation, position.head))
         db.execute('UPDATE ' + PREFIX + 'retention SET retained_after=? WHERE singleton=1', (position.head,))
         db.execute('INSERT INTO sqlite_sequence(name,seq) VALUES(?,?)', (PREFIX + 'events', position.head))
+        retained = _retain_attempts(db, operation_id)
     with contextlib.closing(sqlite3.connect(path)) as db:
         db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
         if db.execute('PRAGMA journal_mode=DELETE').fetchone()[0] != 'delete':
             raise ValueError('business_writer_staging_wal_not_closed')
+    return retained
 
 
 def activate_ledger(plan, source, target, source_key, target_key, replica, template, candidate,
@@ -83,10 +111,11 @@ def activate_ledger(plan, source, target, source_key, target_key, replica, templ
         pass
     with tempfile.TemporaryDirectory(prefix='.amita-writer-', dir=path.parent) as stage:
         staged = Path(stage) / 'staged.db'
-        _new_ledger(staged, candidate, manifest, position, observed)
+        retained = _new_ledger(staged, candidate, manifest, position, observed, proposal['operation_id'])
         confirmation = confirm_grant(proposal, voters)
         proof = dict(format='amita-business-writer-activation/1', **confirmation,
                      original_position=checkpoint, scope='replicated_sqlite_ledger',
+                     retained_attempts=retained,
                      external_execution_authorized=False, ha_qualified=False)
         with contextlib.closing(sqlite3.connect(staged)) as db, db:
             db.execute('PRAGMA synchronous=FULL')

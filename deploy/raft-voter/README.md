@@ -192,6 +192,16 @@ head, and keeps the activation receipt in SQLite. `inspect --database PATH`
 recovers that receipt after an interrupted command response. The original
 operation's destination file is never replaced.
 
+Activation retains inherited running and continuing attempts for review,
+including attempts whose last checkpoint does not acknowledge a native effect.
+It preserves their task ID, execution epoch, source identity and checkpoint
+fields, and records the source checkpoint digest. A pre-existing owner pause
+persists. The existing task status route reports a handoff review reason. The
+original lease cannot write to the destination, and admission blocks reuse of
+the held native scope while independent work can proceed. The authenticated
+native review path can release a hold using original runtime closure and
+history. A task lacking enough original evidence remains held.
+
 Use this to activate the replicated ledger during a controlled handoff. It
 does not verify the semantics of external records or start native work, OAuth,
 channel delivery or the production service. Those runtimes need their existing

@@ -1138,6 +1138,8 @@ class Store:
                 raise ValueError('task_not_found')
             value = dict(row)
             checkpoint = json.loads(value.pop('checkpoint'))
+            if isolation.writer_handoff_held(checkpoint):
+                value['review_reason'] = 'writer_handoff_original_attempt'
             value['native'] = {k: checkpoint.get(k) for k in ('thread_id', 'turn_id', 'harness', 'mode', 'goal', 'plan')}
             value['interactions'] = [dict(q) for q in db.execute('SELECT id,kind,params FROM interactions WHERE task_id=? AND epoch=? AND answer IS NULL', (task_id, row['epoch']))]
             for question in value['interactions']:
