@@ -128,3 +128,62 @@ test('host fsynced exclusive admission blocks overlapping delivery; expired/disa
   assert.equal(hits, 1);
   assert.equal((await fs.stat(path.join(directory, frame.request_id + '.json'))).mode & 0o777, 0o600);
 });
+
+test('public OAuth preserves callback cookies and redirects through an explicit member handoff', async t => {
+  const route = {method: 'GET', path: '/auth/callback', member_id: 'fixture-member'};
+  const f = await fixture(t, {public_oauth: true, routes: [route]});
+  const member = {id: 'backup-member', token_sha256: await sha256('backup-token-fixture-'.repeat(3))};
+  const backup = {...f.socket, sent: [], attachment: {member: member.id, connection: 'b'.repeat(64),
+    token_hash: member.token_sha256}};
+  f.ctx.getWebSockets = tag => [f.socket, backup].filter(socket => socket.attachment.member === tag);
+  f.config.members.push(member);
+  assert.throws(() => policy(JSON.stringify({...f.config, routes: [...f.config.routes,
+    {method: 'POST', path: '/token', member_id: member.id}]})), /relay_oauth_single_active_member_required/);
+  f.env.RELAY_POLICY = JSON.stringify(f.config);
+  f.env.RELAY = {idFromName: name => name, get: () => f.relay};
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'amita-oauth-relay.'));
+  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  for (const name of ['primary', 'backup']) await fs.mkdir(path.join(dir, name));
+  const hits = [];
+  const server = http.createServer((request, response) => {
+    hits.push(request.url);
+    assert.equal(request.headers.host, 'relay.example.invalid');
+    assert.equal(request.headers['x-forwarded-proto'], 'https');
+    assert.equal(request.headers.cookie, 'private-consent=example');
+    response.writeHead(302, {'location': 'https://chatgpt.com/connector_platform_oauth_redirect?state=original',
+      'set-cookie': ['private-consent=; Max-Age=0; Secure', 'new-session=value; Secure; HttpOnly']});
+    response.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  for (const [socket, name] of [[f.socket, 'primary'], [backup, 'backup']]) {
+    const host = {state_directory: path.join(dir, name), upstream_origin: `http://127.0.0.1:${server.address().port}`,
+      upstream_host: 'relay.example.invalid', public_oauth: true, routes: [route]};
+    socket.send = async raw => {
+      const frame = JSON.parse(raw); socket.sent.push(frame);
+      const response = await execute(host, frame, socket.attachment.connection);
+      await f.relay.webSocketMessage(socket, JSON.stringify(response));
+    };
+  }
+  const callback = state => worker.fetch(new Request(f.env.PUBLIC_ORIGIN + '/auth/callback?code=private%2Bcode&state=' + state,
+    {headers: {cookie: 'private-consent=example', 'x-amita-relay-request-id': 'attacker-selected'}}), f.env);
+  const first = await callback('first');
+  assert.equal(first.status, 302);
+  assert.equal(first.headers.get('location'), 'https://chatgpt.com/connector_platform_oauth_redirect?state=original');
+  assert.equal(first.headers.getSetCookie().length, 2);
+  assert.notEqual(first.headers.get('x-amita-relay-request-id'), 'attacker-selected');
+  f.env.RELAY_POLICY = JSON.stringify({...f.config, routes: [{...route, member_id: member.id}]});
+  assert.equal((await callback('first')).status, 409);
+  assert.equal(backup.sent.length, 0);
+  assert.equal((await callback('second')).status, 302);
+  assert.equal(f.socket.sent.length, 1);
+  assert.equal(backup.sent.length, 1);
+  assert.deepEqual(hits, ['/auth/callback?code=private%2Bcode&state=first', '/auth/callback?code=private%2Bcode&state=second']);
+  const raw = await fs.readFile(path.join(dir, 'primary', f.socket.sent[0].request_id + '.json'), 'utf8');
+  for (const secret of ['private-consent', 'private%2Bcode', 'new-session', 'state=first']) {
+    assert(!raw.includes(secret));
+    assert(!JSON.stringify(f.relay.one('SELECT * FROM attempts WHERE id=?', f.socket.sent[0].request_id)).includes(secret));
+  }
+  const admin = await worker.fetch(new Request(f.env.PUBLIC_ORIGIN + '/_mesh/relay/bootstrap'), f.env);
+  assert.equal(admin.status, 401);
+});

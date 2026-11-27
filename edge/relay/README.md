@@ -12,19 +12,45 @@ five session-node tools at a stateless JSON `/mcp`. Their bytes, ordinary
 Authorization, MCP headers, original application status and WWW-Authenticate
 challenge pass unchanged. Host is a Root-pinned original resource host, never
 client input. Issuer/audience checks stay in the original application and are
-not loosened or rewritten. The only configurable public application routes are
-GET/POST/OPTIONS `/mcp` and the two exact OAuth protected-resource metadata GETs.
+not loosened or rewritten. The default private relay allows GET/POST/OPTIONS
+`/mcp` and the two exact OAuth protected-resource metadata GETs.
 `/v1/*`, management routes, `/token`, `/authorize`, registration, consent,
 callback and revocation are refused. Responses are bounded finite HTTP messages,
 not an indefinite SSE tunnel; the current gateway already uses JSON responses.
 
-**This release is not ordinary Chat migration.** Requests additionally require
+The default private relay additionally requires
 an independent `X-Amita-Relay-Access` admission token and retained
 `X-Amita-Relay-Request-Id`. Existing application OAuth Authorization is separate
 and still required by that application. Ordinary Chat does not automatically
-supply these new headers. Full issuer/client/consent/code/token/refresh/revoke
-state migration, public OAuth integration and plugin URL reconnection remain
-separate work. No personal account credentials are copied into this transport.
+supply these new headers. For an ordinary Chat connection, use the public
+OAuth ingress below with its matching gateway and writer authority. Personal
+account credentials stay in their original account runtime.
+
+## Public OAuth ingress
+
+The deployment may set `public_oauth: true` in the private Worker policy and
+matching host configuration. Explicitly allow the required MCP and OAuth
+routes from `OAUTH_ROUTES` and bind all of them to one current member. The host's
+`upstream_host` and the gateway's public issuer and resource settings must match
+the Worker origin. The host sets the fixed HTTPS scheme on its local hop. The
+original gateway validates clients, PKCE, consent, scopes, tokens and MCP calls.
+Public traffic reaches only these listed application routes. Member bootstrap
+and transport receipt queries still require their existing credentials.
+
+The public mode preserves the allowed authorization and callback query strings,
+browser cookies, separate Set-Cookie headers, redirects and security headers.
+Credentials, response bodies and query strings stay in memory. Transport
+receipts retain hashes and outcomes. The Worker allocates request IDs for
+ordinary clients and deduplicates exact repeats of single-use OAuth operations.
+Existing MCP applications retain their own business request IDs. A member
+switch affects subsequent requests only. An in-flight request remains bound
+to its original member, and an ambiguous response never triggers a new attempt.
+
+Changing the pinned member is a controlled deployment operation. Verify the
+new OAuth writer and its required backend bindings before changing all route
+bindings together. The `sslip.io` issuer can stay available as the original
+entry during qualification. Moving ordinary Chat to a different stable origin
+uses the approved callback configuration and reconnection for that origin.
 
 ## Root deployment contract
 

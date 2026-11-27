@@ -1,5 +1,11 @@
 # AMITA 当前实施计划
 
+2026-11-28 Chat 公网入口：Cloudflare Free 隔离候选已通过实际公网往返，经本机
+主动连出的 WSS 访问真实 OAuth 网关组件。无需附加转接头即可读取同源 OAuth
+元数据，未认证 MCP 请求收到该网关原始挑战。本机定向验证覆盖回调参数、Cookie、
+跳转和备用成员切换时保留原回执。候选使用合成配置，测试后已停止本机后端。生产
+插件地址、真实 GitHub 回调和旧 VPS 接入仍未切换。 [公网入口](../edge/relay/README.md#public-oauth-ingress)
+
 2026-11-27 三宿主写入权验收：同版电脑、VPS 和 Cloudflare Free 隔离节点提交
 账本写入权。停掉 VPS 测试 Leader 后，电脑与 Cloudflare 在 108.664 秒内从任期 1
 转入任期 2 并提交 OAuth 写入权，原账本授权保持。测试只用合成检查点，节点清理

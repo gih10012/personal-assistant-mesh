@@ -1,18 +1,23 @@
-import {PROTOCOL, MAX_REQUEST, MAX_RESPONSE, REQUEST_HEADERS, RESPONSE_HEADERS, identifier,
-  sha256, random, fromBase64, toBase64, headers, fingerprint, policy, boundedBody, exact} from './protocol.mjs';
+import {PROTOCOL, MAX_REQUEST, MAX_RESPONSE, REQUEST_HEADERS, RESPONSE_HEADERS, OAUTH_REQUEST_HEADERS,
+  OAUTH_RESPONSE_HEADERS, allowedQuery, responseCookies, identifier, sha256, random, fromBase64, toBase64,
+  headers, fingerprint, policy, boundedBody, exact} from './protocol.mjs';
 
 const json = (value, status = 200) => Response.json(value, {status, headers: {'cache-control': 'no-store'}});
 const failure = (error, status, outcome = 'not_attempted', request_id = null) => json({
   protocol: PROTOCOL, error, outcome, request_id, automatic_retry: false, retry_with_new_id: false}, status);
+const OAUTH_SINGLE_USE = new Set(['POST /token', 'POST /consent', 'GET /auth/callback', 'POST /revoke']);
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.origin !== env.PUBLIC_ORIGIN || url.search || url.hash || /%|\\/.test(url.pathname)) {
+    if (url.origin !== env.PUBLIC_ORIGIN || url.hash || /%|\\/.test(url.pathname)) {
       return failure('relay_exact_origin_and_path_required', 400);
     }
     try {
-      policy(env.RELAY_POLICY); // Missing private configuration always fails closed.
+      const config = policy(env.RELAY_POLICY); // Missing private configuration always fails closed.
+      if (!allowedQuery(request.method, url.pathname, url.search, config.public_oauth)) {
+        return failure('relay_exact_origin_and_path_required', 400);
+      }
       return await env.RELAY.get(env.RELAY.idFromName('authenticated-transport-v1')).fetch(request);
     } catch { return failure('relay_unavailable', 503, 'unknown'); }
   }
@@ -53,8 +58,18 @@ export class ReverseRelay {
   }
   async fetch(request) {
     const url = new URL(request.url); const config = policy(this.env.RELAY_POLICY);
+    if (!allowedQuery(request.method, url.pathname, url.search, config.public_oauth)) {
+      return failure('relay_exact_origin_and_path_required', 400);
+    }
     if (url.pathname === '/_mesh/relay/ticket' && request.method === 'POST') return this.ticket(request, config);
     if (url.pathname === '/_mesh/relay/connect' && request.method === 'GET') return this.connect(request, config);
+    const route = config.routes.find(item => item.method === request.method && item.path === url.pathname);
+    if (route && config.public_oauth) {
+      // OAuth and MCP identity remain the original application's decisions.
+      // Public callers cannot choose transport IDs, backends or control routes.
+      const original = await this.clientAuthorized(request, config);
+      return this.forward(request, route, config, original, url.search);
+    }
     if (!await this.clientAuthorized(request, config)) return failure('relay_admission_denied', 401);
     if (url.pathname === '/_mesh/relay/bootstrap' && request.method === 'GET') return json({
       protocol: PROTOCOL, oauth_migration_complete: false, automatic_authority_switch: false,
@@ -66,9 +81,8 @@ export class ReverseRelay {
       return found ? json({...found, protocol: PROTOCOL, automatic_retry: false,
         execution_verified: false, response_body_retained: false}) : failure('relay_receipt_not_found', 404);
     }
-    const route = config.routes.find(item => item.method === request.method && item.path === url.pathname);
     if (!route) return failure('relay_route_not_allowed', 404);
-    return this.forward(request, route, config);
+    return this.forward(request, route, config, true);
   }
   async ticket(request, config) {
     let input;
@@ -111,13 +125,18 @@ export class ReverseRelay {
     await this.ctx.storage.sync();
     return member;
   }
-  async forward(request, route, config) {
-    const id = request.headers.get('x-amita-relay-request-id');
-    if (!identifier(id)) return failure('relay_original_request_id_required', 400);
+  async forward(request, route, config, original, query) {
+    const oauth = query !== undefined;
+    let id = original ? request.headers.get('x-amita-relay-request-id') : null;
+    if (original && !identifier(id)) return failure('relay_original_request_id_required', 400);
     let raw, selected;
-    try { raw = await boundedBody(request, MAX_REQUEST); selected = headers(request.headers, REQUEST_HEADERS); }
+    try { raw = await boundedBody(request, MAX_REQUEST); selected = headers(request.headers, oauth ? OAUTH_REQUEST_HEADERS : REQUEST_HEADERS); }
     catch { return failure('relay_bounded_request_required', 413, 'not_attempted', id); }
-    const signature = await fingerprint(request.method, route.path, selected, raw);
+    const signature = await fingerprint(request.method, route.path, selected, raw, query);
+    // Guard exact repeats of the single-use OAuth operations at the transport
+    // as well. Ordinary MCP calls keep their existing application idempotency.
+    if (!original) id = OAUTH_SINGLE_USE.has(`${route.method} ${route.path}`)
+      ? 'oauth-' + signature : 'public-' + random();
     const known = this.one('SELECT fingerprint,state FROM attempts WHERE id=?', id);
     if (known) return failure(known.fingerprint === signature ? 'relay_reconcile_original' : 'relay_request_id_conflict',
       409, known.fingerprint === signature ? known.state : 'rejected', id);
@@ -134,10 +153,11 @@ export class ReverseRelay {
     await this.ctx.storage.sync();
     return new Promise(resolve => {
       const timer = setTimeout(() => this.unknown(id, 'relay_deadline_unknown'), config.timeout_ms);
-      this.pending.set(id, {resolve, timer});
+      this.pending.set(id, {resolve, timer, oauth});
       try { socket.send(JSON.stringify({type: 'request', protocol: PROTOCOL, request_id: id,
         connection_id: attachment.connection, fingerprint: signature, method: route.method, path: route.path,
-        headers: selected, body_base64: toBase64(raw), deadline_ms: deadline})); }
+        headers: selected, body_base64: toBase64(raw), deadline_ms: deadline,
+        ...(oauth ? {query} : {})})); }
       catch { this.unknown(id, 'relay_connection_unknown'); }
     });
   }
@@ -154,13 +174,20 @@ export class ReverseRelay {
       if (!config.members.some(member => member.id === attachment?.member && member.token_sha256 === attachment.token_hash)
           || typeof message !== 'string' || message.length > 800000) throw new Error('relay_frame_invalid');
       const frame = JSON.parse(message);
-      if (!exact(frame, ['type', 'protocol', 'connection_id', 'request_id', 'status', 'headers', 'body_base64', 'outcome'])
+      const fields = ['type', 'protocol', 'connection_id', 'request_id', 'status', 'headers', 'body_base64', 'outcome'];
+      const pending = this.pending.get(frame.request_id);
+      const oauth = Object.hasOwn(frame, 'set_cookies');
+      if (!exact(frame, oauth ? [...fields, 'set_cookies'] : fields) || (oauth && !config.public_oauth && !pending?.oauth)
+          || (oauth && pending && !pending.oauth)
+          || (!oauth && pending?.oauth && frame.outcome === 'responded')
           || frame.type !== 'response' || frame.protocol !== PROTOCOL || frame.connection_id !== attachment.connection
           || !identifier(frame.request_id) || !Number.isInteger(frame.status) || frame.status < 200 || frame.status > 599
           || !['responded', 'unknown', 'not_attempted'].includes(frame.outcome)) throw new Error('relay_frame_invalid');
       const attempt = this.one('SELECT member,connection,state,status,response_sha256 FROM attempts WHERE id=?', frame.request_id);
       if (!attempt || attempt.member !== attachment.member || attempt.connection !== attachment.connection) throw new Error('relay_frame_unowned');
-      const raw = fromBase64(frame.body_base64, MAX_RESPONSE); const selected = headers(frame.headers, RESPONSE_HEADERS);
+      const raw = fromBase64(frame.body_base64, MAX_RESPONSE);
+      const selected = headers(frame.headers, oauth ? OAUTH_RESPONSE_HEADERS : RESPONSE_HEADERS);
+      const cookies = oauth ? responseCookies(frame.set_cookies) : [];
       const bodyHash = await sha256(raw);
       if (attempt.state === 'completed') {
         if (frame.outcome !== 'responded' || attempt.status !== frame.status || attempt.response_sha256 !== bodyHash) {
@@ -171,11 +198,11 @@ export class ReverseRelay {
       this.sql.exec('UPDATE attempts SET state=?,status=?,response_sha256=? WHERE id=?',
         frame.outcome === 'responded' ? 'completed' : frame.outcome, frame.status, bodyHash, frame.request_id);
       await this.ctx.storage.sync();
-      const pending = this.pending.get(frame.request_id);
       if (pending) {
         clearTimeout(pending.timer); this.pending.delete(frame.request_id);
-        pending.resolve(new Response(raw.length ? raw : null, {status: frame.status,
-          headers: {...selected, 'x-amita-relay-request-id': frame.request_id, 'cache-control': 'no-store'}}));
+        const output = new Headers({...selected, 'x-amita-relay-request-id': frame.request_id, 'cache-control': 'no-store'});
+        for (const cookie of cookies) output.append('set-cookie', cookie);
+        pending.resolve(new Response(raw.length ? raw : null, {status: frame.status, headers: output}));
       }
     } catch { this.disconnect(socket); socket.close(1008, 'invalid transport response'); }
   }

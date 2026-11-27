@@ -9,6 +9,24 @@ export const RESPONSE_HEADERS = new Set(['content-type', 'www-authenticate', 'ca
   'access-control-allow-headers', 'access-control-expose-headers']);
 export const PUBLIC_ROUTES = new Set(['POST /mcp', 'GET /mcp', 'OPTIONS /mcp',
   'GET /.well-known/oauth-protected-resource', 'GET /.well-known/oauth-protected-resource/mcp']);
+export const OAUTH_ROUTES = new Set([...PUBLIC_ROUTES, 'GET /.well-known/oauth-authorization-server',
+  'GET /authorize', 'GET /consent', 'POST /consent', 'GET /auth/callback', 'POST /token', 'OPTIONS /token',
+  'POST /register', 'OPTIONS /register', 'POST /revoke', 'OPTIONS /revoke']);
+export const OAUTH_REQUEST_HEADERS = new Set([...REQUEST_HEADERS, 'cookie', 'access-control-request-method',
+  'access-control-request-headers']);
+export const OAUTH_RESPONSE_HEADERS = new Set([...RESPONSE_HEADERS, 'location', 'pragma', 'expires',
+  'access-control-allow-credentials', 'access-control-max-age', 'content-security-policy',
+  'content-security-policy-report-only', 'x-frame-options', 'x-content-type-options', 'referrer-policy',
+  'permissions-policy', 'cross-origin-resource-policy', 'strict-transport-security']);
+const QUERY_ROUTES = new Set(['GET /authorize', 'GET /consent', 'GET /auth/callback']);
+export const allowedQuery = (method, path, query, oauth) => query === '' || oauth === true &&
+  typeof query === 'string' && query.length <= 8192 && query.startsWith('?') && !/[\x00-\x20\x7f#]/.test(query) &&
+  QUERY_ROUTES.has(`${method} ${path}`);
+export function responseCookies(value) {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || /[\r\n\0]/.test(item)) ||
+      JSON.stringify(value).length > 16384) throw new Error('relay_cookies_invalid');
+  return value;
+}
 export const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(value);
 export const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -35,14 +53,17 @@ export function headers(value, allowed) {
   if (JSON.stringify(result).length > 16384) throw new Error('relay_headers_oversized');
   return Object.fromEntries(Object.entries(result).sort(([a], [b]) => a.localeCompare(b)));
 }
-export const fingerprint = (method, path, selectedHeaders, body) => sha256(JSON.stringify([
-  method, path, Object.entries(selectedHeaders).sort(([a], [b]) => a.localeCompare(b)), toBase64(body)]));
+export const fingerprint = (method, path, selectedHeaders, body, query) => sha256(JSON.stringify([
+  method, path, Object.entries(selectedHeaders).sort(([a], [b]) => a.localeCompare(b)), toBase64(body),
+  ...(query === undefined ? [] : [query])]));
 export function policy(raw) {
   const value = JSON.parse(raw);
   const hex = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+  const routes = value.public_oauth === true ? OAUTH_ROUTES : PUBLIC_ROUTES;
   if (value.format !== PROTOCOL || !hex(value.client_token_sha256) || !Array.isArray(value.members)
+      || (value.public_oauth !== undefined && typeof value.public_oauth !== 'boolean')
       || value.members.length < 1 || value.members.length > 8 || !Array.isArray(value.routes)
-      || value.routes.length < 1 || value.routes.length > PUBLIC_ROUTES.size) throw new Error('relay_policy_invalid');
+      || value.routes.length < 1 || value.routes.length > routes.size) throw new Error('relay_policy_invalid');
   const ids = new Set(), hashes = new Set([value.client_token_sha256]);
   for (const member of value.members) {
     if (!exact(member, ['id', 'token_sha256']) || !identifier(member.id) || !hex(member.token_sha256)
@@ -52,9 +73,12 @@ export function policy(raw) {
   const seen = new Set();
   for (const route of value.routes) {
     const key = `${route.method} ${route.path}`;
-    if (!exact(route, ['method', 'path', 'member_id']) || !PUBLIC_ROUTES.has(key)
+    if (!exact(route, ['method', 'path', 'member_id']) || !routes.has(key)
         || seen.has(key) || !ids.has(route.member_id)) throw new Error('relay_route_invalid');
     seen.add(key);
+  }
+  if (value.public_oauth && new Set(value.routes.map(route => route.member_id)).size !== 1) {
+    throw new Error('relay_oauth_single_active_member_required');
   }
   value.daily_limit ??= 2000;
   value.max_receipts ??= 100000;

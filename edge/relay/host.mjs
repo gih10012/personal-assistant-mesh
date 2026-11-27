@@ -5,7 +5,8 @@ import https from 'node:https';
 import {fileURLToPath} from 'node:url';
 import WebSocket from 'ws';
 import {HttpsProxyAgent} from 'https-proxy-agent';
-import {PROTOCOL, MAX_REQUEST, MAX_RESPONSE, PUBLIC_ROUTES, REQUEST_HEADERS, RESPONSE_HEADERS,
+import {PROTOCOL, MAX_REQUEST, MAX_RESPONSE, PUBLIC_ROUTES, OAUTH_ROUTES, REQUEST_HEADERS, RESPONSE_HEADERS,
+  OAUTH_REQUEST_HEADERS, OAUTH_RESPONSE_HEADERS, allowedQuery, responseCookies,
   identifier, random, sha256, fingerprint, fromBase64, toBase64, headers, exact} from './protocol.mjs';
 
 async function ancestors(filename) {
@@ -34,13 +35,16 @@ export async function saveReceipt(directory, id, value) {
 }
 export function validateHost(config) {
   const edge = new URL(config.edge_origin); const upstream = new URL(config.upstream_origin);
+  const routes = config.public_oauth === true ? OAUTH_ROUTES : PUBLIC_ROUTES;
   if (config.format !== PROTOCOL || !identifier(config.member_id) || edge.protocol !== 'https:'
       || edge.username || edge.password || edge.search || edge.hash || edge.pathname !== '/'
       || upstream.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(upstream.hostname)
       || upstream.username || upstream.password || upstream.search || upstream.hash || upstream.pathname !== '/'
       || !path.isAbsolute(config.token_file) || !path.isAbsolute(config.state_directory)
+      || (config.public_oauth !== undefined && typeof config.public_oauth !== 'boolean')
+      || (config.public_oauth && config.upstream_host !== edge.host)
       || !Array.isArray(config.routes) || !config.routes.length
-      || config.routes.some(route => !PUBLIC_ROUTES.has(`${route.method} ${route.path}`))
+      || config.routes.some(route => !routes.has(`${route.method} ${route.path}`))
       || typeof config.upstream_host !== 'string' || !/^[A-Za-z0-9.\[\]:-]{1,253}$/.test(config.upstream_host)) {
     throw new Error('relay_host_config_invalid');
   }
@@ -51,7 +55,7 @@ export function validateHost(config) {
   }
   return config;
 }
-function requestOnce(url, options, raw, maximum, timeout) {
+function requestOnce(url, options, raw, maximum, timeout, oauth = false) {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === 'https:' ? https : http).request(url, options, response => {
       const chunks = []; let length = 0;
@@ -62,7 +66,9 @@ function requestOnce(url, options, raw, maximum, timeout) {
       });
       response.on('end', () => {
         try { resolve({status: response.statusCode,
-          headers: headers(new Headers(Object.entries(response.headers).filter(([, value]) => typeof value === 'string')), RESPONSE_HEADERS),
+          headers: headers(new Headers(Object.entries(response.headers).filter(([, value]) => typeof value === 'string')),
+            oauth ? OAUTH_RESPONSE_HEADERS : RESPONSE_HEADERS),
+          ...(oauth ? {set_cookies: responseCookies(response.headers['set-cookie'] ?? [])} : {}),
           body: Buffer.concat(chunks)}); } catch (error) { reject(error); }
       });
       response.on('aborted', () => reject(new Error('relay_upstream_response_unknown')));
@@ -74,12 +80,17 @@ function requestOnce(url, options, raw, maximum, timeout) {
   });
 }
 export async function execute(config, frame, connection, perform = requestOnce) {
-  if (!exact(frame, ['type', 'protocol', 'connection_id', 'request_id', 'fingerprint', 'method', 'path', 'headers', 'body_base64', 'deadline_ms'])
+  const fields = ['type', 'protocol', 'connection_id', 'request_id', 'fingerprint', 'method', 'path', 'headers', 'body_base64', 'deadline_ms'];
+  const oauth = Object.hasOwn(frame, 'query');
+  if (!exact(frame, oauth ? [...fields, 'query'] : fields)
       || frame.type !== 'request' || frame.protocol !== PROTOCOL || frame.connection_id !== connection
       || !identifier(frame.request_id) || !Number.isSafeInteger(frame.deadline_ms)
+      || (oauth && (!config.public_oauth || !allowedQuery(frame.method, frame.path, frame.query, true)))
+      || (!oauth && config.public_oauth)
       || !config.routes.some(route => route.method === frame.method && route.path === frame.path)) throw new Error('relay_frame_not_authorized');
-  const raw = fromBase64(frame.body_base64, MAX_REQUEST); const selected = headers(frame.headers, REQUEST_HEADERS);
-  if (await fingerprint(frame.method, frame.path, selected, raw) !== frame.fingerprint) throw new Error('relay_request_fingerprint_conflict');
+  const raw = fromBase64(frame.body_base64, MAX_REQUEST);
+  const selected = headers(frame.headers, oauth ? OAUTH_REQUEST_HEADERS : REQUEST_HEADERS);
+  if (await fingerprint(frame.method, frame.path, selected, raw, frame.query) !== frame.fingerprint) throw new Error('relay_request_fingerprint_conflict');
   if (frame.deadline_ms <= Date.now() || frame.deadline_ms > Date.now() + 30000) throw new Error('relay_request_expired');
   // No request body or Authorization is written to the transport receipt.
   const receipt = {protocol: PROTOCOL, request_id: frame.request_id, fingerprint: frame.fingerprint,
@@ -91,14 +102,18 @@ export async function execute(config, frame, connection, perform = requestOnce) 
   finally { await claim.close(); }
   await syncDirectory(config.state_directory);
   try {
-    const result = await perform(new URL(frame.path, config.upstream_origin),
-      {method: frame.method, headers: {...selected, host: config.upstream_host}, agent: config.localAgent},
-      raw, MAX_RESPONSE, Math.max(1, Math.min(25000, frame.deadline_ms - Date.now())));
+    const url = new URL(frame.path, config.upstream_origin);
+    if (oauth) url.search = frame.query;
+    const result = await perform(url,
+      {method: frame.method, headers: {...selected, host: config.upstream_host,
+        ...(oauth ? {'x-forwarded-proto': 'https'} : {})}, agent: config.localAgent},
+      raw, MAX_RESPONSE, Math.max(1, Math.min(25000, frame.deadline_ms - Date.now())), oauth);
     if (result.status < 200 || result.status > 599) throw new Error('relay_upstream_status_invalid');
     await saveReceipt(config.state_directory, frame.request_id, {...receipt, state: 'completed',
       status: result.status, response_sha256: await sha256(result.body)});
     return {type: 'response', protocol: PROTOCOL, request_id: frame.request_id, connection_id: connection,
-      status: result.status, headers: result.headers, body_base64: toBase64(result.body), outcome: 'responded'};
+      status: result.status, headers: result.headers, body_base64: toBase64(result.body), outcome: 'responded',
+      ...(oauth ? {set_cookies: responseCookies(result.set_cookies ?? [])} : {})};
   } catch {
     await saveReceipt(config.state_directory, frame.request_id, {...receipt, state: 'unknown'});
     return unknownResponse(frame.request_id, connection);
