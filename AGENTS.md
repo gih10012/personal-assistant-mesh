@@ -4,11 +4,13 @@
 from AMITA routing. Provide device-bound Computer Use, files and shell, plus
 an on-device Codex or Pi integration based on actual compatible runtimes.
 Preserve direct tool calls and A2A autonomous execution as two routes.
-All entrance agents follow [the entrance contract](docs/ENTRANCE-AGENTS.md).
+All present and future entrance agents follow [the entrance contract](docs/ENTRANCE-AGENTS.md).
 Each entrance handles small tasks with its authorized tools in the current
-conversation. Before a durable handoff, check AMITA, the live Leader and the
-required execution route. Retain follow-up ownership after handoff and return
-the outcome through the original entrance.
+conversation, including direct access to remote resources. Before a durable
+handoff, check AMITA, the live Leader and the required execution route. Retain
+follow-up ownership after handoff and return the outcome through the original
+entrance. Leader sends task updates and questions to that entrance by default.
+Use a different channel when the owner has authorized it for that purpose.
 
 2026-11-26 agreement handling. The owner authorizes accepting ordinary
 developer-service agreements needed for this approved work when they fit the
@@ -72,8 +74,9 @@ The owner cleared the previous native Goal and requested the current one,
 createdAt 1793082568, ACTIVE with independent accounting. Continue original
 business work and checkpoints; old Goal usage was not migrated. Concentrate
 development specialists AND actual network agents on all phone prerequisites,
-then report through Claw and advance VPS single-point removal while waiting for
-the phone. Prioritize actual installation/enrollment when it reconnects. Huawei
+then report through the original or owner-designated entrance. Advance VPS
+single-point removal while waiting for the phone. Prioritize actual
+installation/enrollment when it reconnects. Huawei
 is already logged in; reuse it and establish real SDK/signing eligibility.
 The chosen phone delivery is maintainable native membership: foreground work,
 system-scheduled background data/skill updates, and a legitimate same-signature
@@ -179,13 +182,13 @@ Free public bootstrap/relay is authorized; first implementation uses Cloudflare
 Workers Free and existing ingress compatibility. It owns neither the sole
 ledger nor permanent coordination. Do not enable paid service/credit fallback.
 
-Claw remains an independent low-cost continuous assistant with full authorized
-history/media/channel tools and accurate message timestamps. Simple complete
-work may be handled directly; computer/other-node data, requested saving there
-or existing canonical business files require Leader coordination. Reply naturally
-when useful; no stale answer replay, template task receipts or retry-counter spam.
-Use the private confirmed owner-account binding, without rechecking known menus.
-Normal Leader communication goes through Claw; existing direct authority remains.
+Every entrance maintains continuous conversation context and accurate message
+timestamps, and uses its available authorized tools. Direct handling includes
+other-node data and edits to the specified original file when the entrance has
+the tools to do the work. Use Leader for work that needs durable coordination.
+Reply when useful and send material progress, decisions and results through the
+original conversation. Use Claw's confirmed account binding and authorized
+history, media and channel tools for WeChat conversations.
 
 ## Collaboration and boundaries
 
