@@ -32,8 +32,7 @@ class OAuthWriterActivation:
         self.directory_sha256 = target['body']['evidence']['target_directory_sha256']
         self.voter_config = safe_path(config['voter_config'])
 
-    def admit(self, original_keys):
-        """Run under the gateway's directory lock, before any SDK or HTTP work."""
+    def _local_record(self, original_keys):
         root = self.root
         checkpoint = self.proposal['checkpoint']
         marker = _read(root / STAGING_MARKER, 32768)
@@ -52,7 +51,26 @@ class OAuthWriterActivation:
                     or not isinstance(record['first_confirmation'], dict)
                     or record['sha256'] != digest({key: value for key, value in record.items() if key != 'sha256'})):
                 raise ValueError('oauth_writer_activation_record_conflict')
-        else:
+        return record_path, record, pinned, marker
+
+    def confirm_serving_grant(self):
+        """Check an already activated local target without starting it."""
+        original_keys = key_references(self.document)
+        _, record, _, _ = self._local_record(original_keys)
+        if record is None:
+            raise ValueError('oauth_writer_activation_record_required')
+        current = confirm_grant(self.proposal, private_json(self.voter_config))
+        self._check_local(original_keys)
+        if record['first_confirmation'].get('receipt') != current['receipt']:
+            raise ValueError('oauth_writer_activation_original_grant_conflict')
+        return current
+
+    def admit(self, original_keys):
+        """Run under the gateway's directory lock, before any SDK or HTTP work."""
+        root = self.root
+        checkpoint = self.proposal['checkpoint']
+        record_path, record, pinned, marker = self._local_record(original_keys)
+        if record is None:
             checked = inspect_staging(root.parent, self.document, checkpoint['bundle_sha256'],
                                       allow_loopback_for_tests=self.allow_loopback)
             if checked != checkpoint['target_state_sha256']:

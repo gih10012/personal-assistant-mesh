@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import worker, {ReverseRelay} from '../worker.mjs';
 import {execute} from '../host.mjs';
-import {PROTOCOL, sha256, policy, fingerprint, toBase64} from '../protocol.mjs';
+import {PROTOCOL, OAUTH_ROUTE, sha256, policy, fingerprint, toBase64} from '../protocol.mjs';
 
 async function fixture(t, overrides = {}) {
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
@@ -137,9 +137,13 @@ test('public OAuth preserves callback cookies and redirects through an explicit 
     token_hash: member.token_sha256}};
   f.ctx.getWebSockets = tag => [f.socket, backup].filter(socket => socket.attachment.member === tag);
   f.config.members.push(member);
+  const controller = 'fixture-route-control-'.repeat(3);
+  f.config.oauth_control = {token_sha256: await sha256(controller), group: 'fixture-group', scope: 'fixture-scope',
+    holders: [{owner: 'primary', member_id: 'fixture-member'}, {owner: 'backup', member_id: member.id}]};
   assert.throws(() => policy(JSON.stringify({...f.config, routes: [...f.config.routes,
     {method: 'POST', path: '/token', member_id: member.id}]})), /relay_oauth_single_active_member_required/);
   f.env.RELAY_POLICY = JSON.stringify(f.config);
+  f.relay = new ReverseRelay(f.ctx, f.env);
   f.env.RELAY = {idFromName: name => name, get: () => f.relay};
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'amita-oauth-relay.'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
@@ -156,23 +160,49 @@ test('public OAuth preserves callback cookies and redirects through an explicit 
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
+  let started, release;
+  const firstStarted = new Promise(resolve => { started = resolve; });
+  const firstCanFinish = new Promise(resolve => { release = resolve; });
   for (const [socket, name] of [[f.socket, 'primary'], [backup, 'backup']]) {
     const host = {state_directory: path.join(dir, name), upstream_origin: `http://127.0.0.1:${server.address().port}`,
       upstream_host: 'relay.example.invalid', public_oauth: true, routes: [route]};
     socket.send = async raw => {
       const frame = JSON.parse(raw); socket.sent.push(frame);
+      if (socket === f.socket) { started(); await firstCanFinish; }
       const response = await execute(host, frame, socket.attachment.connection);
       await f.relay.webSocketMessage(socket, JSON.stringify(response));
     };
   }
   const callback = state => worker.fetch(new Request(f.env.PUBLIC_ORIGIN + '/auth/callback?code=private%2Bcode&state=' + state,
     {headers: {cookie: 'private-consent=example', 'x-amita-relay-request-id': 'attacker-selected'}}), f.env);
-  const first = await callback('first');
+  const firstPending = callback('first');
+  await firstStarted;
+  const grant = {group: 'fixture-group', scope: 'fixture-scope', owner: 'backup', epoch: 1, index: 10,
+    proposal_sha256: '1'.repeat(64), operation_id: 'real-fixture-handoff'};
+  const command = {format: OAUTH_ROUTE, grant, previous: null, barrier_index: 11, observed_ms: Date.now()};
+  const control = (body, token = controller) => worker.fetch(new Request(f.env.PUBLIC_ORIGIN + '/_mesh/relay/oauth-route',
+    {method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
+      headers: {'Authorization': 'Bearer ' + token}}), f.env);
+  try {
+    assert.equal((await control(command, 'client-token-fixture-'.repeat(3))).status, 401);
+    assert.equal((await control({...command, observed_ms: Date.now() - 31000})).status, 409);
+    backup.readyState = 3;
+    assert.equal((await control(command)).status, 503);
+    assert.equal((await (await control()).json()).current, null);
+    backup.readyState = 1;
+    const moved = await control(command);
+    assert.equal(moved.status, 200);
+    assert.deepEqual((await moved.json()).applied, grant);
+    assert.equal((await (await control(command)).json()).duplicate, true);
+    assert.equal((await control({...command, grant: {...grant, operation_id: 'older-conflict'}})).status, 409);
+  } finally { release(); }
+  const first = await firstPending;
   assert.equal(first.status, 302);
   assert.equal(first.headers.get('location'), 'https://chatgpt.com/connector_platform_oauth_redirect?state=original');
   assert.equal(first.headers.getSetCookie().length, 2);
   assert.notEqual(first.headers.get('x-amita-relay-request-id'), 'attacker-selected');
-  f.env.RELAY_POLICY = JSON.stringify({...f.config, routes: [{...route, member_id: member.id}]});
+  f.relay = new ReverseRelay(f.ctx, f.env);
+  assert.deepEqual((await (await control()).json()).current, grant);
   assert.equal((await callback('first')).status, 409);
   assert.equal(backup.sent.length, 0);
   assert.equal((await callback('second')).status, 302);

@@ -46,10 +46,23 @@ Existing MCP applications retain their own business request IDs. A member
 switch affects subsequent requests only. An in-flight request remains bound
 to its original member, and an ambiguous response never triggers a new attempt.
 
-Changing the pinned member is a controlled deployment operation. Verify the
-new OAuth writer and its required backend bindings before changing all route
-bindings together. The `sslip.io` issuer can stay available as the original
-entry during qualification. Moving ordinary Chat to a different stable origin
+For a controlled handoff, the Worker policy may also define `oauth_control`
+with a dedicated `token_sha256`, Raft `group` and `scope`, and a one-to-one
+`holders` list of `{owner, member_id}`. Keep the controller's raw token in its
+own private file. On the already activated target run `python3 -m
+assistant_mesh.oauth_relay_route` with its OAuth document, writer activation
+document and controller document. The controller document supplies
+`token_file`, the target `upstream_origin` on loopback, and optionally the
+local `proxy_url` for Worker HTTPS.
+
+The controller checks live issuer metadata and the durable activation record,
+then confirms a fresh majority grant before sending the switch. The Worker
+uses the dedicated controller credential to authenticate the command, and
+binds it to the registered holder, connected member and current route head.
+It commits the route and its operation receipt together, preserving attempts
+already assigned to the original connection. A transport reconnect alone
+does not select a writer. The `sslip.io` issuer can stay available as the
+original entry during qualification. Moving Chat to a different stable origin
 uses the approved callback configuration and reconnection for that origin.
 
 ## Root deployment contract

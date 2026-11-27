@@ -1,11 +1,14 @@
 import {PROTOCOL, MAX_REQUEST, MAX_RESPONSE, REQUEST_HEADERS, RESPONSE_HEADERS, OAUTH_REQUEST_HEADERS,
-  OAUTH_RESPONSE_HEADERS, allowedQuery, responseCookies, identifier, sha256, random, fromBase64, toBase64,
+  OAUTH_RESPONSE_HEADERS, OAUTH_ROUTE, allowedQuery, responseCookies, identifier, writerId, sha256, random, fromBase64, toBase64,
   headers, fingerprint, policy, boundedBody, exact} from './protocol.mjs';
 
 const json = (value, status = 200) => Response.json(value, {status, headers: {'cache-control': 'no-store'}});
 const failure = (error, status, outcome = 'not_attempted', request_id = null) => json({
   protocol: PROTOCOL, error, outcome, request_id, automatic_retry: false, retry_with_new_id: false}, status);
 const OAUTH_SINGLE_USE = new Set(['POST /token', 'POST /consent', 'GET /auth/callback', 'POST /revoke']);
+const OAUTH_ROUTE_PATH = '/_mesh/relay/oauth-route';
+const isSha = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+const positive = value => Number.isSafeInteger(value) && value > 0;
 
 export default {
   async fetch(request, env) {
@@ -29,6 +32,9 @@ export class ReverseRelay {
     this.sql.exec('CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,member TEXT NOT NULL,connection TEXT NOT NULL,state TEXT NOT NULL,deadline INTEGER NOT NULL,status INTEGER,response_sha256 TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS tickets(member TEXT PRIMARY KEY,digest TEXT NOT NULL,expires INTEGER NOT NULL)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS budgets(day TEXT PRIMARY KEY,requests INTEGER NOT NULL,tickets INTEGER NOT NULL)');
+    if (policy(env.RELAY_POLICY).oauth_control) {
+      this.sql.exec('CREATE TABLE IF NOT EXISTS oauth_writer_routes(operation_id TEXT PRIMARY KEY,epoch INTEGER UNIQUE NOT NULL,head_index INTEGER NOT NULL,grant TEXT NOT NULL,member TEXT NOT NULL)');
+    }
     // A cold start cannot prove whether an admitted original request executed.
     this.sql.exec("UPDATE attempts SET state='unknown' WHERE state='sent'");
     if (globalThis.WebSocketRequestResponsePair) {
@@ -63,6 +69,7 @@ export class ReverseRelay {
     }
     if (url.pathname === '/_mesh/relay/ticket' && request.method === 'POST') return this.ticket(request, config);
     if (url.pathname === '/_mesh/relay/connect' && request.method === 'GET') return this.connect(request, config);
+    if (url.pathname === OAUTH_ROUTE_PATH && config.oauth_control) return this.controlRoute(request, config);
     const route = config.routes.find(item => item.method === request.method && item.path === url.pathname);
     if (route && config.public_oauth) {
       // OAuth and MCP identity remain the original application's decisions.
@@ -71,10 +78,12 @@ export class ReverseRelay {
       return this.forward(request, route, config, original, url.search);
     }
     if (!await this.clientAuthorized(request, config)) return failure('relay_admission_denied', 401);
-    if (url.pathname === '/_mesh/relay/bootstrap' && request.method === 'GET') return json({
-      protocol: PROTOCOL, oauth_migration_complete: false, automatic_authority_switch: false,
-      routes: config.routes.map(route => ({method: route.method, path: route.path,
-        connected: Boolean(this.socket(config.members.find(member => member.id === route.member_id)))}))});
+    if (url.pathname === '/_mesh/relay/bootstrap' && request.method === 'GET') {
+      const current = this.writerRoute(config);
+      return json({protocol: PROTOCOL, oauth_migration_complete: false, automatic_authority_switch: false,
+        routes: config.routes.map(route => ({method: route.method, path: route.path,
+          connected: Boolean(this.socket(this.activeMember(route, config, current)))}))});
+    }
     const receipt = /^\/_mesh\/relay\/receipt\/([A-Za-z0-9_-]{8,128})$/.exec(url.pathname);
     if (receipt && request.method === 'GET') {
       const found = this.one('SELECT id,state,deadline,status,response_sha256 FROM attempts WHERE id=?', receipt[1]);
@@ -83,6 +92,61 @@ export class ReverseRelay {
     }
     if (!route) return failure('relay_route_not_allowed', 404);
     return this.forward(request, route, config, true);
+  }
+  writerRoute(config) {
+    if (!config.oauth_control) return null;
+    const row = this.one('SELECT grant,member FROM oauth_writer_routes ORDER BY epoch DESC LIMIT 1');
+    if (!row) return null;
+    const grant = JSON.parse(row.grant);
+    if (grant.group !== config.oauth_control.group || grant.scope !== config.oauth_control.scope ||
+        !config.oauth_control.holders.some(item => item.owner === grant.owner && item.member_id === row.member)) {
+      throw new Error('relay_oauth_route_policy_changed');
+    }
+    return grant;
+  }
+  activeMember(route, config, active = this.writerRoute(config)) {
+    const member = active ? config.oauth_control.holders.find(item => item.owner === active.owner).member_id : route.member_id;
+    return config.members.find(item => item.id === member);
+  }
+  async controlRoute(request, config) {
+    const control = config.oauth_control;
+    const token = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(request.headers.get('authorization') || '')?.[1];
+    if (!token || await sha256(token) !== control.token_sha256) return failure('relay_oauth_controller_required', 401);
+    if (request.method === 'GET') return json({format: OAUTH_ROUTE, current: this.writerRoute(config)});
+    if (request.method !== 'POST') return failure('relay_oauth_route_method', 405);
+    let command;
+    try { command = JSON.parse(new TextDecoder().decode(await boundedBody(request, 4096))); }
+    catch { return failure('relay_oauth_route_command_invalid', 400); }
+    if (!exact(command, ['format', 'grant', 'previous', 'barrier_index', 'observed_ms']) || command.format !== OAUTH_ROUTE) {
+      return failure('relay_oauth_route_command_invalid', 400);
+    }
+    const grant = command.grant;
+    if (!exact(grant, ['group', 'scope', 'owner', 'epoch', 'index', 'proposal_sha256', 'operation_id'])
+        || grant.group !== control.group || grant.scope !== control.scope || !writerId(grant.operation_id)
+        || !positive(grant.epoch) || !positive(grant.index) || !isSha(grant.proposal_sha256)) {
+      return failure('relay_oauth_grant_binding_invalid', 400);
+    }
+    const holder = control.holders.find(item => item.owner === grant.owner);
+    if (!holder) return failure('relay_oauth_target_not_registered', 400);
+    const ordered = Object.fromEntries(Object.keys(grant).sort().map(key => [key, grant[key]]));
+    const original = this.one('SELECT grant FROM oauth_writer_routes WHERE operation_id=?', grant.operation_id);
+    if (original) return original.grant === JSON.stringify(ordered)
+      ? json({format: OAUTH_ROUTE, applied: JSON.parse(original.grant), duplicate: true})
+      : failure('relay_oauth_original_grant_conflict', 409);
+    const active = this.writerRoute(config); // Re-read after all asynchronous parsing.
+    if (!positive(command.barrier_index) || command.barrier_index <= grant.index || !positive(command.observed_ms)
+        || Date.now() - command.observed_ms > 30000 || command.observed_ms - Date.now() > 5000) {
+      return failure('relay_oauth_current_confirmation_required', 409);
+    }
+    if (command.previous !== (active?.proposal_sha256 ?? null) || grant.epoch <= (active?.epoch ?? 0)
+        || grant.index <= (active?.index ?? 0)) return failure('relay_oauth_route_predecessor_changed', 409);
+    if (!this.socket(config.members.find(member => member.id === holder.member_id))) {
+      return failure('relay_oauth_target_disconnected', 503);
+    }
+    this.sql.exec('INSERT INTO oauth_writer_routes VALUES(?,?,?,?,?)', grant.operation_id, grant.epoch,
+      grant.index, JSON.stringify(ordered), holder.member_id);
+    await this.ctx.storage.sync();
+    return json({format: OAUTH_ROUTE, applied: ordered, duplicate: false});
   }
   async ticket(request, config) {
     let input;
@@ -140,7 +204,7 @@ export class ReverseRelay {
     const known = this.one('SELECT fingerprint,state FROM attempts WHERE id=?', id);
     if (known) return failure(known.fingerprint === signature ? 'relay_reconcile_original' : 'relay_request_id_conflict',
       409, known.fingerprint === signature ? known.state : 'rejected', id);
-    const member = config.members.find(item => item.id === route.member_id); const socket = this.socket(member);
+    const member = this.activeMember(route, config); const socket = this.socket(member);
     if (!socket) return failure('relay_member_offline', 503, 'not_attempted', id);
     if (this.one("SELECT COUNT(*) AS count FROM attempts WHERE state='sent'").count >= 4) {
       return failure('relay_inflight_capacity', 429, 'not_attempted', id);

@@ -19,6 +19,9 @@ export const OAUTH_RESPONSE_HEADERS = new Set([...RESPONSE_HEADERS, 'location', 
   'content-security-policy-report-only', 'x-frame-options', 'x-content-type-options', 'referrer-policy',
   'permissions-policy', 'cross-origin-resource-policy', 'strict-transport-security']);
 const QUERY_ROUTES = new Set(['GET /authorize', 'GET /consent', 'GET /auth/callback']);
+const hex = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+export const writerId = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
+export const OAUTH_ROUTE = 'amita-oauth-relay-route/1';
 export const allowedQuery = (method, path, query, oauth) => query === '' || oauth === true &&
   typeof query === 'string' && query.length <= 8192 && query.startsWith('?') && !/[\x00-\x20\x7f#]/.test(query) &&
   QUERY_ROUTES.has(`${method} ${path}`);
@@ -58,7 +61,6 @@ export const fingerprint = (method, path, selectedHeaders, body, query) => sha25
   ...(query === undefined ? [] : [query])]));
 export function policy(raw) {
   const value = JSON.parse(raw);
-  const hex = x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
   const routes = value.public_oauth === true ? OAUTH_ROUTES : PUBLIC_ROUTES;
   if (value.format !== PROTOCOL || !hex(value.client_token_sha256) || !Array.isArray(value.members)
       || (value.public_oauth !== undefined && typeof value.public_oauth !== 'boolean')
@@ -79,6 +81,18 @@ export function policy(raw) {
   }
   if (value.public_oauth && new Set(value.routes.map(route => route.member_id)).size !== 1) {
     throw new Error('relay_oauth_single_active_member_required');
+  }
+  if (value.oauth_control !== undefined) {
+    const control = value.oauth_control;
+    if (!value.public_oauth || !exact(control, ['token_sha256', 'group', 'scope', 'holders'])
+        || !hex(control.token_sha256) || hashes.has(control.token_sha256)
+        || !writerId(control.group) || !writerId(control.scope) || !Array.isArray(control.holders)
+        || control.holders.length !== ids.size || control.holders.some(item => !exact(item, ['owner', 'member_id'])
+          || !writerId(item.owner) || !ids.has(item.member_id))
+        || new Set(control.holders.map(item => item.owner)).size !== ids.size
+        || new Set(control.holders.map(item => item.member_id)).size !== ids.size) {
+      throw new Error('relay_oauth_control_policy_invalid');
+    }
   }
   value.daily_limit ??= 2000;
   value.max_receipts ??= 100000;
