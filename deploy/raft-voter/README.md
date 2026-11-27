@@ -392,9 +392,12 @@ traffic also draw on shared account quotas. One packet each way per holder tick
 limits recovery throughput. A sustained backlog or an offline voter can reach
 the existing 256-packet outbox limit. Inspect queue counts during the trial.
 
-The separate laptop/VPS/Cloudflare trial observed a term-1 VPS leader followed
-by a term-2 laptop leader in 96.325 seconds. That trial exercised the earlier
-digest voter. This typed command adds an applied control-state record for a
-future controlled handoff. Signed disk and old-writer-seal verification,
-production business writer activation, portable snapshots/compaction and
-sustained Free-tier qualification remain separate integration work.
+The earlier digest-only laptop/VPS/Cloudflare trial observed a term-1 VPS leader
+followed by a term-2 laptop leader in 96.325 seconds. The subsequent typed
+trial used the same three fault domains with the updated host code. All three
+applied the isolated business writer command. After stopping the exact VPS
+test leader, laptop and Cloudflare applied an independent OAuth writer command
+in 108.664 seconds, retaining the business writer head. These commands used
+synthetic checkpoint fields. The two surviving test voters were disabled and
+the VPS voter was confirmed stopped. Production routing and writer assignment,
+portable snapshots/compaction and sustained Free-tier qualification remain.
