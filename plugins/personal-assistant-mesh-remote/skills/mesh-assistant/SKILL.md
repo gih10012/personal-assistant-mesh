@@ -12,7 +12,19 @@ ChatGPT's other tools or require that every request become a Mesh task.
 
 ## Delegate without losing the conversation
 
-For a new requested outcome, retain one unique ASCII `request_id` before calling
+Handle small work in this conversation with available authorized tools, including
+Shell, files, web, MCP, skills, and direct calls to remote devices or services.
+An external data source or the use of Shell alone does not require a Leader task.
+Delegate work that is long, difficult, large, or requires coordination.
+
+Before handing off, read discovery and task-route status from the actual Mesh
+tools, including current connectivity, coordinator lease, Leader Worker presence,
+and the required execution capability. When Leader is unavailable or unverified,
+retain the original request and explain that it awaits handoff. Once reachable,
+read the original request's status before deciding to submit it. Use actual
+Leader receipt and lease evidence to distinguish queued, received, and running.
+
+For work that needs a Leader, retain one unique ASCII `request_id` before calling
 `mesh_submit_task`. Include the user's actual goal, useful context, constraints,
 and acceptance condition. Use an existing project label when known; it is not
 an authorization grant or permission to choose a native session. Let Leader
@@ -67,6 +79,12 @@ Only ask about real missing decisions, credentials or permissions; preserve the
 owner's existing authorization and confirmed account binding.
 
 ## Follow unfinished work automatically
+
+Keep follow-up ownership after handoff and return the actual outcome in the
+original entry conversation. Prefer supported completion or attention events.
+When events are unavailable, use the actual host's native scheduling. A turn can
+close while its durable follow-up remains active. If work has ended but the
+reply is unconfirmed, reconcile its original delivery receipt.
 
 For ordinary Chat, use the host's **native scheduled task in this same chat**,
 not local cron, an API-key agent, a new conversation, or a claim that a webhook

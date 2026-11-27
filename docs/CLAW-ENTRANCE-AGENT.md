@@ -4,6 +4,9 @@
 `931ea1ee0f51216092766604d6e91c4f5c3d648c6facab92f5572532bb890401`。
 本叶是可选源码/部署入口，不是已部署或本人微信验收，也不完成整个 Mesh goal。
 
+Claw 实现与其它入口共同遵循 [统一入口规则](ENTRANCE-AGENTS.md)。短任务直接处理，
+持久交接先核实实况，再通过原微信会话继续跟进和回传结果。
+
 ## 实际改变
 
 `entrance_store_class` 叠加在原 Store，不另建通信库/接收器/LLM harness。

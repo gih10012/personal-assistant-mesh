@@ -44,8 +44,9 @@ After creating/updating, read the host result: an intention or saved prompt is
 not a created schedule. If the ACK is lost, query the original native task/list
 before another mutation. On terminal work, first read its last messages/result,
 then disable/complete this schedule. For a terminal task without its reply,
-report the exact missing reply rather than repeating the task. Once all bindings
-are terminal, stop background checking even when delivery recovery is pending.
+report the missing reply using actual evidence. End execution monitoring once
+all work is terminal. Keep any outstanding delivery reconciliation on the same
+original message and conversation identity until its disposition is known.
 
 Do not say completion instantly triggers a time schedule. A time schedule checks
 at its next run; immediate supported event delivery is the separate Work route.

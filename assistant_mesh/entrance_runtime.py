@@ -7,6 +7,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -20,18 +21,21 @@ from .worker import Client, Worker
 
 ENTRANCE_INSTRUCTIONS = (
     '你是本人独立的低成本连续沟通入口，不是Mesh Leader，也不是机械转发器。'
-    '先使用原生工具完整读取workspace/AGENTS.md的入口职责合同；持有文档不等于已读。'
+    '先使用原生工具读取 workspace/AGENTS.md 和同目录的 ENTRANCE-AGENTS.md。'
+    '后者给出所有入口现行规则，在旧入口职责记录有冲突时依现行规则执行。'
     '每条新消息先核当前日期、双方最近聊天、最新未处理消息及上次实际回复，'
     'UTC存储、Asia/Shanghai理解，跨天要说清；平台原始时间未知就明确未知，不能拿处理时间代替。'
     '使用原生Codex会话/压缩保持记忆，不因每条消息新开会话或用摘要替换原历史。'
     '普通消息先由你理解：可自然回复、静默、做基础操作，必要才用entrance handoff转给Leader。'
-    '已有完整输入且无需其它节点的简单搜索、表格整理或分析可直接完成并回复，不必机械转交。'
-    '数据源在电脑/其它节点、要求保存到指定设备或已有集中业务文件时，即使任务简单也交Leader协调，'
-    '不要另建脱离原事实源的副本；入口自身收发、媒体、回执和通道管理仍自行处理。'
-    'handoff排队/受理不代表Leader正在执行，更不代表完成；先读回原任务状态再如实告诉本人。'
+    '全部入口 Agent 执行同一规则。小事在当前会话用真实可用的 Shell、文件、Web、MCP、skill 或远端工具直接处理。'
+    '跨设备或指定保存位置仍可直接办理，沿原事实源和授权目标操作。长期、大规模、困难或需要协调的工作才交 Leader。'
+    '交接前查看 AMITA 连通、协调租约、Leader Worker 心跳和任务所需能力。Leader 或路线不可用时如实说待交接。'
+    '收到原任务的实际接收证据才说交给 Leader，入队、领取、运行和完成按原回执分别说明。'
+    '交接后沿原请求、任务与入口会话持续跟进。优先用现有完成或需决定事件唤醒原入口，否则用宿主实际支持的定时回查。'
+    '本轮可以结束，跟进记录继续。完成后读原结果并由本入口回复；通知未知查原回执，避免重复业务。'
     '消息附件要通过entrance media取到私有文件，并实际用view_image/原生文件工具阅读。'
     '下载/文件名/SHA不是理解；未能处理某格式说明具体缺项，不泛称只能文字，不假称已看。'
-    '内部故障/任务完成事件也先核当前任务和时间，通常静默或合并成有用更新，'
+    '已交接任务完成时核对原任务、时间与真实结果，回到原入口答复。普通内部探测与重试留在运行日志，'
     '不要回复“在吗”时播昨天的任务，不要发重试/探针/任务ID模板或旧错误刷屏。'
     '最终文本默认留私有；真正回复本人要明确调用entrance reply，静默用silent。'
     'reply前读history取得latest_inbound_event_id，原回复unknown必须原ID查status，不能换ID重发。'
@@ -39,6 +43,30 @@ ENTRANCE_INSTRUCTIONS = (
     '常规对话仍用reply防陈旧回复；恢复由原唯一authority/refresher处理，不自己开iLink轮询或复制账号。'
     '入口是推荐能力，不拦截任何原生Shell、文件、网络、MCP；Leader也保留直接Claw权限。'
     '在已有本人授权和零新增费用内自主使用工具；不新建付费key、不新增花费、不扩大第三人通讯。')
+
+
+def leader_handoff_wait(client):
+    """Return the reason to defer submission after observing the real authority."""
+    try:
+        status = client.request('/v1/status')
+    except (OSError, ValueError):
+        return 'mesh_status_unavailable'
+    if not isinstance(status, dict) or not isinstance(status.get('leader'), dict):
+        return 'leader_status_unconfirmed'
+    holder = status['leader']
+    now, deadline = status.get('time'), holder.get('deadline')
+    node, epoch = holder.get('node'), holder.get('epoch')
+    if (type(now) not in (int, float) or not math.isfinite(now)
+            or type(deadline) not in (int, float) or not math.isfinite(deadline)
+            or not isinstance(node, str) or not node or type(epoch) is not int or epoch < 1 or deadline <= now):
+        return 'leader_lease_unavailable'
+    nodes = status.get('nodes')
+    if not isinstance(nodes, list) or not any(
+            isinstance(member, dict) and member.get('id') == node and member.get('online') is True
+            and isinstance(member.get('capabilities'), list) and 'leader' in member['capabilities']
+            for member in nodes):
+        return 'leader_worker_unavailable'
+    return None
 
 
 class EntranceWorker(Worker):
@@ -187,6 +215,11 @@ class EntranceWorker(Worker):
             return super().on_tool(call)
         if action not in ('history', 'reply', 'silent', 'handoff', 'status', 'media') or not self.current:
             return result({'error': 'entrance_tool_action_invalid'}, False)
+        if action == 'handoff':
+            waiting = leader_handoff_wait(self.client)
+            if waiting:
+                return result({'state': 'waiting_handoff', 'reason': waiting,
+                               'handoff_submitted': False}, False)
         self.tick(force=True)
         try:
             output = self.client.request('/v1/agent/action', {
@@ -329,7 +362,13 @@ def main(argv=None):
         elif args.command == 'worker-managed':
             run_managed_entrance_worker(config, config_path=args.config)
         else:
-            output = Client(config).request('/v1/agent/action', {
+            client = Client(config)
+            if args.action == 'handoff':
+                waiting = leader_handoff_wait(client)
+                if waiting:
+                    print(json.dumps({'state': 'waiting_handoff', 'reason': waiting, 'handoff_submitted': False}))
+                    return 1
+            output = client.request('/v1/agent/action', {
                 'task_id': args.task_id, 'epoch': args.epoch, 'call_id': args.call_id,
                 'action': 'entrance_' + args.action, 'arguments': private_json(args.payload_file)})
             print(json.dumps(output, ensure_ascii=False))

@@ -3,9 +3,12 @@
 2026-11-26 device execution. Keep the open HarmonyOS agent kernel separate
 from AMITA routing. Provide device-bound Computer Use, files and shell, plus
 an on-device Codex or Pi integration based on actual compatible runtimes.
-Preserve direct device tool calls and A2A autonomous execution as two routes.
-For a small device query, Claw should call the authorized device in the current
-entrance turn. Reserve durable Leader delegation for longer or difficult work.
+Preserve direct tool calls and A2A autonomous execution as two routes.
+All entrance agents follow [the entrance contract](docs/ENTRANCE-AGENTS.md).
+Each entrance handles small tasks with its authorized tools in the current
+conversation. Before a durable handoff, check AMITA, the live Leader and the
+required execution route. Retain follow-up ownership after handoff and return
+the outcome through the original entrance.
 
 2026-11-26 agreement handling. The owner authorizes accepting ordinary
 developer-service agreements needed for this approved work when they fit the

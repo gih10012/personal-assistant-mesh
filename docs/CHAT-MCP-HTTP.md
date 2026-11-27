@@ -1,5 +1,7 @@
 # 普通 Chat 的受限 Streamable HTTP 入口
 
+普通 Chat 的直接办理、交接前实况与原会话回传遵循 [统一入口规则](ENTRANCE-AGENTS.md)。
+
 此片是现代 MCP resource-server 侧车，不是另一个 Leader。只暴露既有
 `mesh_submit_task`、`mesh_task_status`、`mesh_approved_result` 三个工具；
 原 [stdio 入口](../assistant_mesh/mcp_entrypoint.py)、核心 Store/Worker、
