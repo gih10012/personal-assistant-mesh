@@ -172,6 +172,31 @@ references. Opening the target for writes still requires verifying the current
 applied Raft grant, the referenced external evidence and existing execution
 guards. A successful assembly leaves both database paths as they were.
 
+### Activate the replicated SQLite ledger
+
+After the original proposal commits, run `python3 -m
+assistant_mesh.business_writer_activation activate` on the target. Provide the
+same `--plan`, `--source`, `--target`, and two public keys, the original
+`--replica`, `--template`, and `--candidate`, a private `--writer-directory`, the
+two original JSON files as `--dependencies` and `--retained-effects`, and a
+private `--voter-config`. The config contains `voters`, a list of independently
+configured members with `member`, `control_url` and `token_file`. A voter may
+also use `unix_socket`. The token is the existing operator credential for the
+status read and opaque barrier.
+
+The command verifies the signed candidate and the bound external document
+digests. It publishes the ledger only after two voters report the same current
+grant and a fresh Raft entry ordered after it. The new file keeps the original
+authority and incarnation, starts a successor journal generation at the sealed
+head, and keeps the activation receipt in SQLite. `inspect --database PATH`
+recovers that receipt after an interrupted command response. The original
+operation's destination file is never replaced.
+
+Use this to activate the replicated ledger during a controlled handoff. It
+does not verify the semantics of external records or start native work, OAuth,
+channel delivery or the production service. Those runtimes need their existing
+separate fences and actual dependency verification before startup.
+
 ## Candidate assembly
 
 `build-candidate.mjs` takes a new absolute private destination. It copies only

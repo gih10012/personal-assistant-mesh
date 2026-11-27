@@ -187,6 +187,20 @@ class BusinessReplicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'typed_rows_conflict'):
             sign_target(plan, source, source_pub, self.replica.path, template, candidate, target_key)
 
+    def test_retired_generation_cannot_replace_equal_head_on_replica(self):
+        prior = ('agent_peer', 'retired-generation')
+        snapshot = self.journal.snapshot_begin(prior)
+        old_page = self.journal.snapshot_page(prior, snapshot['snapshot_id'], 0, limit=1)
+        self.journal.snapshot_end(prior, snapshot['snapshot_id'])
+        self.journal.refresh()
+        start, _ = self.baseline()
+        self.assertEqual(old_page['head'], start['head'])
+        self.assertLess(old_page['generation'], start['generation'])
+        with self.assertRaisesRegex(ReplicaConflict, 'snapshot_would_regress'):
+            self.replica.apply(old_page, start['authority'])
+        state = self.replica.state(start['authority'], start['incarnation'])
+        self.assertEqual(start['generation'], state['generation'])
+
     def test_business_writes_and_changes_roll_back_together_and_replica_refuses_store(self):
         before = self.journal.status()['head']
         with self.assertRaisesRegex(RuntimeError, 'rollback'):

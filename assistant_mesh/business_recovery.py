@@ -88,26 +88,34 @@ def prepare_recovery(replica_path, template_path, destination, sealed_checkpoint
     """
     position = _checkpoint(sealed_checkpoint)
     destination = Path(destination).absolute()
+    _validate_destination(destination)
+    with tempfile.TemporaryDirectory(prefix='.amita-recovery-', dir=destination.parent) as work:
+        candidate = Path(work) / 'candidate.db'
+        evidence = _prepare(candidate, replica_path, template_path, position, sealed_checkpoint['typed_rows_sha256'])
+        _publish(candidate, destination, 0o400)
+    return dict(format='amita-business-recovery-candidate/1', checkpoint=sealed_checkpoint,
+                **evidence, execution_authorized=False, ha_qualified=False)
+
+
+def _validate_destination(destination):
     directory = destination.parent.stat()
     if directory.st_uid != os.getuid() or directory.st_mode & 0o077 or destination.parent.is_symlink():
         raise ValueError('business_recovery_private_directory_required')
     if any(os.path.lexists(str(destination) + suffix) for suffix in ('', '-wal', '-shm', '-journal')):
         raise FileExistsError('business_recovery_destination_exists')
-    with tempfile.TemporaryDirectory(prefix='.amita-recovery-', dir=destination.parent) as work:
-        candidate = Path(work) / 'candidate.db'
-        evidence = _prepare(candidate, replica_path, template_path, position, sealed_checkpoint['typed_rows_sha256'])
-        candidate.chmod(0o400)
-        with open(candidate, 'rb') as handle:
-            os.fsync(handle.fileno())
-        # Atomic creation with no replacement, including a concurrent publisher.
-        os.link(candidate, destination)
-        fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    return dict(format='amita-business-recovery-candidate/1', checkpoint=sealed_checkpoint,
-                **evidence, execution_authorized=False, ha_qualified=False)
+
+
+def _publish(candidate, destination, mode):
+    candidate.chmod(mode)
+    with candidate.open('rb') as handle:
+        os.fsync(handle.fileno())
+    # Atomic creation with no replacement, including a concurrent publisher.
+    os.link(candidate, destination)
+    fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def inspect_recovery(replica_path, template_path, candidate, sealed_checkpoint):

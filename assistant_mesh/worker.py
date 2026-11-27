@@ -141,8 +141,8 @@ def _checked_unix_socket(path):
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
     """Private IPC transport; URL metadata never triggers TCP or TLS fallback."""
-    def __init__(self, host, port, path):
-        http.client.HTTPConnection.__init__(self, host, port, timeout=15)
+    def __init__(self, host, port, path, timeout=15):
+        http.client.HTTPConnection.__init__(self, host, port, timeout=timeout)
         self.socket_path = path
 
     def connect(self):
@@ -193,8 +193,8 @@ class Client:
             raise ValueError('control_response_too_large')
         return json.loads(value.decode('utf8'))
 
-    def _unix_request(self, path, body, headers):
-        connection = _UnixHTTPConnection(self.parsed_url.hostname, self.parsed_url.port, self.unix_socket)
+    def _unix_request(self, path, body, headers, timeout):
+        connection = _UnixHTTPConnection(self.parsed_url.hostname, self.parsed_url.port, self.unix_socket, timeout)
         try:
             data = json.dumps(body).encode() if body is not None else None
             connection.request('POST' if body is not None else 'GET', self.parsed_url.path + path,
@@ -214,14 +214,14 @@ class Client:
         finally:
             connection.close()
 
-    def request(self, path, body=None):
+    def request(self, path, body=None, *, timeout=15):
         headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'}
         if self.unix_socket is not None:
-            return self._unix_request(path, body, headers)
+            return self._unix_request(path, body, headers, timeout)
         req = urllib.request.Request(self.url + path, data=json.dumps(body).encode() if body is not None else None, headers=headers)
         # Mesh tokens never enter model context or command line arguments.
         try:
-            with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=15) as response:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open(req, timeout=timeout) as response:
                 return self._decode_response(response)
         except urllib.error.HTTPError as exc:
             exc.close()  # rejected RPCs must not leak response sockets/files

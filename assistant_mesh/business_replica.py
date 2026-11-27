@@ -196,7 +196,8 @@ class Replica:
         if duplicate is not None:
             return duplicate
         source = self._source(db, authority, incarnation)
-        if source and (page['baseline_cursor'] < source['cursor'] or page['head'] < source['head']):
+        if source and (page['generation'] < source['generation'] or page['baseline_cursor'] < source['cursor']
+                       or page['head'] < source['head']):
             raise ReplicaConflict('business_replica_snapshot_would_regress')
         description = {key: page[key] for key in ('authority', 'incarnation', 'snapshot_id', 'generation',
             'baseline_cursor', 'manifest', 'counts', 'total_rows')}
@@ -205,6 +206,8 @@ class Replica:
         if not staging or staging['snapshot_id'] != identity:
             if page['after'] != 0:
                 raise ReplicaConflict('business_replica_snapshot_prefix_missing')
+            if staging and page['generation'] < staging['generation']:
+                raise ReplicaConflict('business_replica_snapshot_would_regress')
             db.execute('DELETE FROM replica_staging WHERE authority=? AND incarnation=?', (authority, incarnation))
             db.execute('INSERT OR REPLACE INTO replica_snapshots VALUES(?,?,?,?,?,?,?)',
                 (authority, incarnation, identity, page['generation'], 0, page['baseline_cursor'], canonical(description)))
