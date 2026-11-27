@@ -1,5 +1,10 @@
 # AMITA 当前实施计划
 
+2026-11-27 Chat OAuth 目标启动：目标网关持有本地写入锁并验证新鲜 Raft 多数派
+授权后才接入原 SDK。隔离验收中，目标首次启动和重启后均可用原令牌列出工具，
+已消费的授权码不能重放，旧网关重启后仍关闭。公网路由和生产角色尚未切换。
+[目标启动](CHAT-GITHUB-OAUTH.md#start-the-target-with-its-current-oauth-grant)
+
 2026-11-27 Chat OAuth 写入权：已将真实退役回执和暂存状态的独立签名见证接入
 OAuth 专属 Raft 角色。隔离验收从实际 OAuth 备份生成提案，由两个 WASM 投票实例
 提交并持久化。OAuth 与账本写入权各自推进，跨角色的前任回执被拒绝。目标仍待接线

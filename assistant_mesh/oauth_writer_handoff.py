@@ -8,13 +8,14 @@ from .business_writer_handoff import _fields, _hash, _plan, _public_key, _read, 
 from .config import private_json
 from .oauth_backup_control import RETIREMENT, identity, read_record
 from .oauth_state_boundary import RETIREMENT_MARKER
-from .oauth_state_bundle import _scan, binding, configured_key_paths, decode, inspect_staging, safe_path, verify_bundle
+from .oauth_state_bundle import _source_scan, binding, configured_key_paths, decode, inspect_staging, safe_path, verify_bundle
 
 
 NAMESPACE = 'amita-oauth-writer-handoff'
 EVIDENCE = 'amita-oauth-writer-witness/1'
 HANDOFF = 'amita-oauth-writer-transfer/1'
 SOURCE_FIELDS = {'binding_sha256', 'bundle_sha256', 'tree_sha256', 'source_retirement_sha256'}
+TARGET_FIELDS = {'source_witness_sha256', 'target_state_sha256', 'target_directory_sha256'}
 RETIREMENT_FIELDS = {'format', 'operation_id', 'instance_id', 'bundle_sha256', 'binding_sha256', 'tree_sha256',
                      'retired_at', 'local_restart_closed', 'cross_node_writer_fenced', 'activation_authorized', 'sha256'}
 
@@ -61,7 +62,7 @@ def sign_source(plan, document, bundle_path, private_key, *, allow_loopback_for_
         raise ValueError('oauth_handoff_original_retirement_required')
     bundle, exact, _ = verify_bundle(bundle_path, config, key_paths=configured_key_paths(config),
         expected_sha256=retired['bundle_sha256'], allow_loopback_for_tests=allow_loopback_for_tests)
-    files, directories, _ = _scan(root)
+    files, directories, _ = _source_scan(root, bundle['writer_observation'])
     raw = files.pop(RETIREMENT_MARKER, b'null')
     if (str(root) != bundle['source_root'] or retired['binding_sha256'] != bundle['binding_sha256']
             or retired['tree_sha256'] != bundle['source_stability']['tree_sha256'] or files != exact
@@ -71,15 +72,21 @@ def sign_source(plan, document, bundle_path, private_key, *, allow_loopback_for_
         tree_sha256=retired['tree_sha256'], source_retirement_sha256=retired['sha256']), private_key)
 
 
+def target_directory_sha256(path):
+    root = safe_path(path)
+    info = root.stat()
+    return digest([str(root), info.st_dev, info.st_ino])
+
+
 def sign_target(plan, source, source_public_key, document, staging, private_key, *, allow_loopback_for_tests=False):
     plan = _oauth_plan(plan)
     evidence = _verify(plan, 'source', source, _public_key(source_public_key), SOURCE_FIELDS)
-    _, bound = binding(document, allow_loopback_for_tests)
+    config, bound = binding(document, allow_loopback_for_tests)
     if digest(bound) != evidence['binding_sha256']:
         raise ValueError('oauth_handoff_target_policy_conflict')
     state_hash = inspect_staging(staging, document, evidence['bundle_sha256'], allow_loopback_for_tests=allow_loopback_for_tests)
-    return _sign(plan, 'target', dict(source_witness_sha256=digest(source['body']),
-                                     target_state_sha256=state_hash), private_key)
+    return _sign(plan, 'target', dict(source_witness_sha256=digest(source['body']), target_state_sha256=state_hash,
+        target_directory_sha256=target_directory_sha256(config['state']['directory'])), private_key)
 
 
 def assemble_transfer(plan, source, target, source_public_key, target_public_key):
@@ -88,7 +95,7 @@ def assemble_transfer(plan, source, target, source_public_key, target_public_key
     if source_key == target_key:
         raise ValueError('oauth_handoff_independent_holder_keys_required')
     source_evidence = _verify(plan, 'source', source, source_key, SOURCE_FIELDS)
-    target_evidence = _verify(plan, 'target', target, target_key, {'source_witness_sha256', 'target_state_sha256'})
+    target_evidence = _verify(plan, 'target', target, target_key, TARGET_FIELDS)
     if target_evidence['source_witness_sha256'] != digest(source['body']):
         raise ValueError('oauth_handoff_target_receipt_conflict')
     receipts = sorted((dict(holder=w['body']['holder'], sha256=digest(w['body'])) for w in (source, target)),

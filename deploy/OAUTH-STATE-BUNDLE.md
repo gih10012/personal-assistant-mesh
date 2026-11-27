@@ -125,14 +125,13 @@ approved clients/scopes, GitHub App and redirects. Only local file locations
 may differ. An optional export without a FreezeLease is accurately marked
 `unfenced_stable_file_copy`, not an observed ASGI/SDK drain.
 
-Every target is **staging-only**. A marker is durably installed before copying
-files, so an interrupted staging copy stays blocked too. The new gateway
-factory refuses a marked directory. `activate_staging` always rejects, even
-with caller-supplied true/JSON fence claims. There is currently no trusted
-exclusion proof for other processes, old code, machines or restart paths.
-Removing the marker or starting an old unguarded factory is not activation
-authority. Actual common fencing belongs to the independent S2 work; this
-module does not invent a CAS and label it consensus.
+The target is **staging-only** when copied. A marker is durably installed
+before copying files, so an interrupted copy stays blocked. `activate_staging`
+continues to reject caller-supplied true/JSON claims. The normal gateway
+factory can open the staged directory only through the configured
+[OAuth writer startup](../docs/CHAT-GITHUB-OAUTH.md#start-the-target-with-its-current-oauth-grant),
+using the signed directory and a fresh quorum confirmation. It keeps the
+marker so a plain or older gateway remains closed.
 
 Source implementation, passing synthetic fixtures, deployed freeze and actual
 controlled OAuth migration are separate facts. This release does not move
@@ -199,8 +198,8 @@ persists its original operation's resume intent/result, and invalidates that
 lease before reopening admission. It returns `source_resumed_backup_only` with
 `handoff_authorized:false`. A stopped process, JSON `source_stopped`, another
 instance, uncommitted/failed backup or caller-supplied proof cannot resume it.
-This is explicitly a **backup**, not a handoff or exclusive-writer proof; every
-target remains staging-only and `activate_staging` still always rejects.
+This is the backup path. A resume authorizes the original source only. Use the
+separate retirement operation and OAuth writer grant for any target startup.
 
 A persistent closed marker or interrupted/unresumed operation makes a new
 enabled instance start **sealed**. It can query the original operation, but

@@ -115,7 +115,7 @@ def _private_component_logs():
 
 def create_app(document, *, backend, conversation_service=None, event_service=None,
                session_service=None,
-               allow_loopback_for_tests=False, http_client=None, backup_control=None):
+               allow_loopback_for_tests=False, http_client=None, backup_control=None, writer_activation=None):
     """Owner-installed factory; not a public daemon or GitHub App creator.
 
     http_client is only an owner-code seam for a synthetic IdP transport in
@@ -256,7 +256,8 @@ def create_app(document, *, backend, conversation_service=None, event_service=No
         raise NotConfigured('chat_oauth_private_secret_unavailable') from None
     _private_component_logs()  # Only this optional owner-installed auth integration.
     from .oauth_state_boundary import MigrationBoundary
-    migration = MigrationBoundary(config, allow_loopback_for_tests=allow_loopback_for_tests)
+    migration = MigrationBoundary(config, allow_loopback_for_tests=allow_loopback_for_tests,
+                                  writer_activation=writer_activation)
     ObservedFileTreeStore = migration.instrument(FileTreeStore, 'store')
     ObservedOwnerIdentityProxy = migration.instrument(OwnerIdentityProxy, 'provider')
     encrypted = FernetEncryptionWrapper(key_value=ObservedFileTreeStore(data_directory=Path(state['directory'])),

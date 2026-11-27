@@ -37,7 +37,7 @@ def _event_policy(document):
     return document
 
 
-def assemble(oauth_document, runtime_document, *, event_document=None, final_projection=False):
+def assemble(oauth_document, runtime_document, *, event_document=None, final_projection=False, writer_activation=None):
     """Replace only the original factory's assembly call, NOT its secret loading.
 
     The CurrentOAuthGrants loop bridge is installed BEFORE the Events lifecycle,
@@ -79,7 +79,7 @@ def assemble(oauth_document, runtime_document, *, event_document=None, final_pro
         source = RemoteReceiptSource(bridge.client, bridge.principal, access)
 
     provider, server, app = build_app(oauth, backend=backend,
-        conversation_service=service, event_service=events)
+        conversation_service=service, event_service=events, writer_activation=writer_activation)
     if source is not None:
         grants.install(provider, server, app)
         # Wrap rather than replace the original OAuth/SDK lifespan and contexts.
@@ -96,8 +96,10 @@ def create_app():
     oauth = load(os.environ['MESH_CHAT_OAUTH_CONFIG'])
     runtime = load(os.environ['MESH_CONVERSATION_CONFIG'])
     event_path = os.environ.get('MESH_WORK_EVENTS_CONFIG')
+    activation_path = os.environ.get('MESH_CHAT_OAUTH_WRITER_ACTIVATION')
     projection = os.environ.get('MESH_CONVERSATION_FINAL_PROJECTION', '0')
     if projection not in ('0', '1'):
         raise NotConfigured('conversation_final_projection_owner_enable_required')
     return assemble(oauth, runtime, event_document=load(event_path) if event_path else None,
-                    final_projection=projection == '1')[2]
+                    final_projection=projection == '1',
+                    writer_activation=load(activation_path) if activation_path else None)[2]

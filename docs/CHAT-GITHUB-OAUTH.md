@@ -172,7 +172,24 @@ the unchanged owner, issuer, scope, redirects, dedicated keys and encrypted
 state bytes before signing independently. `assemble` verifies both signatures
 and emits an OAuth-role Raft command. After submission, `confirm` checks the
 current quorum grant. Keep the original plan, witnesses and operation identity.
-The target still stays inactive at this step.
+The `target` witness also binds the candidate's original local directory.
+
+### Start the target with its current OAuth grant
+
+Use the existing factory and the same backend, conversation and session
+bindings. Set `MESH_CHAT_OAUTH_WRITER_ACTIVATION` to a private configuration
+file with `plan`, `source`, `target`, `source_public_key`, `target_public_key`
+and `voter_config` file paths. Set the existing OAuth state directory to the
+signed target's `state` directory. At startup, the factory holds the local
+writer lock, verifies the exact inactive state on first activation, then
+obtains a fresh majority confirmation of the OAuth grant. It saves
+`writer-activation.json` alongside the stage. Each restart rechecks the
+current grant and the pinned directory and keys, and retains later SDK state.
+
+Keep the staging marker. Older or unconfigured factories still refuse that
+directory. A retired source remains closed, including on restart. Public
+routing, live-voter rollout and the original external service bindings remain
+separate deployment steps.
 
 ## Evidence and next real acceptance
 

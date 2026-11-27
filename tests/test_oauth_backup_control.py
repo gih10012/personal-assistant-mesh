@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 
 from assistant_mesh.oauth_backup_control import PROTOCOL
-from assistant_mesh.oauth_state_bundle import configured_key_paths, decode, stage_bundle, verify_bundle
+from assistant_mesh.oauth_state_bundle import STAGING_MARKER, configured_key_paths, decode, stage_bundle, verify_bundle
 from scripts.oauth_owner_backup import request as owner_request
 from tests import test_chat_github_oauth as original
 
@@ -22,6 +22,7 @@ class OwnerBackupControlTests(getattr(unittest, 'IsolatedAsyncioTestCase', unitt
     consent_start = original.ActualOAuthTests.consent_start
     authorization_code = original.ActualOAuthTests.authorization_code
     tokens = original.ActualOAuthTests.tokens
+    rpc = original.ActualOAuthTests.rpc
 
     def make_app(self, **kwargs):
         if not hasattr(self, 'control_config'):
@@ -176,6 +177,80 @@ class OwnerBackupControlTests(getattr(unittest, 'IsolatedAsyncioTestCase', unitt
         with self.assertRaisesRegex(ValueError, 'target_state_content_conflict'):
             sign_target(plan, source, source_pub, target_config, destination, target_key,
                         allow_loopback_for_tests=True)
+
+    @unittest.skipUnless(shutil.which('ssh-keygen'), 'OpenSSH is required to sign writer handoffs')
+    async def test_staged_gateway_requires_current_grant_and_preserves_original_oauth(self):
+        from assistant_mesh.business_writer_grant import _expected
+        from assistant_mesh.oauth_writer_handoff import assemble_transfer, sign_source, sign_target
+
+        operation = 'fixture-oauth-handoff'
+        async with self.app.router.lifespan_context(self.app):
+            # Keep an actual access token and a consumed code from the same SDK.
+            code, verifier = await self.authorization_code('tasks:read')
+            token_request = dict(grant_type='authorization_code', client_id=original.CLIENT, code=code,
+                code_verifier=verifier, redirect_uri=original.CALLBACK, resource=original.ORIGIN + '/mcp')
+            exchanged = await self.http.post('/token', data=token_request)
+            self.assertEqual(200, exchanged.status_code)
+            access = exchanged.json()['access_token']
+            instance = (await self.cli('info'))['instance_id']
+            await self.cli('backup', operation, instance)
+            closed = await self.settled(operation, instance)
+            self.assertEqual('writer_retired', (await self.cli('retire', operation, instance))['state'])
+        plan = dict(operation_id=operation, group='owner-smoke', scope='business-fixture',
+                    source_holder='vps', next_owner='gateway',
+                    previous=dict(owner=None, epoch=0, head=dict(index=0, sha256='0' * 64)))
+        source_key, target_key = (self.directory / name for name in ('source-signing', 'target-signing'))
+        for key in (source_key, target_key):
+            subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)], check=True, timeout=15)
+        source_pub, target_pub = (key.with_suffix('.pub') for key in (source_key, target_key))
+        source = sign_source(plan, self.config, closed['bundle_path'], source_key, allow_loopback_for_tests=True)
+        destination = self.directory / 'staged'; target_config = copy.deepcopy(self.config)
+        stage_bundle(closed['bundle_path'], destination, target_config, key_paths=configured_key_paths(target_config),
+                     expected_sha256=closed['bundle_sha256'], allow_loopback_for_tests=True)
+        target_config['state']['directory'] = str(destination / 'state')
+        target = sign_target(plan, source, source_pub, target_config, destination, target_key,
+                             allow_loopback_for_tests=True)
+        proposal = assemble_transfer(plan, source, target, source_pub, target_pub)
+        activation = dict(source_public_key=str(source_pub), target_public_key=str(target_pub))
+        for name, value in dict(plan=plan, source=source, target=target, voter_config={'voters': []}).items():
+            file = self.directory / (name + '.json')
+            file.write_text(json.dumps(value)); file.chmod(0o600)
+            activation[name] = str(file)
+
+        _, expected = _expected(proposal, dict(index=10, term=2))
+        confirmation = {'receipt': expected, 'barrier': {'index': 11}, 'members': [1, 2]}
+        self.config = target_config
+        _, _, app = original.ActualOAuthTests.make_app(self, writer_activation=activation)
+        record = destination / 'writer-activation.json'
+        with mock.patch('assistant_mesh.oauth_writer_activation.confirm_grant', side_effect=ValueError('no current grant')):
+            with self.assertRaisesRegex(ValueError, 'no current grant'):
+                async with app.router.lifespan_context(app):
+                    self.fail('staging cannot start without its real grant')
+        self.assertFalse(record.exists())
+        with mock.patch('assistant_mesh.oauth_writer_activation.confirm_grant', return_value=confirmation) as voters:
+            async with app.router.lifespan_context(app):
+                async with self.real_client(transport=original.httpx2.ASGITransport(app=app), base_url=original.ORIGIN) as http:
+                    self.assertEqual(200, (await self.rpc(access, 'tools/list', http=http)).status_code)
+                    replay = await http.post('/token', data=token_request)
+                    self.assertEqual((401, 'invalid_grant'), (replay.status_code, replay.json()['error']))
+                lease = await app.oauth_migration.freeze()
+                moved = app.oauth_migration.state_root
+                exported = app.oauth_migration.stage_marker_sha256
+                self.assertTrue(exported)
+                from assistant_mesh.oauth_state_bundle import export_bundle
+                successor = export_bundle(target_config, self.directory / 'successor-backup', lease=lease,
+                                          allow_loopback_for_tests=True)
+                self.assertEqual(exported, successor['writer_observation']['source_stage_marker_sha256'])
+                self.assertNotIn(STAGING_MARKER, successor['files'])
+            voters.assert_called_once_with(proposal, {'voters': []})
+        self.assertTrue(record.exists()); self.assertTrue((moved / STAGING_MARKER).exists())
+        with self.assertRaisesRegex(ValueError, 'staging_not_activated'):
+            original.ActualOAuthTests.make_app(self)
+        _, _, restart = original.ActualOAuthTests.make_app(self, writer_activation=activation)
+        with mock.patch('assistant_mesh.oauth_writer_activation.confirm_grant', side_effect=ValueError('grant superseded')):
+            with self.assertRaisesRegex(ValueError, 'grant superseded'):
+                async with restart.router.lifespan_context(restart):
+                    self.fail('stored startup receipt is insufficient')
 
     async def test_owner_auth_exact_fields_and_drain_timeout_keep_original_admission_closed(self):
         started, release = asyncio.Event(), asyncio.Event()

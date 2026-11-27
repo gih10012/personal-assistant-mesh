@@ -221,10 +221,10 @@ the original receipt uses `amita-oauth-writer-receipt/1`.
 Use `assistant_mesh.oauth_writer_handoff` to generate the private signed
 source and inactive target witnesses and assemble the proposal. Its `confirm`
 action commits a new read barrier and verifies the still-current named grant
-on two voters. The role grant is a control-plane result. The target remains
-inactive until its OAuth lifespan consumes that verified grant, and outside
-dependencies still need the original service bindings. Upgrade all voting
-members before submitting the new typed command to a group.
+on two voters. The target's normal [OAuth lifespan](../../docs/CHAT-GITHUB-OAUTH.md#start-the-target-with-its-current-oauth-grant)
+also verifies a fresh barrier before serving. Outside dependencies still
+need the original service bindings. Upgrade all voting members before
+submitting the new typed command to a group.
 
 ## Candidate assembly
 

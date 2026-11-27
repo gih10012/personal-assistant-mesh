@@ -65,22 +65,30 @@ class FreezeLease:
                 or Path(state_root).absolute() != boundary.state_root
                 or bound != boundary.binding or references != boundary.key_references):
             raise ValueError('oauth_migration_live_freeze_lease_required')
-        return {'kind': 'observed_in_process_asgi_and_sdk_drain', 'controller_id': boundary.identity,
+        result = {'kind': 'observed_in_process_asgi_and_sdk_drain', 'controller_id': boundary.identity,
                 'asgi_active': 0, 'sdk_active': 0, 'completed_operations': boundary.completed,
                 'instrumented_async_methods': boundary.instrumented,
                 'provider_state': boundary.provider_evidence(),
                 'sdk_audit': boundary.audit, 'local_state_writer_lock_held': True, 'cross_process_writer_fenced': False,
                 'activation_authorized': False}
+        if boundary.stage_marker_sha256 is not None:
+            result['source_stage_marker_sha256'] = boundary.stage_marker_sha256
+        return result
 
 
 class MigrationBoundary:
-    def __init__(self, document, *, allow_loopback_for_tests=False):
+    def __init__(self, document, *, allow_loopback_for_tests=False, writer_activation=None):
         from .oauth_state_bundle import binding, key_references
         config, self.binding = binding(document, allow_loopback_for_tests)
         self._document = config
         self.state_root = Path(config['state']['directory']).absolute()
-        if os.path.lexists(self.state_root / STAGING_MARKER):
+        if os.path.lexists(self.state_root / STAGING_MARKER) and writer_activation is None:
             raise ValueError('oauth_migration_staging_not_activated')
+        self.activation = self.stage_marker_sha256 = None
+        if writer_activation is not None:
+            from .oauth_writer_activation import OAuthWriterActivation
+            self.activation = OAuthWriterActivation(config, writer_activation,
+                                                     allow_loopback_for_tests=allow_loopback_for_tests)
         self.audit = audit_sdk()
         self.key_references = key_references(config)
         self.identity = secrets.token_hex(16)
@@ -129,9 +137,18 @@ class MigrationBoundary:
         try:
             if not self.owns_writer():
                 raise ValueError('oauth_local_state_writer_directory_changed')
-            if os.path.lexists(self.state_root / STAGING_MARKER):
-                raise ValueError('oauth_migration_staging_not_activated')
-            self.phase = 'sealed' if self.retired else 'open'
+            self.phase = 'starting'
+            self.stage_marker_sha256 = None
+            if self.retired:
+                self.phase = 'sealed'
+            else:
+                if self.activation is not None:
+                    self.stage_marker_sha256 = self.activation.admit(self.key_references)
+                    if not self.owns_writer() or self.retired:
+                        raise ValueError('oauth_local_state_writer_directory_changed')
+                elif os.path.lexists(self.state_root / STAGING_MARKER):
+                    raise ValueError('oauth_migration_staging_not_activated')
+                self.phase = 'open'
             yield
         finally:
             # Do not let a replacement process start while a cancelled ASGI

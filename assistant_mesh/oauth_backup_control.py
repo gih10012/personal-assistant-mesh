@@ -14,12 +14,11 @@ import re
 import socket
 import stat
 import struct
-import tempfile
 import time
 
 from .oauth_state_boundary import RETIREMENT_MARKER
 from .oauth_state_bundle import (canonical, decode, export_bundle, key_references, safe_path, sha, verify_bundle,
-                                 _read, _scan, _sync_tree, _write)
+                                 _publish_record, _read, _source_scan, _sync_tree, _write)
 
 
 PROTOCOL = 'mesh-oauth-owner-backup/1'
@@ -264,8 +263,8 @@ class OwnerBackupControl:
 
     def _retire(self, operation, instance, lease, bundle):
         root = self.boundary.state_root
-        lease.evidence(root, self.boundary.binding, key_references(self.document))
-        files, directories, _ = _scan(root)
+        evidence = lease.evidence(root, self.boundary.binding, key_references(self.document))
+        files, directories, _ = _source_scan(root, evidence)
         tree_hash = sha(canonical({key: sha(raw) for key, raw in files.items()}).encode())
         if directories != bundle['directories'] or tree_hash != bundle['source_stability']['tree_sha256']:
             raise ValueError('oauth_writer_retirement_state_changed')
@@ -276,15 +275,7 @@ class OwnerBackupControl:
         receipt['sha256'] = sha(canonical(receipt).encode())
         # Publication is atomic and tied to this state directory, independent
         # of the configured maintenance socket or later service command line.
-        with tempfile.NamedTemporaryFile(prefix='.oauth-retire-', suffix='.tmp', dir=root) as staged:
-            staged.write((canonical(receipt) + '\n').encode())
-            staged.flush(); os.fsync(staged.fileno())
-            os.link(staged.name, root / RETIREMENT_MARKER)
-        directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _publish_record(root / RETIREMENT_MARKER, receipt)
         self.leases.pop(operation, None)
 
     async def _backup(self, operation):

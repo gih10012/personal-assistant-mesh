@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import stat
+import tempfile
 import time
 
 from .oauth_state_boundary import FreezeLease, SDK_PINS, STAGING_MARKER, VERSIONS
@@ -136,6 +137,15 @@ def _scan(root):
     return files, sorted(directories), signatures
 
 
+def _source_scan(root, observation):
+    files, directories, signatures = _scan(root)
+    marker = files.pop(STAGING_MARKER, None)
+    expected = observation.get('source_stage_marker_sha256')
+    if (sha(marker) if marker is not None else None) != expected:
+        raise ValueError('oauth_bundle_source_activation_changed')
+    return files, directories, signatures
+
+
 def _layout(files, directories, source_root):
     if (not isinstance(source_root, str) or not Path(source_root).is_absolute()
             or '..' in Path(source_root).parts):
@@ -189,6 +199,18 @@ def _write(path, raw):
         stream.write(raw); stream.flush(); os.fsync(stream.fileno())
 
 
+def _publish_record(path, value):
+    with tempfile.NamedTemporaryFile(prefix='.oauth-record-', suffix='.tmp', dir=path.parent) as staged:
+        staged.write((canonical(value) + '\n').encode())
+        staged.flush(); os.fsync(staged.fileno())
+        os.link(staged.name, path)
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _sync_tree(root):
     for parent, _, _ in os.walk(str(root), topdown=False):
         fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -214,9 +236,9 @@ def export_bundle(document, destination, *, lease=None, allow_loopback_for_tests
     references = key_references(config)
     evidence = lease.evidence(root, bound, references) if lease is not None else {'kind': 'unfenced_stable_file_copy',
         'asgi_active': None, 'sdk_active': None, 'cross_process_writer_fenced': False, 'activation_authorized': False}
-    files, directories, signatures = _scan(root)
+    files, directories, signatures = _source_scan(root, evidence)
     artifacts = _layout(files, directories, str(root))
-    again, again_dirs, again_signatures = _scan(root)
+    again, again_dirs, again_signatures = _source_scan(root, evidence)
     if files != again or directories != again_dirs or signatures != again_signatures:
         raise ValueError('oauth_bundle_source_changed')
     if lease is not None:
