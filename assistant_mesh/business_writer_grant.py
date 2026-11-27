@@ -10,6 +10,8 @@ from .worker import Client
 
 MANAGE = '/raft/manage'
 MEMBERS = {1, 2, 3}
+RECEIPT_FORMATS = {'replica_writer': 'amita-replica-writer-receipt/1',
+                   'oauth_writer': 'amita-oauth-writer-receipt/1'}
 
 
 def _expected(proposal, receipt):
@@ -17,9 +19,10 @@ def _expected(proposal, receipt):
     grant = dict(owner=proposal['next_owner'], epoch=proposal['next_epoch'], head=head)
     binding = {key: proposal[key] for key in ('group', 'role', 'scope', 'operation_id', 'checkpoint_sha256')}
     current = dict(grant, **binding, checkpoint=proposal['checkpoint'])
-    expected_receipt = dict(**binding, format='amita-replica-writer-receipt/1', status='applied',
-        request_sha256=head['sha256'], index=head['index'], term=receipt['term'], grant=grant,
-        retained_effects_sha256=proposal['checkpoint']['retained_effects_sha256'])
+    expected_receipt = dict(**binding, format=RECEIPT_FORMATS[proposal['role']], status='applied',
+                           request_sha256=head['sha256'], index=head['index'], term=receipt['term'], grant=grant)
+    if proposal['role'] == 'replica_writer':
+        expected_receipt['retained_effects_sha256'] = proposal['checkpoint']['retained_effects_sha256']
     return current, expected_receipt
 
 
@@ -38,7 +41,7 @@ def _observation(proposal, barrier, member, status):
                for row in (receipt, boundary)):
         return None
     current, expected_receipt = _expected(proposal, receipt)
-    if (receipt != expected_receipt or status.get('replica_writer') != current
+    if (receipt != expected_receipt or status.get(proposal['role']) != current
             or boundary != {'digest': barrier['digest'], 'index': boundary['index'], 'term': boundary['term']}
             or not receipt['index'] < boundary['index'] <= status['applied'] <= status['persisted_commit']
             or not receipt['term'] <= boundary['term'] <= status['term']):
@@ -118,4 +121,6 @@ def _confirm(proposal, clients, timeout):
 
 def confirm_grant(proposal, config, timeout=15):
     """Read the exact still-current grant from two authenticated voters."""
+    if proposal.get('role') not in RECEIPT_FORMATS:
+        raise ValueError('writer_grant_role_invalid')
     return _confirm(proposal, _client_set(config), timeout)

@@ -1,4 +1,4 @@
-import { exact, identifier, MEMBERS, need, OWNER_TRANSFER } from './codec.mjs';
+import { exact, identifier, isOwnerTransfer, MEMBERS, need, OWNER_ROLES } from './codec.mjs';
 import { originalReceipt } from './owner-fsm.mjs';
 import { peerMode, verify, verifyExchange } from './protocol.mjs';
 
@@ -28,7 +28,7 @@ function authorized(header, expected) {
 function checkManagement(config, value, authorization) {
   const operator = authorized(authorization, config.operator_key);
   const owner = authorized(authorization, config.owner_command_key);
-  if (value?.action === 'propose' && value.proposal?.format === OWNER_TRANSFER) {
+  if (value?.action === 'propose' && isOwnerTransfer(value.proposal)) {
     need(owner, 'owner_command_key_required');
   } else if (['status', 'receipt', 'owner'].includes(value?.action)) {
     need(operator || owner, 'existing_operator_binding_required');
@@ -79,12 +79,14 @@ export async function handle(driver, request) {
   }
   if (value.action === 'receipt' || value.action === 'owner') {
     const readReceipt = value.action === 'receipt';
-    need(readReceipt ? exact(value, [...keys, 'operation_id']) && identifier(value.operation_id) : exact(value, keys),
+    const ownerRole = value.role ?? 'replica_writer';
+    need(readReceipt ? exact(value, [...keys, 'operation_id']) && identifier(value.operation_id)
+      : exact(value, keys) || (exact(value, [...keys, 'role']) && OWNER_ROLES.includes(value.role)),
       'management_fields');
     const state = await driver.inspect();
     const read = { group: state.group, scope: state.scope, member: state.member, applied: state.applied,
       consistency: state.owner_read_consistency, core_closed: state.core_closed, hold: state.hold, business_fencing: false };
-    if (!readReceipt) return { ...read, role: 'replica_writer', current: state.replica_writer };
+    if (!readReceipt) return { ...read, role: ownerRole, current: state[ownerRole] };
     const receipt = originalReceipt(state.receipts, value.operation_id);
     return { ...read, operation_id: value.operation_id, status: receipt ? 'recorded' : 'unknown_here', receipt };
   }

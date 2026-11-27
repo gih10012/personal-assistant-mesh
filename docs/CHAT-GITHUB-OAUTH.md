@@ -162,6 +162,18 @@ covering older launch paths and confirming the OAuth role's authority before
 serving from the staged target. The retirement operation never activates the
 target or moves the public route.
 
+Use `python3 -m assistant_mesh.oauth_writer_handoff` for the writer transfer.
+The private plan contains `operation_id` (the original retirement operation),
+`group`, `scope`, `source_holder`, `next_owner` and the OAuth role's `previous`
+grant. The `source` action reads the retirement and exact bundle with the old
+gateway's OAuth document and signs with the old holder's key. On the target,
+`target` uses its exact OAuth document and the staged directory. This verifies
+the unchanged owner, issuer, scope, redirects, dedicated keys and encrypted
+state bytes before signing independently. `assemble` verifies both signatures
+and emits an OAuth-role Raft command. After submission, `confirm` checks the
+current quorum grant. Keep the original plan, witnesses and operation identity.
+The target still stays inactive at this step.
+
 ## Evidence and next real acceptance
 
 The isolated tests use real pinned components, real PKCE/CSRF/cookies, actual

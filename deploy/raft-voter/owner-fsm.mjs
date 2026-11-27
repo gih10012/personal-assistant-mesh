@@ -1,4 +1,4 @@
-import { OWNER_TRANSFER } from './codec.mjs';
+import { isOwnerTransfer } from './codec.mjs';
 import { sha256 } from './protocol.mjs';
 
 // All accepted strings are ASCII identifiers or hashes, and numbers are
@@ -18,9 +18,13 @@ export function originalReceipt(receipts, id) {
 }
 
 export function receiptMatches(receipt, proposal, requestHash) {
-  return proposal.format === OWNER_TRANSFER
-    ? receipt.format === 'amita-replica-writer-receipt/1' && receipt.request_sha256 === requestHash
+  return isOwnerTransfer(proposal)
+    ? receipt.format === receiptFormat(proposal.role) && receipt.request_sha256 === requestHash
     : receipt.format === undefined && receipt.digest === proposal.digest;
+}
+
+function receiptFormat(role) {
+  return role === 'oauth_writer' ? 'amita-oauth-writer-receipt/1' : 'amita-replica-writer-receipt/1';
 }
 
 export function recordReceipt(receipts, id, receipt) {
@@ -39,22 +43,22 @@ export async function ownerRequestError(command, binding) {
 export async function applyOwner(state, command, record) {
   if (originalReceipt(state.receipts, command.operation_id)) return;
   const requestHash = await contentHash(command);
-  const current = state.replica_writer ?? genesis;
+  const current = state[command.role] ?? genesis;
   let reason = await ownerRequestError(command, state.binding);
   if (reason === null && (current.owner !== command.previous.owner || current.epoch !== command.previous.epoch ||
     current.head.index !== command.previous.head.index || current.head.sha256 !== command.previous.head.sha256)) {
     reason = 'owner_predecessor_conflict';
   }
-  const receipt = { format: 'amita-replica-writer-receipt/1', operation_id: command.operation_id,
+  const receipt = { format: receiptFormat(command.role), operation_id: command.operation_id,
     group: command.group, role: command.role, scope: command.scope, request_sha256: requestHash,
     index: record.index, term: record.term, checkpoint_sha256: command.checkpoint_sha256,
-    retained_effects_sha256: command.checkpoint.retained_effects_sha256,
     status: reason === null ? 'applied' : 'rejected' };
+  if (command.role === 'replica_writer') receipt.retained_effects_sha256 = command.checkpoint.retained_effects_sha256;
   if (reason) receipt.reason = reason;
   else {
     const head = { index: record.index, sha256: requestHash };
     receipt.grant = { owner: command.next_owner, epoch: command.next_epoch, head };
-    state.replica_writer = { ...receipt.grant, group: command.group, role: command.role, scope: command.scope,
+    state[command.role] = { ...receipt.grant, group: command.group, role: command.role, scope: command.scope,
       operation_id: command.operation_id, checkpoint_sha256: command.checkpoint_sha256, checkpoint: command.checkpoint };
   }
   recordReceipt(state.receipts, command.operation_id, receipt);

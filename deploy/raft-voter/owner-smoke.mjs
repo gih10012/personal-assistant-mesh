@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { OWNER_TRANSFER } from './codec.mjs';
+import { OAUTH_TRANSFER, OWNER_TRANSFER } from './codec.mjs';
 import { VoterDriver, flusher } from './driver.mjs';
 import { authenticatedForward, handle } from './http.mjs';
 import { loadNodeVoter, pins } from './loader-node.mjs';
@@ -28,6 +28,14 @@ function transfer(operation_id, previous, source, next_owner) {
     retained_effects_sha256: digit(7) };
   return { format: OWNER_TRANSFER, operation_id, group, scope, role: 'replica_writer', previous,
     next_owner, next_epoch: previous.epoch + 1, checkpoint, checkpoint_sha256: checkpointDigest(checkpoint) };
+}
+
+function oauthTransfer(operation_id, previous, source, target) {
+  const checkpoint = { binding_sha256: digit(1), bundle_sha256: digit(2), tree_sha256: digit(3),
+    source_retirement_sha256: digit(4), target_state_sha256: digit(7), source_holder: source,
+    holder_receipts: [source, target].sort().map((holder, i) => ({ holder, sha256: digit(5 + i) })) };
+  return { format: OAUTH_TRANSFER, operation_id, group, scope, role: 'oauth_writer', previous,
+    next_owner: target, next_epoch: previous.epoch + 1, checkpoint, checkpoint_sha256: checkpointDigest(checkpoint) };
 }
 
 test('controlled owner transfer survives interruption at durable apply', async t => {
@@ -100,6 +108,21 @@ test('controlled owner transfer survives interruption at durable apply', async t
   await manage(1, 'propose', { proposal: seed }); await pump();
   const seedReceipt = (await manage(2, 'receipt', { operation_id: seed.operation_id })).receipt;
   assert.equal(seedReceipt.status, 'applied');
+  const oauth = oauthTransfer('first-oauth-handoff', genesis, 'vps', 'gateway');
+  await assert.rejects(manage(1, 'propose', { proposal: oauth }, operatorKey), /owner_command_key_required/);
+  await assert.rejects(manage(1, 'propose', { proposal: { ...oauth, role: 'replica_writer' } }), /owner_transfer_fields/);
+  await manage(1, 'propose', { proposal: oauth }); await pump();
+  const oauthReceipt = (await manage(2, 'receipt', { operation_id: oauth.operation_id })).receipt;
+  assert.equal(oauthReceipt.format, 'amita-oauth-writer-receipt/1');
+  assert.equal(oauthReceipt.grant.epoch, 1);
+  assert.equal((await manage(2, 'owner', { role: 'oauth_writer' })).current.owner, 'gateway');
+  assert.deepEqual((await manage(2, 'owner')).current.head, seedReceipt.grant.head);
+  await assert.rejects(manage(1, 'propose', { proposal: { ...seed, operation_id: oauth.operation_id } }),
+    /original_operation_digest_conflict/);
+  const wrongRoleHead = oauthTransfer('other-role-predecessor', seedReceipt.grant, seed.next_owner, 'other');
+  await manage(1, 'propose', { proposal: wrongRoleHead }); await pump();
+  assert.equal((await manage(2, 'receipt', { operation_id: wrongRoleHead.operation_id })).receipt.reason,
+    'owner_predecessor_conflict');
   const winner = transfer('transfer-winner', seedReceipt.grant, 'laptop', 'vps');
   const conflict = transfer('transfer-conflict', seedReceipt.grant, 'laptop', 'alternate');
   interrupt = true;
@@ -125,6 +148,7 @@ test('controlled owner transfer survives interruption at durable apply', async t
     assert.equal(status.replica_writer.owner, winner.next_owner);
     assert.deepEqual(status.replica_writer.checkpoint, winner.checkpoint);
     assert.deepEqual(status.replica_writer.head, committed.grant.head);
+    assert.deepEqual(status.oauth_writer.head, oauthReceipt.grant.head);
     assert.deepEqual(status.receipts[seed.operation_id], seedReceipt);
     assert.deepEqual(status.receipts[winner.operation_id], committed);
     const rejected = status.receipts[conflict.operation_id];
@@ -138,9 +162,10 @@ test('controlled owner transfer survives interruption at durable apply', async t
   await drivers.get(2).close();
   await open(2);
   assert.deepEqual((await manage(2, 'receipt', { operation_id: winner.operation_id })).receipt, committed);
+  assert.deepEqual((await manage(2, 'receipt', { operation_id: oauth.operation_id })).receipt, oauthReceipt);
   const local = drivers.get(2);
   const incomplete = await local.store.read();
-  delete incomplete.replica_writer;
+  delete incomplete.oauth_writer;
   await local.store.save(incomplete);
   await local.close();
   await assert.rejects(open(2), /original_applied_owner_state_required/);

@@ -17,8 +17,8 @@ from .worker_claim_receipts import FORMAT as CLAIM_PROTOCOL
 NAMESPACE = 'amita-business-writer-handoff'
 EVIDENCE = 'amita-business-writer-witness/1'
 TRANSFER = 'amita-replica-writer-transfer/1'
-PLAN_FIELDS = {'operation_id', 'group', 'scope', 'source_holder', 'next_owner', 'previous',
-               'external_dependencies_manifest_sha256', 'retained_effects_sha256'}
+PLAN_FIELDS = {'operation_id', 'group', 'scope', 'source_holder', 'next_owner', 'previous'}
+BUSINESS_HASH_FIELDS = ('external_dependencies_manifest_sha256', 'retained_effects_sha256')
 
 
 def _need(condition, reason):
@@ -34,11 +34,11 @@ def _fields(value, keys):
     return isinstance(value, dict) and set(value) == keys
 
 
-def _plan(value):
-    _need(_fields(value, PLAN_FIELDS) and all(_identifier(value[k]) for k in
+def _plan(value, hash_fields=BUSINESS_HASH_FIELDS):
+    _need(_fields(value, PLAN_FIELDS | set(hash_fields)) and all(_identifier(value[k]) for k in
           ('operation_id', 'group', 'scope', 'source_holder', 'next_owner'))
           and value['source_holder'] != value['next_owner']
-          and all(_hash(value[k]) for k in ('external_dependencies_manifest_sha256', 'retained_effects_sha256')),
+          and all(_hash(value[k]) for k in hash_fields),
           'plan_invalid')
     previous = value['previous']
     _need(_fields(previous, {'owner', 'epoch', 'head'}) and _integer(previous['epoch'])
@@ -74,23 +74,31 @@ def _body(plan, kind, evidence):
 
 def _sign(plan, kind, evidence, key):
     body = _body(plan, kind, evidence)
-    signature = _ssh(['sign', '-f', str(Path(key).absolute()), '-n', NAMESPACE], body)
+    signature = sign_witness(body, key, NAMESPACE)
     return dict(body=body, signature=signature)
 
 
-def _verify(plan, kind, envelope, public_key):
-    _need(_fields(envelope, {'body', 'signature'}) and isinstance(envelope['body'], dict)
-          and isinstance(envelope['signature'], str) and envelope['signature'].isascii()
-          and 0 < len(envelope['signature']) <= 8192, 'witness_invalid')
-    body = envelope['body']
-    evidence = body.get('evidence')
-    _need(isinstance(evidence, dict) and body == _body(plan, kind, evidence), 'witness_plan_conflict')
+def sign_witness(body, key, namespace):
+    return _ssh(['sign', '-f', str(Path(key).absolute()), '-n', namespace], body)
+
+
+def verify_witness(body, signature, public_key, namespace):
+    _need(_identifier(body['holder']) and isinstance(signature, str) and signature.isascii()
+          and 0 < len(signature) <= 8192, 'witness_invalid')
     with tempfile.TemporaryDirectory(prefix='amita-handoff-') as directory:
         signers = Path(directory) / 'allowed_signers'
         signers.write_text(body['holder'] + ' ' + public_key + '\n', encoding='ascii')
-        signature = Path(directory) / 'signature'
-        signature.write_text(envelope['signature'], encoding='ascii')
-        _ssh(['verify', '-f', str(signers), '-I', body['holder'], '-n', NAMESPACE, '-s', str(signature)], body)
+        path = Path(directory) / 'signature'
+        path.write_text(signature, encoding='ascii')
+        _ssh(['verify', '-f', str(signers), '-I', body['holder'], '-n', namespace, '-s', str(path)], body)
+
+
+def _verify(plan, kind, envelope, public_key):
+    _need(_fields(envelope, {'body', 'signature'}) and isinstance(envelope['body'], dict), 'witness_invalid')
+    body = envelope['body']
+    evidence = body.get('evidence')
+    _need(isinstance(evidence, dict) and body == _body(plan, kind, evidence), 'witness_plan_conflict')
+    verify_witness(body, envelope['signature'], public_key, NAMESPACE)
     return evidence
 
 

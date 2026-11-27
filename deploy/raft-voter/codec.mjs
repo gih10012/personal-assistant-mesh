@@ -98,14 +98,18 @@ export function digestProposal(value) {
   return { format: value.format, operation_id: value.operation_id, digest: value.digest };
 }
 export const OWNER_TRANSFER = 'amita-replica-writer-transfer/1';
+export const OAUTH_TRANSFER = 'amita-oauth-writer-transfer/1';
+export const OWNER_ROLES = Object.freeze(['replica_writer', 'oauth_writer']);
+export const isOwnerTransfer = value => [OWNER_TRANSFER, OAUTH_TRANSFER].includes(value?.format);
 export const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
 const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 export function parseProposal(value) {
-  if (value?.format !== OWNER_TRANSFER) return digestProposal(value);
+  if (!isOwnerTransfer(value)) return digestProposal(value);
+  const role = value.format === OWNER_TRANSFER ? 'replica_writer' : 'oauth_writer';
   need(exact(value, ['format', 'operation_id', 'group', 'role', 'scope', 'previous', 'next_owner',
     'next_epoch', 'checkpoint', 'checkpoint_sha256']) && identifier(value.operation_id) &&
-    identifier(value.group) && value.role === 'replica_writer' && identifier(value.scope) &&
+    identifier(value.group) && value.role === role && identifier(value.scope) &&
     identifier(value.next_owner) && integer(value.next_epoch) && value.next_epoch > 0 &&
     hash(value.checkpoint_sha256), 'owner_transfer_fields');
   const p = value.previous;
@@ -115,14 +119,21 @@ export function parseProposal(value) {
     (p.epoch === 0 ? p.head.index === 0 && p.head.sha256 === '0'.repeat(64) : p.head.index > 0) &&
     value.next_epoch === p.epoch + 1 && value.next_owner !== p.owner, 'owner_predecessor_fields');
   const c = value.checkpoint;
-  need(exact(c, ['authority', 'incarnation', 'generation', 'manifest_sha256', 'sealed_journal_head',
-    'typed_rows_sha256', 'external_dependencies_manifest_sha256', 'worker_claim_protocol',
-    'source_holder', 'source_seal_sha256', 'holder_receipts', 'retained_effects_sha256']) &&
-    identifier(c.authority) && identifier(c.incarnation) && integer(c.generation) && c.generation > 0 &&
-    integer(c.sealed_journal_head) && hash(c.manifest_sha256) && hash(c.typed_rows_sha256) &&
-    hash(c.external_dependencies_manifest_sha256) && c.worker_claim_protocol === 'amita-worker-claim/1' &&
-    identifier(c.source_holder) && hash(c.source_seal_sha256) && hash(c.retained_effects_sha256) &&
-    (p.owner === null || c.source_holder === p.owner) && c.source_holder !== value.next_owner, 'sealed_checkpoint_fields');
+  if (role === 'replica_writer') {
+    need(exact(c, ['authority', 'incarnation', 'generation', 'manifest_sha256', 'sealed_journal_head',
+      'typed_rows_sha256', 'external_dependencies_manifest_sha256', 'worker_claim_protocol',
+      'source_holder', 'source_seal_sha256', 'holder_receipts', 'retained_effects_sha256']) &&
+      identifier(c.authority) && identifier(c.incarnation) && integer(c.generation) && c.generation > 0 &&
+      integer(c.sealed_journal_head) && hash(c.manifest_sha256) && hash(c.typed_rows_sha256) &&
+      hash(c.external_dependencies_manifest_sha256) && c.worker_claim_protocol === 'amita-worker-claim/1' &&
+      hash(c.source_seal_sha256) && hash(c.retained_effects_sha256), 'sealed_checkpoint_fields');
+  } else {
+    const digests = ['binding_sha256', 'bundle_sha256', 'tree_sha256', 'source_retirement_sha256', 'target_state_sha256'];
+    need(exact(c, [...digests, 'source_holder', 'holder_receipts']) && digests.every(key => hash(c[key])),
+      'oauth_checkpoint_fields');
+  }
+  need(identifier(c.source_holder) && (p.owner === null || c.source_holder === p.owner) &&
+    c.source_holder !== value.next_owner, 'checkpoint_source_holder');
   const receipts = c.holder_receipts;
   need(Array.isArray(receipts) && receipts.length === 2 &&
     receipts.every(r => exact(r, ['holder', 'sha256']) && identifier(r.holder) && hash(r.sha256)) &&

@@ -312,6 +312,19 @@ def verify_bundle(bundle_path, expected_document, *, key_paths=None, expected_sh
     return value, files, verified_keys is not None
 
 
+def _relocated(value, files, state):
+    relocations, content = {}, {}
+    for name, raw in files.items():
+        if '/' not in name and name.endswith('-info.json'):
+            metadata = decode(raw)
+            metadata['directory'] = str(state / COLLECTION_DIRECTORIES[metadata['collection']])
+            raw = canonical(metadata).encode('utf8')
+            relocations[name] = {'field': 'directory', 'source_sha256': value['files'][name]['sha256'],
+                                 'target_sha256': sha(raw)}
+        content[name] = raw
+    return content, relocations
+
+
 def stage_bundle(bundle_path, destination, expected_document, *, key_paths=None, expected_sha256=None, allow_loopback_for_tests=False):
     target = safe_path(destination)
     if target.exists():
@@ -326,27 +339,44 @@ def stage_bundle(bundle_path, destination, expected_document, *, key_paths=None,
     _sync_tree(target)  # A failed/interrupted staging copy must remain startup-blocked too.
     for relative in sorted(value['directories'], key=lambda item: (len(PurePosixPath(item).parts), item)):
         (state / relative).mkdir(mode=0o700)
-    relocations, derived = {}, {}
-    for name, raw in files.items():
-        if '/' not in name and name.endswith('-info.json'):
-            metadata = decode(raw)
-            metadata['directory'] = str(state / COLLECTION_DIRECTORIES[metadata['collection']])
-            raw = canonical(metadata).encode('utf8')
-            relocations[name] = {'field': 'directory', 'source_sha256': value['files'][name]['sha256'],
-                                 'target_sha256': sha(raw)}
+    content, relocations = _relocated(value, files, state)
+    for name, raw in content.items():
         _write(state / name, raw)
-        derived[name] = sha(raw)
     # Preserve every original source byte inside the verified self-contained
     # bundle, alongside the explicitly derived SDK path-relocated view.
     _write(target / 'source-bundle.json', (canonical(value) + '\n').encode('utf8'))
     report = {'format': FORMAT, 'bundle_sha256': value['sha256'], 'state_directory': str(state),
         'key_dependencies_verified': keys_verified, 'metadata_relocations': relocations,
         'source_bundle_pinned': expected_sha256 is not None,
-        'state_sha256': derived, 'activation_authorized': False, 'writer_fence_verified': False,
+        'state_sha256': {name: sha(raw) for name, raw in content.items()},
+        'activation_authorized': False, 'writer_fence_verified': False,
         'scopes_or_issuer_rewritten': False, 'ttl_rebased': False}
     _write(target / 'staging.json', (canonical(report) + '\n').encode('utf8'))
     _sync_tree(target)
     return report
+
+
+def configured_key_paths(config):
+    return dict(zip(KEY_ROLES, (config['github']['client_secret_file'], config['state']['jwt_key_file'],
+                               config['state']['encryption_key_file'])))
+
+
+def inspect_staging(destination, document, expected_sha256, *, allow_loopback_for_tests=False):
+    """Verify the inactive target bytes and the target's actual key references."""
+    state = safe_path(destination) / 'state'
+    config, _ = binding(document, allow_loopback_for_tests)
+    if safe_path(config['state']['directory']) != state:
+        raise ValueError('oauth_bundle_target_state_path_conflict')
+    value, files, _ = verify_bundle(state.parent / 'source-bundle.json', config,
+        key_paths=configured_key_paths(config), expected_sha256=expected_sha256,
+        allow_loopback_for_tests=allow_loopback_for_tests)
+    actual, directories, _ = _scan(state)
+    marker = actual.pop(STAGING_MARKER, b'null')
+    expected_marker = {'format': FORMAT, 'bundle_sha256': value['sha256'], 'activation_authorized': False}
+    content, _ = _relocated(value, files, state)
+    if decode(marker) != expected_marker or directories != value['directories'] or actual != content:
+        raise ValueError('oauth_bundle_target_state_content_conflict')
+    return sha(canonical({'files': {key: sha(raw) for key, raw in actual.items()}, 'directories': directories}).encode())
 
 
 def activate_staging(*args, **kwargs):

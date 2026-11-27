@@ -1,4 +1,4 @@
-import { bytes, entry, exact, hardState, MEMBERS, message, need, OWNER_TRANSFER, parseProposal, proposeWire, safe, withCommit } from './codec.mjs';
+import { bytes, entry, exact, hardState, isOwnerTransfer, MEMBERS, message, need, OWNER_ROLES, parseProposal, proposeWire, safe, withCommit } from './codec.mjs';
 import { acknowledgement, envelope, exchangeRequest, peerMode, validAck, validateConfig, verify, verifyExchange } from './protocol.mjs';
 import { applyOwner, canonical, contentHash, originalReceipt, ownerRequestError, receiptMatches, recordReceipt } from './owner-fsm.mjs';
 
@@ -27,7 +27,7 @@ function validateStable(stable) {
     const record = entry(wire); size += wire.length;
     need(record.index === previous + 1 && record.term <= hs.term, 'contiguous_bound_log');
     previous = record.index;
-    if (record.index <= stable.applied && record.proposal?.format === OWNER_TRANSFER) appliedOwner = true;
+    if (record.index <= stable.applied && isOwnerTransfer(record.proposal)) appliedOwner = true;
   }
   need(size <= MAX_LOG_BYTES && stable.applied <= hs.commit && hs.commit <= previous, 'stable_commit_applied_bounds');
   return appliedOwner;
@@ -36,7 +36,7 @@ function validateStable(stable) {
 async function applyProposal(state, record) {
   const proposal = record.proposal;
   if (!proposal) return;
-  if (proposal.format === OWNER_TRANSFER) return applyOwner(state, proposal, record);
+  if (isOwnerTransfer(proposal)) return applyOwner(state, proposal, record);
   const previous = originalReceipt(state.receipts, proposal.operation_id);
   if (previous) {
     // The original typed request already owns this ID. A later opaque entry
@@ -46,7 +46,7 @@ async function applyProposal(state, record) {
 }
 
 async function verifyOwnerRestore(state, appliedOwner) {
-  if (!appliedOwner && state.replica_writer == null && !Object.values(state.receipts).some(r => r.format)) return;
+  if (!appliedOwner && OWNER_ROLES.every(role => state[role] == null) && !Object.values(state.receipts).some(r => r.format)) return;
   // The pinned host retains the entire bounded log. A missing FSM row or
   // receipt at an already-applied index must never be treated as virgin state.
   const replay = { binding: state.binding, receipts: {} };
@@ -54,7 +54,7 @@ async function verifyOwnerRestore(state, appliedOwner) {
     const reason = await applyProposal(replay, entry(wire));
     need(!reason, reason);
   }
-  need(canonical(replay.replica_writer ?? null) === canonical(state.replica_writer ?? null) &&
+  need(OWNER_ROLES.every(role => canonical(replay[role] ?? null) === canonical(state[role] ?? null)) &&
     canonical(replay.receipts) === canonical(state.receipts), 'original_applied_owner_state_required');
 }
 
@@ -126,7 +126,8 @@ export class VoterDriver {
       ...(this.config.qualification_until_ms === undefined ? {} : { qualification_until_ms: this.config.qualification_until_ms }),
       term: hs.term, persisted_commit: hs.commit, applied: state.stable.applied,
       leader_hint: state.leader_hint, leader_hint_is_authority: false,
-      replica_writer: clone(state.replica_writer ?? null), owner_read_consistency: 'local_durable_applied',
+      replica_writer: clone(state.replica_writer ?? null), oauth_writer: clone(state.oauth_writer ?? null),
+      owner_read_consistency: 'local_durable_applied',
       receipts: clone(state.receipts), queued_messages: state.outbox.length,
       pending_original_input: state.pending !== null, hold: state.hold, quota: clone(state.quota),
       core_closed: this.dead, business_fencing: false, ha_qualified: false };
@@ -296,7 +297,7 @@ export class VoterDriver {
     return this.serial(async () => {
       need(this.state.enabled && !this.expired(), 'voter_disabled'); this.event();
       let requestHash = null;
-      if (proposal.format === OWNER_TRANSFER) {
+      if (isOwnerTransfer(proposal)) {
         const reason = await ownerRequestError(proposal, this.state.binding);
         need(reason === null, reason);
         requestHash = await contentHash(proposal);

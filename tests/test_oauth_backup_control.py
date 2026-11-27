@@ -1,12 +1,15 @@
 """Real local socket/lifespan + pinned OAuth SDK, synthetic IdP/state only."""
 import asyncio
+import copy
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import unittest
 from unittest import mock
 
 from assistant_mesh.oauth_backup_control import PROTOCOL
-from assistant_mesh.oauth_state_bundle import decode, verify_bundle
+from assistant_mesh.oauth_state_bundle import configured_key_paths, decode, stage_bundle, verify_bundle
 from scripts.oauth_owner_backup import request as owner_request
 from tests import test_chat_github_oauth as original
 
@@ -130,6 +133,49 @@ class OwnerBackupControlTests(getattr(unittest, 'IsolatedAsyncioTestCase', unitt
             persisted = await self.cli('status', operation, instance)
             self.assertEqual('writer_retired', persisted['state'])
             self.assertEqual(retired['retirement'], persisted['retirement'])
+
+    @unittest.skipUnless(shutil.which('ssh-keygen'), 'OpenSSH is required to sign writer handoffs')
+    async def test_oauth_transfer_binds_real_retirement_and_exact_inactive_state(self):
+        from assistant_mesh.oauth_writer_handoff import assemble_transfer, sign_source, sign_target
+
+        operation = 'fixture-oauth-handoff'
+        async with self.app.router.lifespan_context(self.app):
+            await self.tokens()
+            instance = (await self.cli('info'))['instance_id']
+            await self.cli('backup', operation, instance)
+            closed = await self.settled(operation, instance)
+            retired = await self.cli('retire', operation, instance)
+        self.assertEqual('writer_retired', retired['state'])
+        plan = dict(operation_id=operation, group='owner-smoke', scope='business-fixture',
+                    source_holder='vps', next_owner='gateway',
+                    previous=dict(owner=None, epoch=0, head=dict(index=0, sha256='0' * 64)))
+        source_key, target_key = (self.directory / name for name in ('source-signing', 'target-signing'))
+        for key in (source_key, target_key):
+            subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)], check=True, timeout=15)
+        source_pub, target_pub = (key.with_suffix('.pub') for key in (source_key, target_key))
+        with self.assertRaisesRegex(ValueError, 'original_retirement_required'):
+            sign_source(dict(plan, operation_id='new-id'), self.config, closed['bundle_path'], source_key,
+                        allow_loopback_for_tests=True)
+        source = sign_source(plan, self.config, closed['bundle_path'], source_key, allow_loopback_for_tests=True)
+        destination = self.directory / 'staged'
+        stage_bundle(closed['bundle_path'], destination, self.config, key_paths=configured_key_paths(self.config),
+                     expected_sha256=closed['bundle_sha256'], allow_loopback_for_tests=True)
+        target_config = copy.deepcopy(self.config)
+        target_config['state']['directory'] = str(destination / 'state')
+        target = sign_target(plan, source, source_pub, target_config, destination, target_key,
+                             allow_loopback_for_tests=True)
+        proposal = assemble_transfer(plan, source, target, source_pub, target_pub)
+        self.assertEqual('oauth_writer', proposal['role'])
+        self.assertEqual(retired['retirement']['sha256'], proposal['checkpoint']['source_retirement_sha256'])
+        self.assertEqual(closed['bundle_sha256'], proposal['checkpoint']['bundle_sha256'])
+        with self.assertRaisesRegex(ValueError, 'witness_binding_conflict'):
+            assemble_transfer(dict(plan, next_owner='other'), source, target, source_pub, target_pub)
+        drift = destination / 'state' / 'unrecorded.tmp'
+        drift.write_bytes(b'unrecorded target write')
+        drift.chmod(0o600)
+        with self.assertRaisesRegex(ValueError, 'target_state_content_conflict'):
+            sign_target(plan, source, source_pub, target_config, destination, target_key,
+                        allow_loopback_for_tests=True)
 
     async def test_owner_auth_exact_fields_and_drain_timeout_keep_original_admission_closed(self):
         started, release = asyncio.Event(), asyncio.Event()

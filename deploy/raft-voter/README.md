@@ -207,6 +207,25 @@ does not verify the semantics of external records or start native work, OAuth,
 channel delivery or the production service. Those runtimes need their existing
 separate fences and actual dependency verification before startup.
 
+### Independent OAuth writer role
+
+`amita-oauth-writer-transfer/1` controls `oauth_writer`, with its own owner,
+epoch and applied head in the same group. It binds the exact source retirement,
+OAuth policy, bundle, source tree and prepared target hashes, with two
+independent holder witnesses. The control envelope and authorization are the
+same as for the business writer, including the separate owner command
+credential and original operation IDs. An OAuth transfer does not advance
+the business writer. The `owner` action accepts `role: "oauth_writer"`, and
+the original receipt uses `amita-oauth-writer-receipt/1`.
+
+Use `assistant_mesh.oauth_writer_handoff` to generate the private signed
+source and inactive target witnesses and assemble the proposal. Its `confirm`
+action commits a new read barrier and verifies the still-current named grant
+on two voters. The role grant is a control-plane result. The target remains
+inactive until its OAuth lifespan consumes that verified grant, and outside
+dependencies still need the original service bindings. Upgrade all voting
+members before submitting the new typed command to a group.
+
 ## Candidate assembly
 
 `build-candidate.mjs` takes a new absolute private destination. It copies only
