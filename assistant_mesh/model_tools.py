@@ -18,6 +18,8 @@ TOOLS = [
          'provider回执不是工具执行证明，未接执行适配器不会自动执行；未知占用不能因超时直接释放或新ID重做。'
          'action=runtime_diagnose, arguments={} 只读观察本worker配置绑定的本节点运行包布局，不接受任意path/config，'
          '不读凭据、不联网推理、不安装/切换/重试；未知布局不是能力禁止，complete不证明原生Shell已验证。'
+         'action=device_query,arguments={peer,query} 直接查询已授权设备，query 为 disk 或 battery。'
+         '简单问题用结果继续当前对话，无需建立 Leader 或子任务。设备不可达时按实际结果回复。'
          'action=remote_delegate 将任务交给 mesh 内已授权 peer，arguments={peer,input,project_id,agent_id,role}；'
          'delegate/children/wait_children 管理原账本子任务；wait_children 返回 continue_after_children=true 才结束本轮等待续接，'
          '返回 false 时使用 tasks 中的实际结果继续当前工作，不再等待；remember/recall/notify 沿用原合同。'

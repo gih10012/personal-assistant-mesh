@@ -301,6 +301,27 @@ class Worker:
                 return result(diagnose_runtime(self.config))
             except Exception:
                 return result({'error': 'runtime_diagnosis_unavailable'}, False)
+        if (call.get('tool') == 'mesh' and isinstance(arguments, dict)
+                and arguments.get('action') == 'device_query'):
+            from .device_query import FORMAT, QUERIES, ROUTE
+            nested = arguments.get('arguments')
+            if (set(arguments) - {'action', 'arguments'} or not isinstance(nested, dict)
+                    or set(nested) != {'peer', 'query'} or not isinstance(nested['peer'], str)
+                    or not isinstance(nested['query'], str) or nested['query'] not in QUERIES):
+                return result({'error': 'device_query_invalid_arguments'}, False)
+            peer = nested['peer']
+            endpoints = self.config.get('device_query_peers', {})
+            path = endpoints.get(peer) if isinstance(endpoints, dict) else None
+            if not isinstance(path, str) or not Path(path).is_absolute():
+                return result({'error': 'device_query_target_not_configured'}, False)
+            try:
+                output = Client(private_json(path)).request(ROUTE, {'query': nested['query']})
+                if (not isinstance(output, dict) or output.get('format') != FORMAT
+                        or output.get('node_id') != peer or output.get('query') != nested['query']):
+                    raise ValueError('device_query_original_target_unconfirmed')
+            except (OSError, ValueError) as exc:
+                return self._mesh_tool_failure(exc, 'device_query', False)
+            return result(output)
         self.tick(force=True)
         name = call['tool']
         arguments = call.get('arguments', {})

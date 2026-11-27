@@ -312,6 +312,11 @@ class API:
     def mesh_dispatch(self, method, path, query, payload, peer, member):
         role, node = peer.get('role'), peer.get('node')
         grants = peer.get('capabilities', [])
+        if path == '/v1/mesh/device-query':
+            if method != 'POST' or query:
+                raise PermissionError('device_query_original_route_required')
+            from .device_query import inspect_device
+            return inspect_device(self.config.get('node_id'), payload, peer)
         if method == 'GET' and member and path == '/v1/mesh/hello':
             return self.network.hello()
         if method == 'GET' and member and path == '/v1/mesh/links':

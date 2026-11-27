@@ -1,5 +1,18 @@
 # AMITA working contract
 
+2026-11-26 device execution. Keep the open HarmonyOS agent kernel separate
+from AMITA routing. Provide device-bound Computer Use, files and shell, plus
+an on-device Codex or Pi integration based on actual compatible runtimes.
+Preserve direct device tool calls and A2A autonomous execution as two routes.
+For a small device query, Claw should call the authorized device in the current
+entrance turn. Reserve durable Leader delegation for longer or difficult work.
+
+2026-11-26 agreement handling. The owner authorizes accepting ordinary
+developer-service agreements needed for this approved work when they fit the
+existing zero-new-spend scope. After acceptance, send the bound owner the
+actual titles, official links and confirmation time via Claw. Preserve the
+original message ID and receipt if delivery fails or remains unconfirmed.
+
 2026-11-26 owner instruction. AMITA runs in YOLO mode for the owner's assigned
 tasks, including autonomous notifications to the bound owner. Do not insert an
 AMITA confirmation step for routine tool use, permissions, or owner-directed

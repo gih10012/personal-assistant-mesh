@@ -19,6 +19,12 @@ python3 -m assistant_mesh --config /absolute/private/node.json node
 
 监督器使用 A2A 的私有 RPC，跨机必须是 TLS 或预先建立的 SSH loopback 隧道。它不会扫描主机、新增 ssh alias、跳过 host key、擅自安装模型、提升权限或购买算力。SSH 通道见 [NETWORK](NETWORK.md)。
 
+短查询可在当前对话里调用 `mesh(action="device_query", arguments={peer, query})`。
+`disk` 返回目标设备用户主目录所在文件系统的总量、已用和可用字节，`battery`
+读取 Linux 电源状态。结果包含实际设备和观测时间。目标 `/v1/mesh/device-query`
+要求现有认证与 `device.query` 权限，调用方的 `device_query_peers` 由机主将
+节点映射到原私有 TLS 或 Unix 客户端配置。调用不创建新 Leader 或 A2A 任务。
+
 ## 私有配置合同
 
 以下是结构示例，不包含真实凭据。配置和 token 放在仓库外的本人 `0700` 目录，普通文件 `0600`、不可是 symlink。参数中的路径需改成部署环境的**绝对路径**。`node.json`：
