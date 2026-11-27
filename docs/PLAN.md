@@ -1,5 +1,13 @@
 # AMITA 当前实施计划
 
+2026-11-27 鸿蒙工作区：0.7.2（1000008）已通过商业 SDK 构建并使用原签名。
+原生文件内核接入现有任务、路径授权和回执链，VPS 已为原手机注册工作区范围。
+能力等待新版真机主动公告，之后绑定现有容量池并验收真实文件读写与原回执。
+录屏、聊天与推送接口保留。真机 Shell 与本机 Codex/Pi 仍在原交付范围。
+华为 API 26.0.1 的 `cliManager.execCmd` 当前支持 PC/2in1，手机仍需验证合法
+的进程执行路径。OpenAI 的官方 Codex 构建列表目前提供 Linux ARM64，没有
+鸿蒙目标。 [华为 CLI API](https://developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-app-cli-climanager/) [Codex 构建目标](https://github.com/openai/codex/blob/main/scripts/codex_package/targets.py)
+
 现行 [统一入口规则](ENTRANCE-AGENTS.md) 覆盖所有入口。短任务用原生或已授权
 远端工具直接处理。持久任务交接前核实 AMITA、实际 Leader 与所需能力，交接后
 保留原会话跟进，由完成事件或原宿主定时回查触发最终回传。分别验证各入口的
