@@ -1,5 +1,10 @@
 # AMITA 当前实施计划
 
+2026-11-28 原 Chat 入口已恢复：在原 App 中重新关联现有账号，原 MCP 地址和 App
+身份保留。重新关联后通过该 App 实际调用 `mesh_discover` 成功，无业务任务写入。
+当前管理页给出原地址和名称、描述的编辑入口，正式域名的独立 App 连接仍待处理。
+华为 API Console 仍显示独立的华为账号登录页，推送服务密钥尚未签发。
+
 2026-11-28 正式入口已就绪：`amita-chat.gihggiy.workers.dev` 通过 VPS 主动出站转接
 连接独立的 Chat 网关。已用一次公网验收确认同源 OAuth 和 MCP 发现；之后在原
 GitHub 应用追加新域名精确回调，保留原 IP 与 DNS 回调，并上线完整 OAuth 路由。
